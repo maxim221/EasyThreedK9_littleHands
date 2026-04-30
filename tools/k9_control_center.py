@@ -133,6 +133,9 @@ class K9ControlCenter:
         self.fw_var = tk.StringVar(value="")
         self.progress_var = tk.StringVar(value="Print: idle")
         self.busy_var = tk.StringVar(value="USB: idle")
+        self.header_marquee_var = tk.StringVar(value="")
+        self.selected_sd_var = tk.StringVar(value="Выбрано на SD: -")
+        self.active_sd_var = tk.StringVar(value="Печатается: -")
         self.step_var = tk.DoubleVar(value=5.0)
         self.melody_on_complete_var = tk.BooleanVar(value=True)
 
@@ -158,6 +161,8 @@ class K9ControlCenter:
         self.last_position_line = "X:? Y:? Z:?"
         self.last_position_sample_ts = 0.0
         self.last_fw_query_ts = 0.0
+        self.header_marquee_source = ""
+        self.header_marquee_offset = 0
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         GUI_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,6 +173,7 @@ class K9ControlCenter:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(150, self._drain_events)
         self.root.after(300, self._refresh_header_from_cache)
+        self.root.after(350, self._tick_header_marquee)
         self.root.after(350, self._init_pane_layout)
         self.root.after(200, self._poll_status)
 
@@ -232,6 +238,23 @@ class K9ControlCenter:
             self.last_temp_sample_ts = loaded[-1][0]
             self.last_temp_current = loaded[-1][1]
             self.last_temp_target = loaded[-1][2]
+        self._restore_last_print_state_from_log(lines)
+
+    def _restore_last_print_state_from_log(self, lines: list[str]) -> None:
+        telemetry_re = re.compile(r"TELEMETRY file=(.+?) progress=")
+        end_re = re.compile(r"PRINT_END file=(.+?) temp=")
+        last_active: str | None = None
+        last_end: str | None = None
+        for line in lines[-4000:]:
+            mt = telemetry_re.search(line)
+            if mt:
+                last_active = mt.group(1).strip()
+            me = end_re.search(line)
+            if me:
+                last_end = me.group(1).strip()
+        if last_active and last_active != "-" and last_active != last_end:
+            self.current_print_file = last_active
+            self.active_sd_var.set(f"Печатается: {last_active}")
 
     def _load_ui_state(self) -> dict[str, object]:
         if not UI_STATE_PATH.is_file():
@@ -263,6 +286,17 @@ class K9ControlCenter:
     def _on_close(self) -> None:
         self._save_ui_state()
         self.root.destroy()
+
+    def _format_fw_line(self, raw_line: str) -> str:
+        line = raw_line.strip()
+        if line.startswith("FIRMWARE_NAME:"):
+            line = line.replace("FIRMWARE_NAME:", "Firmware: ", 1)
+        if "(" in line and line.count("(") > line.count(")"):
+            line = line + (")" * (line.count("(") - line.count(")")))
+        close_idx = line.rfind(")")
+        if close_idx != -1:
+            line = line[: close_idx + 1]
+        return line
 
     def _normalized_geometry(self, geometry: str) -> str:
         match = re.match(r"^(\d+)x(\d+)([+-]\d+)([+-]\d+)$", geometry.strip())
@@ -441,6 +475,15 @@ class K9ControlCenter:
             darkcolor=colors["accent"],
         )
         style.configure(
+            "LH.Horizontal.TProgressbar",
+            background=colors["accent"],
+            troughcolor=colors["field"],
+            bordercolor=colors["border"],
+            lightcolor=colors["accent"],
+            darkcolor=colors["accent"],
+            thickness=24,
+        )
+        style.configure(
             "Vertical.TScrollbar",
             background=colors["panel_alt"],
             troughcolor=colors["field"],
@@ -525,17 +568,18 @@ class K9ControlCenter:
             relief="solid",
             borderwidth=1,
         )
-        for label in (self.temp_status_label, self.sd_status_label, self.fw_status_label, self.busy_status_label):
-            label.configure(
-                bg=colors["field_alt"],
-                fg=colors["text"],
-                highlightbackground=colors["border"],
-                highlightcolor=colors["accent"],
-                relief="solid",
-                borderwidth=1,
-            )
+        self.temp_status_label.configure(
+            bg=colors["field_alt"],
+            fg=colors["text"],
+            highlightbackground=colors["border"],
+            highlightcolor=colors["accent"],
+            relief="solid",
+            borderwidth=1,
+        )
         self.left_split.configure(bg=colors["border"])
         self.temp_canvas.configure(bg=colors["panel"], highlightbackground=colors["border"], highlightcolor=colors["accent"], relief="solid", borderwidth=1)
+        self.progress_wrap.configure(bg=colors["field_alt"], highlightbackground=colors["border"], highlightcolor=colors["accent"], highlightthickness=1)
+        self.progress_label.configure(bg=colors["field_alt"], fg=colors["text"], font=("DejaVu Sans", 9, "bold"))
         for widget in (self.log_text, self.metrics_text):
             try:
                 widget.frame.configure(bg=colors["panel"], bd=0, highlightthickness=0, relief="flat")
@@ -572,19 +616,13 @@ class K9ControlCenter:
 
         conn = ttk.Frame(top_left)
         conn.grid(row=0, column=0, sticky="ew")
-        conn.columnconfigure(8, weight=1)
+        conn.columnconfigure(4, weight=1)
         ttk.Label(conn, text="Port").grid(row=0, column=0, sticky="w")
         ttk.Entry(conn, textvariable=self.port_var, width=16).grid(row=0, column=1, padx=(4, 8))
         ttk.Label(conn, text="Baud").grid(row=0, column=2, sticky="w")
         ttk.Entry(conn, textvariable=self.baud_var, width=10).grid(row=0, column=3, padx=(4, 8))
-        self.temp_status_label = tk.Label(conn, textvariable=self.temp_var, width=22, anchor="w", padx=6)
-        self.temp_status_label.grid(row=0, column=4, padx=(12, 6), sticky="ew")
-        self.sd_status_label = tk.Label(conn, textvariable=self.sd_var, width=24, anchor="w", padx=6)
-        self.sd_status_label.grid(row=0, column=5, padx=6, sticky="ew")
-        self.fw_status_label = tk.Label(conn, textvariable=self.fw_var, width=30, anchor="w", padx=6)
-        self.fw_status_label.grid(row=0, column=6, padx=6, sticky="ew")
-        self.busy_status_label = tk.Label(conn, textvariable=self.busy_var, width=18, anchor="w", padx=6)
-        self.busy_status_label.grid(row=0, column=7, padx=6, sticky="ew")
+        self.temp_status_label = tk.Label(conn, textvariable=self.header_marquee_var, anchor="w", padx=6)
+        self.temp_status_label.grid(row=0, column=4, padx=(12, 0), sticky="ew")
 
         actions = ttk.Frame(top_left)
         actions.grid(row=1, column=0, sticky="ew", pady=(6, 0))
@@ -605,14 +643,19 @@ class K9ControlCenter:
 
         substatus = ttk.Frame(top_left)
         substatus.grid(row=2, column=0, sticky="ew", pady=(6, 0))
-        substatus.columnconfigure(1, weight=1)
+        substatus.columnconfigure(0, weight=1)
         ttk.Checkbutton(substatus, text="Мелодия после печати", variable=self.melody_on_complete_var).grid(row=0, column=0, sticky="w")
-        ttk.Label(substatus, textvariable=self.progress_var).grid(row=0, column=1, padx=(12, 8), sticky="w")
-        self.progress_bar = ttk.Progressbar(substatus, orient="horizontal", mode="determinate", maximum=100, length=280)
-        self.progress_bar.grid(row=0, column=2, padx=(8, 0), sticky="ew")
+        self.progress_wrap = tk.Frame(substatus, bd=0, highlightthickness=0)
+        self.progress_wrap.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.progress_wrap.columnconfigure(0, weight=1)
+        self.progress_wrap.configure(height=30)
+        self.progress_bar = ttk.Progressbar(self.progress_wrap, orient="horizontal", mode="determinate", maximum=100, style="LH.Horizontal.TProgressbar")
+        self.progress_bar.grid(row=0, column=0, sticky="ew")
+        self.progress_label = tk.Label(self.progress_wrap, textvariable=self.progress_var, anchor="center", bd=0, padx=6)
+        self.progress_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        self.hands_canvas = tk.Canvas(top, width=120, height=64, bd=0, highlightthickness=0)
-        self.hands_canvas.grid(row=0, column=1, sticky="ne", padx=(12, 0))
+        self.hands_canvas = tk.Canvas(top, width=108, height=64, bd=0, highlightthickness=0)
+        self.hands_canvas.grid(row=0, column=1, sticky="ne", padx=(8, 0))
 
         self.main_pane = ttk.Panedwindow(self.root, orient="horizontal")
         self.main_pane.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
@@ -668,21 +711,25 @@ class K9ControlCenter:
 
         sd_frame = ttk.LabelFrame(self.left_split, text="Файлы на SD принтера", padding=8)
         sd_frame.columnconfigure(0, weight=1)
-        sd_frame.rowconfigure(0, weight=1)
+        sd_frame.rowconfigure(2, weight=1)
+
+        ttk.Label(sd_frame, textvariable=self.selected_sd_var).grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(sd_frame, textvariable=self.active_sd_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         self.sd_listbox = tk.Listbox(sd_frame, height=4, exportselection=False)
-        self.sd_listbox.grid(row=0, column=0, sticky="nsew")
+        self.sd_listbox.grid(row=2, column=0, sticky="nsew", pady=(6, 0))
         self.sd_listbox.bind("<Double-1>", lambda _event: self.start_selected_print_with_home())
+        self.sd_listbox.bind("<<ListboxSelect>>", lambda _event: self._sync_selected_sd_label())
         sd_scroll = ttk.Scrollbar(sd_frame, orient="vertical", command=self.sd_listbox.yview)
-        sd_scroll.grid(row=0, column=1, sticky="ns")
+        sd_scroll.grid(row=3, column=1, sticky="ns")
         self.sd_listbox.configure(yscrollcommand=sd_scroll.set)
 
         buttons = ttk.Frame(sd_frame)
-        buttons.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        buttons.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         for idx in range(3):
             buttons.columnconfigure(idx, weight=1)
-        ttk.Button(buttons, text="Обновить", command=self.refresh_sd_files).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
-        ttk.Button(buttons, text="Печать с SD", command=self.start_selected_print_with_home).grid(row=0, column=1, padx=3, pady=2, sticky="ew")
+        ttk.Button(buttons, text="Обновить список", command=self.refresh_sd_files).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        ttk.Button(buttons, text="Старт печати", command=self.start_selected_print_with_home).grid(row=0, column=1, padx=3, pady=2, sticky="ew")
         ttk.Button(buttons, text="Удалить", command=self.delete_selected_file).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
         ttk.Button(buttons, text="Пауза", command=self.pause_print).grid(row=1, column=0, padx=3, pady=2, sticky="ew")
         ttk.Button(buttons, text="Продолжить", command=self.resume_print).grid(row=1, column=1, padx=3, pady=2, sticky="ew")
@@ -738,29 +785,29 @@ class K9ControlCenter:
         ttk.Button(level, text="ЗЛ", command=lambda: self.move_level_point(5, 95)).grid(row=2, column=0, padx=2, pady=2, sticky="ew")
         ttk.Button(level, text="ЗП", command=lambda: self.move_level_point(95, 95)).grid(row=2, column=2, padx=2, pady=2, sticky="ew")
 
-        views = ttk.Notebook(controls_and_views, style="LH.TNotebook")
-        views.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        self.views = ttk.Notebook(controls_and_views, style="LH.TNotebook")
+        self.views.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
 
-        metrics_frame = ttk.Frame(views, padding=8, style="NotebookPage.TFrame")
-        metrics_frame.columnconfigure(0, weight=1)
-        metrics_frame.rowconfigure(1, weight=1)
-        metrics_buttons = ttk.Frame(metrics_frame)
+        self.metrics_frame = ttk.Frame(self.views, padding=8, style="NotebookPage.TFrame")
+        self.metrics_frame.columnconfigure(0, weight=1)
+        self.metrics_frame.rowconfigure(1, weight=1)
+        metrics_buttons = ttk.Frame(self.metrics_frame)
         metrics_buttons.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         ttk.Button(metrics_buttons, text="Снять все метрики", command=self.refresh_metrics).pack(side="left")
         ttk.Button(metrics_buttons, text="Сохранить лог", command=self.save_log_snapshot).pack(side="left", padx=(8, 0))
-        self.metrics_text = ScrolledText(metrics_frame, wrap="word", height=18)
+        self.metrics_text = ScrolledText(self.metrics_frame, wrap="word", height=18)
         self.metrics_text.grid(row=1, column=0, sticky="nsew")
         self.metrics_text.configure(state="disabled")
 
-        log_frame = ttk.Frame(views, padding=8, style="NotebookPage.TFrame")
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        self.log_text = ScrolledText(log_frame, wrap="word", height=18)
+        self.log_frame = ttk.Frame(self.views, padding=8, style="NotebookPage.TFrame")
+        self.log_frame.columnconfigure(0, weight=1)
+        self.log_frame.rowconfigure(0, weight=1)
+        self.log_text = ScrolledText(self.log_frame, wrap="word", height=18)
         self.log_text.grid(row=0, column=0, sticky="nsew")
         self.log_text.configure(state="disabled")
-        views.add(log_frame, text="Журнал")
-        views.add(metrics_frame, text="USB-метрики")
-        views.select(metrics_frame)
+        self.views.add(self.log_frame, text="Журнал")
+        self.views.add(self.metrics_frame, text="USB-метрики")
+        self.views.select(self.metrics_frame)
 
     def log(self, message: str) -> None:
         timestamp = time.strftime("%H:%M:%S")
@@ -809,8 +856,34 @@ class K9ControlCenter:
             self.sd_var.set("SD: unknown")
 
         self.fw_var.set(self.last_fw_line)
+        self.header_marquee_source = "   •   ".join(
+            part for part in (
+                self.temp_var.get().strip(),
+                self.sd_var.get().strip(),
+                self.fw_var.get().strip(),
+                self.busy_var.get().strip(),
+            ) if part
+        )
         self._render_live_status()
         self.root.after(500, self._refresh_header_from_cache)
+
+    def _tick_header_marquee(self) -> None:
+        source = (self.header_marquee_source or "").strip()
+        if not source:
+            self.header_marquee_var.set("")
+            self.root.after(220, self._tick_header_marquee)
+            return
+
+        padded = source + "     "
+        if len(padded) <= 8:
+            self.header_marquee_var.set(source)
+            self.root.after(220, self._tick_header_marquee)
+            return
+
+        self.header_marquee_offset = (self.header_marquee_offset + 1) % len(padded)
+        rolled = padded[self.header_marquee_offset:] + padded[:self.header_marquee_offset]
+        self.header_marquee_var.set(rolled)
+        self.root.after(220, self._tick_header_marquee)
 
     def _render_live_status(self) -> None:
         now = time.time()
@@ -926,6 +999,8 @@ class K9ControlCenter:
                 self._render_metrics()
             elif kind == "sd-files":
                 self._apply_sd_files(payload)  # type: ignore[arg-type]
+            elif kind == "active-sd":
+                self.active_sd_var.set(str(payload))
         self.root.after(150, self._drain_events)
 
     def _render_metrics(self) -> None:
@@ -948,13 +1023,16 @@ class K9ControlCenter:
         self.metrics_text.configure(state="disabled")
 
     def _apply_sd_files(self, files: list[str]) -> None:
+        previous_path = self._selected_sd_path()
         self.sd_list = files
         self.sd_display_to_path = {}
         self.sd_listbox.delete(0, "end")
         if not files:
             self.sd_listbox.insert("end", "(empty)")
+            self.selected_sd_var.set("Выбрано на SD: -")
             return
-        for entry in files:
+        selected_index = None
+        for idx, entry in enumerate(files):
             display = entry
             path = entry
             if " " in entry:
@@ -962,6 +1040,18 @@ class K9ControlCenter:
                 path = entry.split()[0]
             self.sd_display_to_path[display] = path
             self.sd_listbox.insert("end", display)
+            if previous_path and path == previous_path:
+                selected_index = idx
+        if selected_index is not None:
+            self.sd_listbox.selection_set(selected_index)
+            self.sd_listbox.see(selected_index)
+        elif files:
+            self.sd_listbox.selection_set(0)
+        self._sync_selected_sd_label()
+
+    def _sync_selected_sd_label(self) -> None:
+        path = self._selected_sd_path()
+        self.selected_sd_var.set(f"Выбрано на SD: {path or '-'}")
 
     def _port(self) -> str:
         return self.port_var.get().strip()
@@ -1082,7 +1172,7 @@ class K9ControlCenter:
             caps, sd = sdtool.preflight(self._port(), self._baud())
             fw_line = next((line for line in caps.splitlines() if line.startswith("FIRMWARE_NAME:")), "")
             if fw_line:
-                self._post("fw", fw_line.replace("FIRMWARE_NAME:", "Firmware: ", 1))
+                self._post("fw", self._format_fw_line(fw_line))
             self._post("sd", sd.strip() or "SD: unknown")
             self._post("metrics", ("m115", caps))
             self._post("log", caps.strip())
@@ -1092,6 +1182,12 @@ class K9ControlCenter:
         self._run_task("Проверка статуса", task)
 
     def refresh_metrics(self) -> None:
+        self.views.select(self.metrics_frame)
+        self.metrics_text.configure(state="normal")
+        self.metrics_text.delete("1.0", "end")
+        self.metrics_text.insert("1.0", "Собираю USB-метрики...\n")
+        self.metrics_text.configure(state="disabled")
+
         def task() -> None:
             caps, sd = sdtool.preflight(self._port(), self._baud())
             m503 = sdtool.query_command(self._port(), self._baud(), "M503", wait_before_read=0.6, read_seconds=2.0)
@@ -1100,7 +1196,7 @@ class K9ControlCenter:
             m27 = sdtool.query_command(self._port(), self._baud(), "M27", wait_before_read=0.3, read_seconds=1.0)
             fw_line = next((line for line in caps.splitlines() if line.startswith("FIRMWARE_NAME:")), "")
             if fw_line:
-                self._post("fw", fw_line.replace("FIRMWARE_NAME:", "Firmware: ", 1))
+                self._post("fw", self._format_fw_line(fw_line))
             self._post("sd", sd.strip() or "SD: unknown")
             pos_line = next((line.strip() for line in m114.splitlines() if "X:" in line and "Y:" in line and "Z:" in line), "").strip()
             if pos_line:
@@ -1114,15 +1210,28 @@ class K9ControlCenter:
         self._run_task("Снятие всех USB-метрик", task)
 
     def save_log_snapshot(self) -> None:
-        export_dir = GUI_EXPORT_DIR
-        export_dir.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d_%H%M%S")
-        target = export_dir / f"little_hands_runtime_{stamp}.log"
+        desktop_dir = Path.home() / "Desktop"
+        desktop_dir.mkdir(parents=True, exist_ok=True)
+        target_path = filedialog.asksaveasfilename(
+            title="Сохранить лог Little Hands",
+            initialdir=str(desktop_dir),
+            initialfile=f"little_hands_runtime_{stamp}.log",
+            defaultextension=".log",
+            filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if not target_path:
+            self.log("Сохранение лога отменено")
+            return
+        target = Path(target_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
         if RUNTIME_LOG_PATH.is_file():
             shutil.copy2(RUNTIME_LOG_PATH, target)
         else:
             target.write_text("", encoding="utf-8")
         self.log(f"Лог сохранён: {target}")
+        self.views.select(self.log_frame)
+        messagebox.showinfo("Little Hands", f"Лог сохранён:\n{target}")
 
     def reset_usb_session(self) -> None:
         self.monitor_enabled = False
@@ -1243,6 +1352,7 @@ class K9ControlCenter:
             self._post("sd-files", files)
             out = sdtool.start_sd_print_from_pseudo_home(self._port(), self._baud(), dest)
             self.current_print_file = dest
+            self._post("active-sd", f"Печатается: {dest}")
             self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {dest}")
             self._post("progress", ("Print: started", 0.0))
             self.print_was_active = False
@@ -1285,6 +1395,7 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.start_sd_print(self._port(), self._baud(), path)
             self.current_print_file = path
+            self._post("active-sd", f"Печатается: {path}")
             self._post("log", out.strip() or f"Печать запущена: {path}")
             self.print_was_active = False
             self.suppress_next_completion_chime = False
@@ -1303,6 +1414,7 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
             self.current_print_file = path
+            self._post("active-sd", f"Печатается: {path}")
             self._post("log", out.strip() or f"Печать с SD запущена от сохранённого старта: {path}")
             self.print_was_active = False
             self.suppress_next_completion_chime = False
@@ -1448,7 +1560,7 @@ class K9ControlCenter:
                 m115 = sdtool.query_command(self._port(), self._baud(), "M115", wait_before_read=0.1, read_seconds=0.5)
                 fw_line = next((line for line in m115.splitlines() if line.startswith("FIRMWARE_NAME:")), "")
                 if fw_line:
-                    self._post("fw", fw_line.replace("FIRMWARE_NAME:", "Firmware: ", 1))
+                    self._post("fw", self._format_fw_line(fw_line))
                 self._post("metrics", ("m115", m115))
             progress_match = SD_PROGRESS_RE.search(sd)
             if progress_match:
@@ -1456,6 +1568,10 @@ class K9ControlCenter:
                 total = max(int(progress_match.group(2)), 1)
                 pct = max(0.0, min(100.0, (done / total) * 100.0))
                 self.print_was_active = True
+                if self.current_print_file != "-":
+                    self._post("active-sd", f"Печатается: {self.current_print_file}")
+                else:
+                    self._post("active-sd", "Печатается: идёт печать (имя не восстановлено)")
                 self._post("progress", (f"Print: {pct:.1f}% ({done}/{total})", pct))
                 if now - self.last_telemetry_log_ts >= 5.0 and current_temp is not None and target_temp is not None:
                     self.last_telemetry_log_ts = now
@@ -1475,6 +1591,7 @@ class K9ControlCenter:
                         f"{time.strftime('%H:%M:%S')} PRINT_END file={self.current_print_file} temp={current_temp if current_temp is not None else '?'}"
                     )
                     self.current_print_file = "-"
+                    self._post("active-sd", "Печатается: -")
             self._post("metrics", ("m27", sd))
         except Exception:
             pass

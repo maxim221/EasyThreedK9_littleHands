@@ -1358,3 +1358,36 @@ After each test print, append:
   - Ring log size cap: `10 MiB`
   - Saved log snapshots path: `/home/maxim/draftCode/littleHands/monitor_logs/gui_exports/`
   - The GUI now records print session start/end and periodic telemetry into the ring log.
+
+## Backlog For Next Session
+
+- `home / start workflow`
+  - make `Запомнить старт -> К старту -> Печать с SD` completely deterministic
+  - verify that `Печать с SD` never re-enters pseudo-home or drives into hard stops
+  - if needed, separate diagnostic homing from production print-start logic in the GUI
+- `USB robustness`
+  - review serial recovery after interrupted jobs or printer-side busy states
+  - make sure `Сброс USB` and background polling recover cleanly without requiring GUI restarts
+  - reduce chances of the app appearing frozen when the printer stops answering temporarily
+- `print profile / adhesion / cracking`
+  - review the result of the current print tomorrow before changing Cura again
+  - only then decide whether to keep `brim 18 + tabs + concentric first layer`
+  - if cracks remain, prefer targeted anti-warp and stress reduction changes over broad random tuning
+
+## 2026-05-01 Current Baseline Snapshot
+
+- Printer-side baseline now treated as:
+  - firmware: `custom-hotend-autofan-45c-usb-mksLite.bin`
+  - fan wiring: single fan on `FAN1`
+  - fan behavior: auto hotend fan, `off` below `45C`, `on` above `45C`
+  - motor wiring: physical `Y/Z` swap on the board remains required
+- `Little Hands` current operator baseline:
+  - persistent window geometry and pane proportions
+  - runtime ring log and temperature history restore
+  - SD panel shows selected file, active print file, and survives `M27` / list-unavailable situations better
+  - top status is now a single scrolling line instead of four unstable clipped fields
+  - progress bar is wider and carries its status text inside the bar
+- Known next technical focus:
+  - deterministic print start / home workflow
+  - USB recovery polish
+  - next Cura tuning only after reviewing the active print result
