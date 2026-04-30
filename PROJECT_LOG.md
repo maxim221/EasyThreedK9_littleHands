@@ -1353,3 +1353,8 @@ After each test print, append:
 - 2026-04-30: Tuned `codex - monitored strength` further against corner cracking / internal stress: reduced infill from 35% to 20%, set `infill_before_walls = False`, lowered print/wall/topbottom/infill speeds to 16/14/14/18 mm/s, reduced top/bottom layers from 6 to 5, and raised nozzle temperatures to 224C print / 230C first layer.
 - 2026-04-30: Restored FAN1 control on the EasyThreeD single-fan branch and built a new hotend-safe fan profile with USB firmware-update support: `custom-hotend-fan-guard-hotonly-pulsedcooldown-mksLite.bin` (`sha256: 64577dc459222ce92b4f272eae56df81885b3a62379c9015cb776011b28ade01`). New logic: fan off when cold, full 255 while heating / holding a hot target, full 255 while passively cooling above 60C, then pulsed 255/off cooldown between 60C and 45C, then fully off below 45C.
 - 2026-04-30: Finalized the new working hotend-fan baseline on `FAN1` with `custom-hotend-autofan-45c-usb-mksLite.bin` (`sha256: 6ea0bd0340329cf96cf4b9b3d2164c03299f4e84edd02989238414cde5f1127c`). Verified behavior on hardware: fan stays off below 45C, turns on above 45C during heating, and turns off again after cooldown below 45C. This resolves the overnight noise problem while keeping hotend cooling automatic.
+- 2026-04-30: Little Hands runtime print logging was standardized.
+  - Ring log path: `/home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log`
+  - Ring log size cap: `10 MiB`
+  - Saved log snapshots path: `/home/maxim/draftCode/littleHands/monitor_logs/gui_exports/`
+  - The GUI now records print session start/end and periodic telemetry into the ring log.

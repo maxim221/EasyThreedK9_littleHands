@@ -89,6 +89,8 @@ def ensure_sd_ready(ser: serial.Serial) -> str:
     send_line(ser, "M21")
     time.sleep(0.8)
     out = read_for(ser, 1.0)
+    if "No SD card" in out or "No media" in out:
+        raise RuntimeError("Printer reports no SD card / no media")
     if "SD card ok" not in out and "SD init fail" in out:
         raise RuntimeError("Printer reports SD init failure")
     return out
@@ -165,7 +167,7 @@ def parse_m20_listing(text: str) -> list[str]:
     return files
 
 
-def list_files(port: str, baud: int, firmware_only: bool = False) -> list[str]:
+def read_sd_listing(port: str, baud: int, firmware_only: bool = False) -> tuple[list[str], str, str]:
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
@@ -173,7 +175,26 @@ def list_files(port: str, baud: int, firmware_only: bool = False) -> list[str]:
         send_line(ser, cmd)
         time.sleep(1.2)
         out = read_for(ser, 2.0)
-    return parse_m20_listing(out)
+    if "No SD card" in out or "No media" in out:
+        raise RuntimeError("Printer reports no SD card / no media")
+    files = parse_m20_listing(out)
+    if "Begin file list" in out:
+        return files, "ok", out
+    lowered = out.lower()
+    if "busy" in lowered or "processing" in lowered or "sd printing byte" in lowered:
+        return [], "busy", out
+    if not out.strip():
+        return [], "unavailable", out
+    return files, "unavailable", out
+
+
+def list_files(port: str, baud: int, firmware_only: bool = False) -> list[str]:
+    files, status, _raw = read_sd_listing(port, baud, firmware_only=firmware_only)
+    if status == "busy":
+        raise RuntimeError("Printer is busy printing; SD file listing is unavailable right now")
+    if status == "unavailable":
+        raise RuntimeError("Printer did not return a usable SD file list")
+    return files
 
 
 def delete_file(port: str, baud: int, path: str) -> str:
@@ -214,6 +235,43 @@ def set_current_home_zero(port: str, baud: int) -> str:
     )
 
 
+def pseudo_home_to_zero(port: str, baud: int) -> str:
+    """
+    Drive the K9 into its known mechanical print-start pose and declare it X0 Y0 Z0.
+
+    This printer does not provide reliable conventional endstop-based homing on
+    the current baseline. Instead we:
+    - lift Z to avoid scraping while moving laterally
+    - drive X and Y far enough in the negative direction to reach the hard stops
+    - lower Z slowly back to the print-start contact point
+    - set the resulting pose as logical zero
+    """
+    return run_commands(
+        port,
+        baud,
+        [
+            "M17",
+            "G90",
+            "M211 S0",
+            "G91",
+            "G1 Z15 F600",
+            "M400",
+            "G1 X-130 F1800",
+            "M400",
+            "G1 Y-130 F1800",
+            "M400",
+            "G1 Z-120 F300",
+            "M400",
+            "G90",
+            "G92 X0 Y0 Z0",
+            "M114",
+        ],
+        settle_after_each=0.5,
+        final_wait=5.0,
+        read_seconds=5.5,
+    )
+
+
 def goto_print_home(port: str, baud: int) -> str:
     return run_commands(
         port,
@@ -240,6 +298,40 @@ def start_sd_print_from_home(port: str, baud: int, path: str) -> str:
         out = read_for(ser, 2.5)
     if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
         raise RuntimeError(f"Start print from home may have failed for {target}: {out.strip() or '<no response>'}")
+    return out
+
+
+def start_sd_print_from_pseudo_home(port: str, baud: int, path: str) -> str:
+    target = path if path.startswith("/") else f"/{path}"
+    with open_serial(port, baud) as ser:
+        sync_ascii(ser)
+        ensure_sd_ready(ser)
+        for line in (
+            "M17",
+            "G90",
+            "M211 S0",
+            "G91",
+            "G1 Z15 F600",
+            "M400",
+            "G1 X-130 F1800",
+            "M400",
+            "G1 Y-130 F1800",
+            "M400",
+            "G1 Z-120 F300",
+            "M400",
+            "G90",
+            "G92 X0 Y0 Z0",
+        ):
+            send_line(ser, line)
+            time.sleep(0.5)
+        _ = read_for(ser, 5.0)
+        send_line(ser, f"M23 {target}")
+        time.sleep(0.8)
+        send_line(ser, "M24")
+        time.sleep(0.8)
+        out = read_for(ser, 2.5)
+    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
+        raise RuntimeError(f"Start print from pseudo-home may have failed for {target}: {out.strip() or '<no response>'}")
     return out
 
 
