@@ -34,6 +34,13 @@ MBP_PATH = PROJECT_ROOT / "firmware_src/ECF-Marlin-upstream/buildroot/share/scri
 ProgressCb = Callable[[str, float], None]
 
 
+def make_sd_name(source_name: str) -> str:
+    src = Path(source_name)
+    stem = re.sub(r"[^A-Za-z0-9]+", "_", src.stem.upper()).strip("_") or "MODEL"
+    stem = stem[:8]
+    return f"{stem}.GCO"
+
+
 def load_mbp():
     spec = importlib.util.spec_from_file_location("MarlinBinaryProtocol", MBP_PATH)
     if spec is None or spec.loader is None:
@@ -194,6 +201,45 @@ def start_sd_print(port: str, baud: int, path: str) -> str:
         out = read_for(ser, 2.0)
     if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
         raise RuntimeError(f"Start print may have failed for {target}: {out.strip() or '<no response>'}")
+    return out
+
+
+def set_current_home_zero(port: str, baud: int) -> str:
+    return run_commands(
+        port,
+        baud,
+        ["G90", "G92 X0 Y0 Z0", "M114"],
+        final_wait=0.8,
+        read_seconds=1.5,
+    )
+
+
+def goto_print_home(port: str, baud: int) -> str:
+    return run_commands(
+        port,
+        baud,
+        ["G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M114"],
+        final_wait=0.8,
+        read_seconds=2.0,
+    )
+
+
+def start_sd_print_from_home(port: str, baud: int, path: str) -> str:
+    target = path if path.startswith("/") else f"/{path}"
+    with open_serial(port, baud) as ser:
+        sync_ascii(ser)
+        ensure_sd_ready(ser)
+        for line in ("G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600"):
+            send_line(ser, line)
+            time.sleep(0.5)
+        _ = read_for(ser, 2.0)
+        send_line(ser, f"M23 {target}")
+        time.sleep(0.8)
+        send_line(ser, "M24")
+        time.sleep(0.8)
+        out = read_for(ser, 2.5)
+    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
+        raise RuntimeError(f"Start print from home may have failed for {target}: {out.strip() or '<no response>'}")
     return out
 
 

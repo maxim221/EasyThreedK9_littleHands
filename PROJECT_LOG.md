@@ -1262,3 +1262,94 @@ After each test print, append:
   - fan: always-on in `FAN2`
   - hardware: `Y/Z` motor connectors swapped physically
   - slicing: normal Cura output, no plane-remap post-processing
+- Cura start workflow was changed to remove `G28` from print start:
+  - file: `/home/maxim/.local/share/cura/5.11/definition_changes/lilHands_settings.inst.cfg`
+  - new mode: `manual zero + G92`
+  - fixed expected home pose:
+    - `X` fully left
+    - `Y` bed fully back / away from the operator
+    - `Z` nozzle touching the bed
+  - Cura now treats this physical pose as `X0 Y0 Z0`
+  - this avoids the dangerous end-of-home grinding behavior on this K9
+
+## 2026-04-30 GUI Baseline Workflow Update
+
+- Updated `/home/maxim/draftCode/littleHands/tools/k9_control_center.py` to match the baseline print setup:
+  - plain `ECF`
+  - fan always-on in `FAN2`
+  - physical `Y/Z` motor plug swap
+- Added GUI actions:
+  - `Manual` window with the current Little Hands operating procedure
+  - `Экспорт Cura` to copy the printer profiles and Cura settings into the project
+  - `Подготовить` for ordinary Cura G-code (no `_k9xz` remap in baseline mode)
+  - `Залить и старт` for upload + start from the fixed print home
+  - `Запомнить Home` (`G92 X0 Y0 Z0`)
+  - `К Home` (return to fixed print home before start)
+  - `Пуск с home` for SD prints
+- Updated jog and leveling labels to the real current machine motion:
+  - `X` = printhead left/right
+  - `Y` = bed in print plane
+  - `Z` = printhead up/down
+- Leveling point moves now:
+  - lift `Z`
+  - move in `X/Y`
+  - lower back to `Z0`
+- Export self-test:
+  - `/home/maxim/draftCode/littleHands/exports/cura_bundle_selftest`
+  - copied 31 Cura-related files successfully
+
+## 2026-04-30 Adhesion Tuning For FAN2 Always-On
+
+- During a normal baseline print, the far-left rear corner began lifting from the tape.
+- Immediate operational decision:
+  - do not use `G28` on stop / restart
+  - stop workflow for this machine should be:
+    - pause / cancel if possible
+    - hotend off
+    - lift `Z`
+    - no homing
+  - after any interrupted calibration in the center of the bed, return explicitly to the fixed print-home pose before restarting
+- Cura profile `codex - monitored strength` was strengthened for adhesion:
+  - `brim_width = 14`
+  - `speed_layer_0 = 8`
+  - `material_print_temperature = 220`
+  - `material_print_temperature_layer_0 = 225`
+  - `initial_layer_line_width_factor = 135`
+- Files updated:
+  - `/home/maxim/.local/share/cura/5.11/user/codex3_user.inst.cfg`
+  - `/home/maxim/.local/share/cura/5.11/user/codex3_extruder_user.inst.cfg`
+  - `/home/maxim/.local/share/cura/5.11/quality_changes/codex3_quality.inst.cfg`
+  - `/home/maxim/.local/share/cura/5.11/quality_changes/codex3_extruder_quality.inst.cfg`
+
+## 2026-04-30 Print Failure Notes And Anti-Warp Revision
+
+- Current test part reached stable printing for a while, but showed the following defects:
+  - far-left rear corner no longer lifted
+  - near-left front corner lifted along the seam between brim and model corner
+  - approximate lifted zone:
+    - from `X0` to about `X40`
+    - from `Z0` to about `Z15`
+    - lift height from about `1.5 mm` down to `0 mm`
+  - later, around `4 mm` print height, the near-left front corner cracked
+  - crack direction:
+    - from `X0` toward roughly the middle along the `Z` axis
+    - from `X0` toward roughly the middle along the `X` axis
+  - near-right front and far-right rear corners showed shallow non-through grooves on the corner surface
+- Likely interpretation:
+  - adhesion improved, but internal stress / corner cooling asymmetry still remain
+  - `grid` infill may contribute to stress and nozzle contact, so the infill pattern was softened
+- Profile was revised again for the next attempt:
+  - `brim_width = 18`
+  - `infill_pattern = lines`
+  - `speed_layer_0 = 6`
+  - `speed_print = 18`
+  - `speed_wall = 16`
+  - `speed_topbottom = 16`
+  - `speed_infill = 20`
+  - `material_print_temperature = 222`
+  - `material_print_temperature_layer_0 = 228`
+  - `initial_layer_line_width_factor = 145`
+- 2026-04-30: Updated Cura baseline profile `codex - monitored strength` to test concentric first bottom layer while keeping later bottom/top skin on lines. Added `top_bottom_pattern = lines` and `top_bottom_pattern_0 = concentric` in the active user and quality profile files to improve brim-to-part transition and reduce front-left corner lift.
+- 2026-04-30: Tuned `codex - monitored strength` further against corner cracking / internal stress: reduced infill from 35% to 20%, set `infill_before_walls = False`, lowered print/wall/topbottom/infill speeds to 16/14/14/18 mm/s, reduced top/bottom layers from 6 to 5, and raised nozzle temperatures to 224C print / 230C first layer.
+- 2026-04-30: Restored FAN1 control on the EasyThreeD single-fan branch and built a new hotend-safe fan profile with USB firmware-update support: `custom-hotend-fan-guard-hotonly-pulsedcooldown-mksLite.bin` (`sha256: 64577dc459222ce92b4f272eae56df81885b3a62379c9015cb776011b28ade01`). New logic: fan off when cold, full 255 while heating / holding a hot target, full 255 while passively cooling above 60C, then pulsed 255/off cooldown between 60C and 45C, then fully off below 45C.
+- 2026-04-30: Finalized the new working hotend-fan baseline on `FAN1` with `custom-hotend-autofan-45c-usb-mksLite.bin` (`sha256: 6ea0bd0340329cf96cf4b9b3d2164c03299f4e84edd02989238414cde5f1127c`). Verified behavior on hardware: fan stays off below 45C, turns on above 45C during heating, and turns off again after cooldown below 45C. This resolves the overnight noise problem while keeping hotend cooling automatic.
