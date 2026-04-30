@@ -108,6 +108,7 @@ CURA_EXPORT_PATTERNS = [
     "quality_changes/codex*.cfg",
     "extruders/*.extruder.cfg",
 ]
+DISCONNECTED_PORT_LABEL = "— не подключаться —"
 
 
 class K9ControlCenter:
@@ -124,7 +125,7 @@ class K9ControlCenter:
         self.user_task_pending = False
 
         self.port_var = tk.StringVar(value="/dev/ttyUSB0")
-        self.baud_var = tk.StringVar(value="115200")
+        self.port_display_var = tk.StringVar(value="/dev/ttyUSB0")
         self.local_gcode_var = tk.StringVar()
         self.dest_name_var = tk.StringVar(value="MODEL.GCO")
         self.firmware_var = tk.StringVar(value=str(DEFAULT_FIRMWARE))
@@ -150,6 +151,8 @@ class K9ControlCenter:
         self.temp_history: list[tuple[float, float, float]] = []
         self.last_telemetry_log_ts = 0.0
         self.current_print_file = "-"
+        self.current_print_start_ts: float | None = None
+        self.current_print_progress_pct: float | None = None
         self.last_temp_sample_ts = 0.0
         self.last_temp_log_ts = 0.0
         self.last_temp_current: float | None = None
@@ -163,6 +166,9 @@ class K9ControlCenter:
         self.last_fw_query_ts = 0.0
         self.header_marquee_source = ""
         self.header_marquee_offset = 0
+        self.port_choices: list[str] = []
+        self.find_port_animating = False
+        self.find_port_anim_phase = 0
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         GUI_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -173,6 +179,7 @@ class K9ControlCenter:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(150, self._drain_events)
         self.root.after(300, self._refresh_header_from_cache)
+        self.root.after(400, self._refresh_ports_on_startup)
         self.root.after(350, self._tick_header_marquee)
         self.root.after(350, self._init_pane_layout)
         self.root.after(200, self._poll_status)
@@ -241,20 +248,51 @@ class K9ControlCenter:
         self._restore_last_print_state_from_log(lines)
 
     def _restore_last_print_state_from_log(self, lines: list[str]) -> None:
-        telemetry_re = re.compile(r"TELEMETRY file=(.+?) progress=")
-        end_re = re.compile(r"PRINT_END file=(.+?) temp=")
+        telemetry_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) TELEMETRY file=(.+?) progress=([-\d.]+)%")
+        start_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) PRINT_START file=(.+)")
+        end_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) PRINT_END file=(.+?) temp=")
         last_active: str | None = None
         last_end: str | None = None
+        last_start_ts: float | None = None
+        last_progress_pct: float | None = None
+        first_active_telem_ts: float | None = None
+        today = time.localtime(time.time())
+
+        def stamp_for(hh: int, mm: int, ss: int) -> float:
+            stamp = time.mktime((
+                today.tm_year, today.tm_mon, today.tm_mday,
+                hh, mm, ss,
+                today.tm_wday, today.tm_yday, today.tm_isdst
+            ))
+            if stamp > time.time() + 60:
+                stamp -= 24 * 3600
+            return stamp
+
         for line in lines[-4000:]:
+            ms = start_re.search(line)
+            if ms:
+                last_active = ms.group(4).strip()
+                last_start_ts = stamp_for(int(ms.group(1)), int(ms.group(2)), int(ms.group(3)))
+                first_active_telem_ts = None
+                last_progress_pct = None
+                continue
             mt = telemetry_re.search(line)
             if mt:
-                last_active = mt.group(1).strip()
+                file_name = mt.group(4).strip()
+                last_active = file_name
+                last_progress_pct = float(mt.group(5))
+                ts = stamp_for(int(mt.group(1)), int(mt.group(2)), int(mt.group(3)))
+                if file_name == last_active and first_active_telem_ts is None:
+                    first_active_telem_ts = ts
+                continue
             me = end_re.search(line)
             if me:
-                last_end = me.group(1).strip()
+                last_end = me.group(4).strip()
         if last_active and last_active != "-" and last_active != last_end:
             self.current_print_file = last_active
             self.active_sd_var.set(f"Печатается: {last_active}")
+            self.current_print_start_ts = last_start_ts or first_active_telem_ts
+            self.current_print_progress_pct = last_progress_pct
 
     def _load_ui_state(self) -> dict[str, object]:
         if not UI_STATE_PATH.is_file():
@@ -440,6 +478,24 @@ class K9ControlCenter:
             darkcolor=colors["border"],
         )
         style.configure(
+            "TCombobox",
+            fieldbackground=colors["field"],
+            background=colors["field"],
+            foreground=colors["text"],
+            arrowcolor=colors["accent"],
+            bordercolor=colors["border"],
+            lightcolor=colors["border"],
+            darkcolor=colors["border"],
+            insertcolor=colors["accent"],
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", colors["field"])],
+            background=[("readonly", colors["field"])],
+            foreground=[("readonly", colors["text"])],
+            arrowcolor=[("readonly", colors["accent"]), ("active", colors["accent_active"])],
+        )
+        style.configure(
             "TButton",
             background=colors["panel_alt"],
             foreground=colors["text"],
@@ -580,6 +636,13 @@ class K9ControlCenter:
         self.temp_canvas.configure(bg=colors["panel"], highlightbackground=colors["border"], highlightcolor=colors["accent"], relief="solid", borderwidth=1)
         self.progress_wrap.configure(bg=colors["field_alt"], highlightbackground=colors["border"], highlightcolor=colors["accent"], highlightthickness=1)
         self.progress_label.configure(bg=colors["field_alt"], fg=colors["text"], font=("DejaVu Sans", 9, "bold"))
+        try:
+            self.root.option_add("*TCombobox*Listbox*Background", colors["field"])
+            self.root.option_add("*TCombobox*Listbox*Foreground", colors["text"])
+            self.root.option_add("*TCombobox*Listbox*selectBackground", colors["accent"])
+            self.root.option_add("*TCombobox*Listbox*selectForeground", colors["field"])
+        except Exception:
+            pass
         for widget in (self.log_text, self.metrics_text):
             try:
                 widget.frame.configure(bg=colors["panel"], bd=0, highlightthickness=0, relief="flat")
@@ -618,9 +681,13 @@ class K9ControlCenter:
         conn.grid(row=0, column=0, sticky="ew")
         conn.columnconfigure(4, weight=1)
         ttk.Label(conn, text="Port").grid(row=0, column=0, sticky="w")
-        ttk.Entry(conn, textvariable=self.port_var, width=16).grid(row=0, column=1, padx=(4, 8))
-        ttk.Label(conn, text="Baud").grid(row=0, column=2, sticky="w")
-        ttk.Entry(conn, textvariable=self.baud_var, width=10).grid(row=0, column=3, padx=(4, 8))
+        self.port_combo = ttk.Combobox(conn, textvariable=self.port_display_var, width=28, state="readonly")
+        self.port_combo.grid(row=0, column=1, padx=(4, 6), sticky="ew")
+        self.port_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_port_selected())
+        self.find_port_button = ttk.Button(conn, text="Найти", command=self.detect_printer_port_action)
+        self.find_port_button.grid(row=0, column=2, padx=(0, 8), sticky="ew")
+        self.disconnect_port_button = ttk.Button(conn, text="Откл.", command=self.disconnect_port)
+        self.disconnect_port_button.grid(row=0, column=3, padx=(0, 8), sticky="ew")
         self.temp_status_label = tk.Label(conn, textvariable=self.header_marquee_var, anchor="w", padx=6)
         self.temp_status_label.grid(row=0, column=4, padx=(12, 0), sticky="ew")
 
@@ -901,6 +968,16 @@ class K9ControlCenter:
         pos_line = self.last_position_line
         zero_line = "да" if self.session_zero_defined else "нет"
         fw_line = self.last_fw_line.replace("Firmware: ", "", 1) if self.last_fw_line else "-"
+        if self.current_print_start_ts:
+            start_line = f"Старт печати: {time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))}"
+        else:
+            start_line = "Старт печати: -"
+        eta_line = "Окончание: -"
+        if self.current_print_start_ts and self.current_print_progress_pct and self.current_print_progress_pct > 0.1:
+            elapsed = max(1.0, now - self.current_print_start_ts)
+            total_est = elapsed / (self.current_print_progress_pct / 100.0)
+            eta_ts = self.current_print_start_ts + total_est
+            eta_line = f"Окончание: ~{time.strftime('%H:%M:%S', time.localtime(eta_ts))}"
 
         lines = [
             temp_line,
@@ -909,6 +986,8 @@ class K9ControlCenter:
             f"Возраст SD-статуса: {sd_age}",
             f"Печать: {self.progress_var.get()}",
             f"Файл: {self.current_print_file}",
+            start_line,
+            eta_line,
             f"Позиция: {pos_line}",
             f"Старт сохранён: {zero_line}",
             f"Прошивка: {fw_line}",
@@ -963,6 +1042,9 @@ class K9ControlCenter:
             elif kind == "error":
                 messagebox.showerror("K9 Control Center", str(payload))
                 self.log(f"Ошибка: {payload}")
+            elif kind == "info":
+                messagebox.showinfo("Little Hands", str(payload))
+                self.log(str(payload))
             elif kind == "temp":
                 current, target, heater = payload  # type: ignore[misc]
                 self.last_temp_current = float(current)
@@ -1001,6 +1083,12 @@ class K9ControlCenter:
                 self._apply_sd_files(payload)  # type: ignore[arg-type]
             elif kind == "active-sd":
                 self.active_sd_var.set(str(payload))
+            elif kind == "ports":
+                ports, detected = payload  # type: ignore[misc]
+                self._set_port_choices(list(ports), str(detected) if detected else None)
+            elif kind == "find-port-ui":
+                active = bool(payload)
+                self._set_find_port_busy(active)
         self.root.after(150, self._drain_events)
 
     def _render_metrics(self) -> None:
@@ -1056,8 +1144,106 @@ class K9ControlCenter:
     def _port(self) -> str:
         return self.port_var.get().strip()
 
+    def _port_label(self, meta: dict[str, str]) -> str:
+        device = meta.get("device", "")
+        desc = meta.get("description", "") or meta.get("product", "") or "serial"
+        return f"{device} — {desc}"
+
+    def _set_port_choices(self, ports: list[dict[str, str]], preferred: str | None = None) -> None:
+        self.port_choices = [DISCONNECTED_PORT_LABEL] + [self._port_label(meta) for meta in ports if meta.get("device")]
+        self.port_combo["values"] = self.port_choices
+
+        selected_device = preferred or self.port_var.get().strip()
+        if not selected_device:
+            self.port_display_var.set(DISCONNECTED_PORT_LABEL)
+            self.port_var.set("")
+            return
+        if selected_device:
+            for meta in ports:
+                if meta.get("device") == selected_device:
+                    self.port_display_var.set(self._port_label(meta))
+                    self.port_var.set(selected_device)
+                    return
+        if ports:
+            first = ports[0]
+            self.port_display_var.set(self._port_label(first))
+            self.port_var.set(first.get("device", ""))
+        else:
+            self.port_display_var.set(DISCONNECTED_PORT_LABEL)
+            self.port_var.set("")
+
+    def _on_port_selected(self) -> None:
+        text = self.port_display_var.get().strip()
+        if text == DISCONNECTED_PORT_LABEL:
+            self.disconnect_port(log_change=True)
+            return
+        device = text.split(" — ", 1)[0].strip() if text else ""
+        if device:
+            self.port_var.set(device)
+            self.log(f"Выбран порт: {device}")
+
+    def disconnect_port(self, log_change: bool = False) -> None:
+        self.port_var.set("")
+        self.port_display_var.set(DISCONNECTED_PORT_LABEL)
+        self.busy_var.set("USB: отключен")
+        if log_change:
+            self.log("Порт отключён. Автоопрос и команды принтера остановлены до выбора нового порта.")
+
+    def _refresh_ports_on_startup(self) -> None:
+        try:
+            ports = sdtool.list_serial_ports()
+            self._set_port_choices(ports)
+        except Exception:
+            pass
+
+    def _set_find_port_busy(self, active: bool) -> None:
+        self.find_port_animating = active
+        if active:
+            try:
+                self.find_port_button.configure(state="disabled")
+            except Exception:
+                pass
+            self.find_port_anim_phase = 0
+            self._tick_find_port_button()
+        else:
+            try:
+                self.find_port_button.configure(state="normal", text="Найти")
+            except Exception:
+                pass
+
+    def _tick_find_port_button(self) -> None:
+        if not self.find_port_animating:
+            return
+        dots = "." * (self.find_port_anim_phase % 4)
+        label = "Ищу" + dots
+        try:
+            self.find_port_button.configure(text=label)
+        except Exception:
+            return
+        self.find_port_anim_phase += 1
+        self.root.after(300, self._tick_find_port_button)
+
+    def detect_printer_port_action(self) -> None:
+        self._set_find_port_busy(True)
+
+        def task() -> None:
+            try:
+                self._post("log", "Ищу вероятный порт принтера среди USB/ACM serial...")
+                detected, ranked = sdtool.detect_printer_port(self._baud())
+                self.events.put(("ports", (ranked, detected)))
+                if detected:
+                    self._post("log", f"Найден вероятный принтер: {detected}")
+                    self._post("info", f"Найден вероятный принтер:\n{detected}")
+                else:
+                    self._post("log", "Автодетект не нашёл уверенный порт принтера. Оставляю ручной выбор.")
+                    self._post("info", "Автопоиск не нашёл уверенный порт принтера.\nВыбери порт вручную из списка.")
+            finally:
+                self._post("find-port-ui", False)
+
+        self._run_task("Поиск порта принтера", task, require_port=False)
+
     def _baud(self) -> int:
-        return int(self.baud_var.get().strip())
+        return 115200
 
     def show_manual(self) -> None:
         win = tk.Toplevel(self.root)
@@ -1117,7 +1303,10 @@ class K9ControlCenter:
         for delay_ms in (0, 180, 420):
             self.root.after(delay_ms, self.root.bell)
 
-    def _run_task(self, label: str, func) -> None:
+    def _run_task(self, label: str, func, *, require_port: bool = True) -> None:
+        if require_port and not self._port():
+            messagebox.showerror("Little Hands", "Сначала выбери порт принтера, нажми 'Найти' или оставь 'не подключаться'.")
+            return
         self.user_task_pending = True
 
         def worker() -> None:
@@ -1395,6 +1584,9 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.start_sd_print(self._port(), self._baud(), path)
             self.current_print_file = path
+            self.current_print_start_ts = time.time()
+            self.current_print_progress_pct = 0.0
+            self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
             self._post("active-sd", f"Печатается: {path}")
             self._post("log", out.strip() or f"Печать запущена: {path}")
             self.print_was_active = False
@@ -1414,6 +1606,9 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
             self.current_print_file = path
+            self.current_print_start_ts = time.time()
+            self.current_print_progress_pct = 0.0
+            self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
             self._post("active-sd", f"Печатается: {path}")
             self._post("log", out.strip() or f"Печать с SD запущена от сохранённого старта: {path}")
             self.print_was_active = False
@@ -1522,6 +1717,10 @@ class K9ControlCenter:
         self._run_task(f"Переход к точке X{x:.0f} Y{y:.0f}", task)
 
     def _poll_status(self) -> None:
+        if not self._port():
+            self.busy_var.set("USB: отключен")
+            self.root.after(1000, self._poll_status)
+            return
         if self.monitor_enabled and not self.user_task_pending and self.serial_lock.acquire(blocking=False):
             threading.Thread(target=self._poll_worker, daemon=True).start()
         self.root.after(1000, self._poll_status)
@@ -1568,6 +1767,7 @@ class K9ControlCenter:
                 total = max(int(progress_match.group(2)), 1)
                 pct = max(0.0, min(100.0, (done / total) * 100.0))
                 self.print_was_active = True
+                self.current_print_progress_pct = pct
                 if self.current_print_file != "-":
                     self._post("active-sd", f"Печатается: {self.current_print_file}")
                 else:
@@ -1591,6 +1791,8 @@ class K9ControlCenter:
                         f"{time.strftime('%H:%M:%S')} PRINT_END file={self.current_print_file} temp={current_temp if current_temp is not None else '?'}"
                     )
                     self.current_print_file = "-"
+                    self.current_print_start_ts = None
+                    self.current_print_progress_pct = None
                     self._post("active-sd", "Печатается: -")
             self._post("metrics", ("m27", sd))
         except Exception:

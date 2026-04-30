@@ -26,12 +26,92 @@ import time
 from pathlib import Path
 
 import serial
+from serial.tools import list_ports
 from typing import Callable
 
 
 PROJECT_ROOT = Path("/home/maxim/draftCode/littleHands")
 MBP_PATH = PROJECT_ROOT / "firmware_src/ECF-Marlin-upstream/buildroot/share/scripts/MarlinBinaryProtocol.py"
 ProgressCb = Callable[[str, float], None]
+
+
+def list_serial_ports() -> list[dict[str, str]]:
+    ports: list[dict[str, str]] = []
+    for info in list_ports.comports():
+        ports.append({
+            "device": info.device or "",
+            "description": info.description or "",
+            "hwid": info.hwid or "",
+            "manufacturer": info.manufacturer or "",
+            "product": info.product or "",
+            "serial_number": info.serial_number or "",
+            "vid": f"{info.vid:04X}" if info.vid is not None else "",
+            "pid": f"{info.pid:04X}" if info.pid is not None else "",
+        })
+    return ports
+
+
+def _port_score(meta: dict[str, str]) -> int:
+    hay = " ".join(meta.values()).lower()
+    score = 0
+    if meta.get("device", "").startswith("/dev/ttyUSB"):
+        score += 6
+    if meta.get("device", "").startswith("/dev/ttyACM"):
+        score += 5
+    for token, bonus in (
+        ("ch340", 8),
+        ("wch", 6),
+        ("usb-serial", 6),
+        ("serial", 3),
+        ("marlin", 8),
+        ("stm32", 4),
+        ("arduino", 3),
+        ("usb", 2),
+    ):
+        if token in hay:
+            score += bonus
+    return score
+
+
+def detect_printer_port(baud: int = 115200, probe_timeout_s: float = 2.8) -> tuple[str | None, list[dict[str, str]]]:
+    candidates = list_serial_ports()
+    if not candidates:
+        return None, []
+
+    ranked = sorted(candidates, key=_port_score, reverse=True)
+    likely = [
+        meta for meta in ranked
+        if meta.get("device", "").startswith(("/dev/ttyUSB", "/dev/ttyACM"))
+        or _port_score(meta) >= 6
+    ] or ranked[:6]
+
+    for meta in likely[:8]:
+        device = meta.get("device", "")
+        if not device:
+            continue
+        try:
+            with open_serial(device, baud, timeout=0.5) as ser:
+                sync_ascii(ser)
+                send_line(ser, "M115")
+                time.sleep(0.45)
+                caps = read_for(ser, 0.9)
+                if "FIRMWARE_NAME:" not in caps:
+                    send_line(ser, "M105")
+                    time.sleep(0.25)
+                    caps += read_for(ser, 0.7)
+            if "FIRMWARE_NAME:" in caps:
+                meta["detected"] = "marlin"
+                return device, ranked
+            if "T:" in caps and "ok" in caps:
+                meta["detected"] = "marlin-like"
+                return device, ranked
+            if probe_timeout_s and _port_score(meta) <= 0:
+                meta["detected"] = "timeout"
+        except Exception:
+            continue
+    if ranked:
+        return ranked[0].get("device") or None, ranked
+    return None, ranked
 
 
 def make_sd_name(source_name: str) -> str:
