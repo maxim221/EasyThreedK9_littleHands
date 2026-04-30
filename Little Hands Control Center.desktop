@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Little Hands Control Center
+Comment=USB/SD control center for the EasyThreeD K9
+Exec=/usr/bin/env python3 /home/maxim/draftCode/littleHands/tools/k9_control_center.py
+Path=/home/maxim/draftCode/littleHands
+Icon=little-hands-control-center
+Terminal=false
+Categories=Utility;Graphics;
+StartupNotify=true

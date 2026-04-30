@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+monitor_logs/
+screen.jpg
+screen.png
+diagnostics_full_swap.log
+firmware_src/
+CFFFP_zeroBottom_k9xz.gcode
+CFFFP_zeroBottom_usb200.gcode
+CFFFP_zeroBottom_usb215.gcode
+axis_test_sd.gcode
