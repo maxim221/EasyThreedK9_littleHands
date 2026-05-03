@@ -46,6 +46,54 @@ This should help separate:
 - USB is not currently treated as the primary print path.
 - Earlier USB detection was confused by another device (`OrangePi` serial console).
 
+## Safety Rules For The Incoming Second K9
+
+The second Easythreed K9 from your friend must not be sacrificed to experiments.
+
+Treat it as a protected reference printer:
+
+- Do not flash experimental firmware first.
+- Do not swap motor plugs, fan plugs, or stepper drivers first.
+- Do not run destructive homing or repeated hard-stop tests first.
+- Do not delete service files from its card blindly.
+- Do not assume its board is wired exactly like the first K9 until checked.
+
+Mandatory first steps on the second K9:
+
+1. Make a full TF-card backup before changing anything.
+2. Record stock behavior before changing anything:
+   - photos of the board and wiring
+   - visible file layout on the card
+   - firmware identity / version if readable
+   - motion mapping of X / Y / Z
+   - fan behavior
+3. Start with the least invasive checks only:
+   - read-only USB queries
+   - small manual jogs
+   - visual inspection
+4. Only after the baseline is documented may we decide whether to:
+   - keep it stock as a known-good control printer
+   - or migrate it carefully toward the Little Hands baseline
+
+Project rule:
+
+- The first K9 may remain the experimental / repair unit.
+- The second K9 must be handled as the “do not break this one” machine until a complete stock baseline is captured.
+- Second-K9 rollout guide:
+  - [SECOND_K9_INTAKE.md](/home/maxim/draftCode/littleHands/SECOND_K9_INTAKE.md)
+  - [SECOND_K9_ROLLOUT.md](/home/maxim/draftCode/littleHands/SECOND_K9_ROLLOUT.md)
+
+## Second K9 External Warm Bed Note
+
+- The incoming second `K9` uses an external heated bed, not one electrically driven by the printer mainboard.
+- Operational assumption for rollout:
+  - preheat the bed externally to `40–50C`
+  - keep Cura `material_bed_temperature = 0`
+  - do not rely on `M140/M190` for normal printing
+- A separate Cura machine/profile was prepared so the damaged first-printer setup is not overwritten:
+  - machine: `lilHands K9 warm mat`
+  - profile: `codex - K9 warm mat cautious`
+
 ## Active Cura Setup
 
 - Machine name in Cura: `lilHands`
@@ -1391,3 +1439,114 @@ After each test print, append:
   - deterministic print start / home workflow
   - USB recovery polish
   - next Cura tuning only after reviewing the active print result
+
+## 2026-05-01 Z Height Root Cause
+
+- A later print result showed a very specific failure pattern:
+  - X/Y footprint matched the sliced model
+  - Z height was approximately 2x too large
+  - the part was weak / porous because adjacent layers were spaced too far apart
+- This matches a bad vertical steps-per-mm setting, not a slicer scaling issue.
+- The stable plain-ECF motion baseline for the K9 with physical `Y/Z` motor swap relied on:
+  - `M92 X606.00 Y606.00 Z1167.00 E1140.00`
+- The later `custom-hotend-autofan-45c-usb-mksLite.bin` branch came from the EasyThreeD single-fan tree where the default motion constants were:
+  - `M92 X606.00 Y606.00 Z606.00 E1040.00`
+- For this machine that reintroduced an under-scaled vertical axis, so every commanded layer lift became almost 2x too large in the real world.
+- Permanent source fix prepared on 2026-05-01:
+  - changed `DEFAULT_AXIS_STEPS_PER_UNIT` from `{ 606, 606, 606, 1040 }` to `{ 606, 606, 1167, 1040 }`
+  - files:
+    - `/home/maxim/draftCode/littleHands/firmware_src/EasyThreeD-K9_ET4000PLUS/Marlin/Configuration.h`
+    - `/home/maxim/draftCode/littleHands/firmware_src/EasyThreeD-K9_ET4000PLUS/config/EasyThreeD/ET4000PLUS/Configuration.h`
+  - rebuilt binary:
+    - `/home/maxim/draftCode/littleHands/firmware/custom-hotend-autofan-45c-usb-z1167-mksLite.bin`
+    - `sha256: 8861ba0dc2f162d821f7474b60acd717a7c705db6dae8fcab5afcb8841f8aa77`
+- Important operational note:
+  - flashing the corrected binary alone may not be enough if `EEPROM.DAT` still contains the old saved `Z606`
+  - after applying the fix, motion settings must be explicitly overwritten with either:
+    - `M92 Z1167` then `M500`
+  - or a full defaults reload:
+    - `M502` then `M500`
+- 2026-05-01: Added explicit Little Hands firmware identity to the printer firmware path. The EasyThreeD single-fan branch now defines `LH_FIRMWARE_LABEL`, and `M115` reports that label directly instead of forcing the UI to infer the build only from `Marlin` base version + `M503`. Current canonical labels:
+  - `LH v1 AutoFan45 FAN1 Z606`
+  - `LH v2 AutoFan45 FAN1 Z1167`
+- 2026-05-01: Extended the same `LH_FIRMWARE_LABEL` mechanism into the ECF source tree as a compatibility hook, so future builds from either firmware tree can expose an explicit Little Hands firmware version through `M115`.
+- 2026-05-01: Built and archived the new explicit-version binary as:
+  - `/home/maxim/draftCode/littleHands/firmware/LH-v2-AutoFan45-FAN1-z1167-mksLite.bin`
+  - sha256: `7504c6d2c808b435b1a62c635c588a01e9e0450d1bc7c2472de10bc0288fe21d`
+
+## 2026-05-03 Second K9 Firmware Root Cause
+
+- Investigated the second fully working `K9` after flashing `LH v2 AutoFan45 FAN1 Z1167`.
+- Confirmed by tiny jog tests that its motion mapping did not match the first experimental K9:
+  - `X` behaved normally
+  - `Y` and `Z` behavior was inconsistent with the first printer baseline
+- Root cause found in the source trees:
+  - `firmware_src/EasyThreeD-K9_ET4000PLUS/Marlin/src/pins/stm32f1/pins_MKS_ROBIN_LITE.h`
+    remaps `Y_STEP/Y_DIR` onto the pins Marlin normally uses for `E0_STEP/E0_DIR`
+  - `firmware_src/ECF-Marlin-upstream/Marlin/src/pins/stm32f1/pins_MKS_ROBIN_LITE.h`
+    keeps the standard K9 / ET4000+ mapping:
+    - `Y_STEP_PIN PB11`
+    - `Y_DIR_PIN PB2`
+    - `E0_STEP_PIN PC4`
+    - `E0_DIR_PIN PA5`
+- The EasyThreeD hard fork even documents this as a unit-specific observation:
+  - `EasyThreeD K9 ET4000+ in this unit appears to route Y motion on the step/dir lines Marlin would normally use for E0.`
+- External references also align with the community baseline rather than our unit-specific swap:
+  - `schmttc/EasyThreeD-K7-STM32` explicitly treats `ET4000PLUS-K9` as its own supported branch
+  - `schmttc/ECF-Marlin` Beginner's Guide lists `K9 + ET4000+` as a supported combination
+  - a public `lite_cfg.txt` dump for factory K9 firmware reports stock motion values closer to:
+    - `X606`
+    - `Y606`
+    - `Z600`
+    - `E1040`
+- Conclusion:
+  - the bad behavior on the second K9 is best explained by our firmware assumptions, not by spontaneous simultaneous motor/driver failure
+  - specifically:
+    - a unit-specific `Y/E0` step-dir swap was baked into `LH v2`
+    - and `Z1167` may be correct only for the first experimental printer, not for a stock-like second K9
+- Built a new cautious rollback firmware for the second K9:
+  - source tree: `firmware_src/ECF-Marlin-upstream`
+  - key properties:
+    - standard stock-like K9/ET4000+ step/dir mapping
+    - `FAN1` / `PA8` auto-fan at `45C`
+    - explicit `M115` label
+    - stock-like motion constants `{ 606, 606, 600, 1040 }`
+  - binary:
+    - `/home/maxim/draftCode/littleHands/firmware/LH-v3-StockPins-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+  - sha256:
+    - `817288cba35bb78bcca0ca57c4c085eb57d6cabd3af069dd0a670f9aaf85179f`
+- Safety rule for the second K9:
+  - do not continue experiments on `LH v2` there
+  - use `LH v3 StockPins AutoFan45 FAN1 Z600 E1040` as the next validation build
+  - re-run only tiny jog tests first, then calibrate zero, and only after that attempt the first print
+- 2026-05-03: `LH v3 StockPins ...` validated one more point: the second K9 did not show random or dead motion. Instead, tiny jog tests were stable and revealed a clean axis swap:
+  - `X` correct
+  - logical `Y` moved the physical vertical axis
+  - logical `Z` moved the physical bed axis
+- That means the second K9 still wants the physical `Y/Z` swap we learned on the first printer, but it does **not** want the later unit-specific `Y/E0` swap from `LH v2`.
+- Built the corrected follow-up firmware:
+  - `/home/maxim/draftCode/littleHands/firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+  - sha256:
+    - `64d679c51f3b1571027dac24ae572d3eeb9d9bfb48a0f1ed1d91ec3022bff86c`
+- `LH v4` keeps:
+  - standard K9 / ET4000+ `Y/E0` mapping
+  - `FAN1` auto-fan at `45C`
+  - stock-like motion values `X606 Y606 Z600 E1040`
+- `LH v4` changes only one axis-level assumption versus `LH v3`:
+  - logical `Y` uses the former `Z` pins
+  - logical `Z` uses the former `Y` pins
+- Operational conclusion:
+  - the earlier theory that the first K9 necessarily had a burned `Y` driver is now weaker
+  - the safer explanation is that `LH v2` combined two different assumptions:
+    - real `Y/Z` motor routing quirk
+    - mistaken extra `Y/E0` step-dir swap
+- 2026-05-03: `LH v4` validated successfully on the protected second K9.
+  - operator-facing tiny jog mapping is now correct:
+    - `X` = head left/right
+    - `Y` = head up/down
+    - `Z` = bed away/toward operator
+  - `Little Hands` was updated so logs, live status, and `M114` presentation follow the operator convention above, while still preserving raw `M114` in USB metrics for debugging.
+  - second K9 is now considered ready for first cautious print tests with:
+    - firmware `LH v4 YZSwap AutoFan45 FAN1 Z600 E1040`
+    - Cura machine `lilHands K9 warm mat`
+    - Cura profile `codex - K9 warm mat cautious`

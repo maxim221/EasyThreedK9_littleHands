@@ -32,7 +32,7 @@ import k9_marlin_sd as sdtool
 
 PROJECT_ROOT = Path("/home/maxim/draftCode/littleHands")
 CURA_ROOT = Path.home() / ".local/share/cura/5.11"
-DEFAULT_FIRMWARE = PROJECT_ROOT / "firmware/ecf-k9-et4000plus-mksLite.bin"
+DEFAULT_FIRMWARE = PROJECT_ROOT / "firmware/LH-v2-AutoFan45-FAN1-z1167-mksLite.bin"
 LOG_DIR = PROJECT_ROOT / "monitor_logs"
 GUI_EXPORT_DIR = LOG_DIR / "gui_exports"
 RUNTIME_LOG_PATH = LOG_DIR / "little_hands_runtime.log"
@@ -46,6 +46,43 @@ TEMP_LOG_INTERVAL_SEC = 5.0
 TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
 HEATER_RE = re.compile(r"@:(\d+)")
 SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
+MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
+LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
+M92_RE = re.compile(r"M92\s+X([-\d.]+)\s+Y([-\d.]+)\s+Z([-\d.]+)\s+E([-\d.]+)")
+
+LH_FIRMWARE_CATALOG = {
+    "custom-hotend-autofan-45c-usb-mksLite.bin": {
+        "lh_version": "LH v1",
+        "label": "LH v1 AutoFan45 FAN1 Z606",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 606.0, 1040.0),
+    },
+    "custom-hotend-autofan-45c-usb-z1167-mksLite.bin": {
+        "lh_version": "LH v2",
+        "label": "LH v2 AutoFan45 FAN1 Z1167",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 1167.0, 1040.0),
+    },
+    "LH-v1-AutoFan45-FAN1-z606-mksLite.bin": {
+        "lh_version": "LH v1",
+        "label": "LH v1 AutoFan45 FAN1 Z606",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 606.0, 1040.0),
+    },
+    "LH-v2-AutoFan45-FAN1-z1167-mksLite.bin": {
+        "lh_version": "LH v2",
+        "label": "LH v2 AutoFan45 FAN1 Z1167",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 1167.0, 1040.0),
+    },
+    "ecf-k9-et4000plus-mksLite.bin": {
+        "lh_version": "LH ECF",
+        "label": "LH ECF Baseline",
+        "marlin": "2.1.2.1",
+        "m92": None,
+    },
+}
 
 MANUAL_TEXT = textwrap.dedent(
     """
@@ -137,11 +174,17 @@ class K9ControlCenter:
         self.header_marquee_var = tk.StringVar(value="")
         self.selected_sd_var = tk.StringVar(value="Выбрано на SD: -")
         self.active_sd_var = tk.StringVar(value="Печатается: -")
+        self.sd_notice_var = tk.StringVar(value="")
+        self.files_status_var = tk.StringVar(value="Выбери G-code или прошивку.")
         self.step_var = tk.DoubleVar(value=5.0)
         self.melody_on_complete_var = tk.BooleanVar(value=True)
 
         self.sd_list: list[str] = []
+        self.sd_print_files: list[str] = []
+        self.sd_other_files: list[str] = []
         self.sd_display_to_path: dict[str, str] = {}
+        self.sd_has_eeprom = False
+        self.eeprom_confirmed = False
         self.metrics_sections: dict[str, str] = {}
         self.action_widgets: list[ttk.Widget] = []
         self.print_was_active = False
@@ -153,6 +196,9 @@ class K9ControlCenter:
         self.current_print_file = "-"
         self.current_print_start_ts: float | None = None
         self.current_print_progress_pct: float | None = None
+        self.print_state_restored_from_log = False
+        self.print_start_watchdog_alerted = False
+        self.printer_halted = False
         self.last_temp_sample_ts = 0.0
         self.last_temp_log_ts = 0.0
         self.last_temp_current: float | None = None
@@ -161,6 +207,9 @@ class K9ControlCenter:
         self.last_sd_sample_ts = 0.0
         self.last_sd_summary = "SD: unknown"
         self.last_fw_line = ""
+        self.last_fw_identity = ""
+        self.last_m115_raw = ""
+        self.last_m503_raw = ""
         self.last_position_line = "X:? Y:? Z:?"
         self.last_position_sample_ts = 0.0
         self.last_fw_query_ts = 0.0
@@ -169,12 +218,22 @@ class K9ControlCenter:
         self.port_choices: list[str] = []
         self.find_port_animating = False
         self.find_port_anim_phase = 0
+        self.pending_flash_finalize = self.ui_state.get("pending_flash_finalize")
+        if not isinstance(self.pending_flash_finalize, dict):
+            self.pending_flash_finalize = None
+        self.flash_finalize_in_progress = False
+        self.flash_finalize_last_attempt_ts = 0.0
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         GUI_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         self._load_recent_temp_history_from_log()
 
         self._build_ui()
+        if self.pending_flash_finalize:
+            source_name = str(self.pending_flash_finalize.get("source_name", "mksLite.bin"))
+            self.files_status_var.set(
+                f"Ожидаю перезапуск принтера после прошивки {source_name}. Потом автоматически выполню M502/M500."
+            )
         self._apply_theme()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(150, self._drain_events)
@@ -293,6 +352,7 @@ class K9ControlCenter:
             self.active_sd_var.set(f"Печатается: {last_active}")
             self.current_print_start_ts = last_start_ts or first_active_telem_ts
             self.current_print_progress_pct = last_progress_pct
+            self.print_state_restored_from_log = True
 
     def _load_ui_state(self) -> dict[str, object]:
         if not UI_STATE_PATH.is_file():
@@ -307,6 +367,13 @@ class K9ControlCenter:
 
     def _save_ui_state(self) -> None:
         state: dict[str, object] = {"geometry": self.root.winfo_geometry()}
+        if self.pending_flash_finalize:
+            state["pending_flash_finalize"] = self.pending_flash_finalize
+        try:
+            current = self.views.select()
+            state["selected_view"] = "log" if str(current) == str(self.log_frame) else "metrics"
+        except Exception:
+            pass
         try:
             state["main_sash"] = int(self.main_pane.sashpos(0))
         except Exception:
@@ -325,6 +392,9 @@ class K9ControlCenter:
         self._save_ui_state()
         self.root.destroy()
 
+    def _on_views_tab_changed(self, _event=None) -> None:
+        self._save_ui_state()
+
     def _format_fw_line(self, raw_line: str) -> str:
         line = raw_line.strip()
         if line.startswith("FIRMWARE_NAME:"):
@@ -335,6 +405,47 @@ class K9ControlCenter:
         if close_idx != -1:
             line = line[: close_idx + 1]
         return line
+
+    def _selected_firmware_profile_label(self) -> str:
+        name = Path(self.firmware_var.get().strip()).name
+        entry = LH_FIRMWARE_CATALOG.get(name)
+        return entry["label"] if entry else name
+
+    def _infer_lh_firmware_identity(self) -> str:
+        direct = LH_M115_RE.search(self.last_m115_raw)
+        if direct:
+            return direct.group(1).strip()
+
+        marlin_ver = None
+        m = MARLIN_VER_RE.search(self.last_m115_raw)
+        if m:
+            marlin_ver = m.group(1)
+
+        m92 = None
+        mm = M92_RE.search(self.last_m503_raw)
+        if mm:
+            m92 = tuple(float(mm.group(i)) for i in range(1, 5))
+
+        if marlin_ver:
+            for entry in LH_FIRMWARE_CATALOG.values():
+                if entry.get("marlin") != marlin_ver:
+                    continue
+                expected = entry.get("m92")
+                if expected is None:
+                    return entry["label"]
+                if m92 and all(abs(a - b) < 0.01 for a, b in zip(m92, expected)):
+                    return entry["label"]
+
+        if m92:
+            if abs(m92[2] - 1167.0) < 0.01 and abs(m92[3] - 1040.0) < 0.01:
+                return "LH v2 AutoFan45 FAN1 Z1167"
+            if abs(m92[2] - 606.0) < 0.01 and abs(m92[3] - 1040.0) < 0.01:
+                return "LH v1 AutoFan45 FAN1 Z606"
+
+        return self.last_fw_identity or "LH ?"
+
+    def _refresh_fw_identity(self) -> None:
+        self.last_fw_identity = self._infer_lh_firmware_identity()
 
     def _normalized_geometry(self, geometry: str) -> str:
         match = re.match(r"^(\d+)x(\d+)([+-]\d+)([+-]\d+)$", geometry.strip())
@@ -563,8 +674,8 @@ class K9ControlCenter:
             bordercolor=colors["border"],
             lightcolor=colors["border"],
             darkcolor=colors["border"],
-            padding=(12, 6),
-            font=("DejaVu Sans", 10, "bold"),
+            padding=(12, 4),
+            font=("DejaVu Sans", 9, "bold"),
         )
         style.map(
             "LH.TNotebook.Tab",
@@ -576,18 +687,32 @@ class K9ControlCenter:
                 ("selected", "#dbeadf"),
                 ("active", "#d1e3d7"),
             ],
+            padding=[
+                ("selected", (14, 7)),
+                ("active", (12, 5)),
+            ],
+            font=[
+                ("selected", ("DejaVu Sans", 11, "bold")),
+                ("active", ("DejaVu Sans", 10, "bold")),
+            ],
         )
         style.configure("NotebookPage.TFrame", background=colors["panel"])
 
-        self.sd_listbox.configure(
-            bg=colors["field"],
-            fg=colors["text"],
-            selectbackground=colors["accent"],
-            selectforeground=colors["field"],
-            highlightbackground=colors["border"],
-            highlightcolor=colors["accent"],
-            relief="solid",
-            borderwidth=1,
+        for sd_listbox in (self.sd_print_listbox,):
+            sd_listbox.configure(
+                bg=colors["field"],
+                fg=colors["text"],
+                selectbackground=colors["accent"],
+                selectforeground=colors["field"],
+                highlightbackground=colors["border"],
+                highlightcolor=colors["accent"],
+                relief="solid",
+                borderwidth=1,
+            )
+        self.sd_notice_label.configure(
+            bg=colors["panel"],
+            fg=colors["muted"],
+            font=("DejaVu Sans", 9),
         )
         self.log_text.configure(
             bg=colors["field"],
@@ -691,21 +816,26 @@ class K9ControlCenter:
         self.temp_status_label = tk.Label(conn, textvariable=self.header_marquee_var, anchor="w", padx=6)
         self.temp_status_label.grid(row=0, column=4, padx=(12, 0), sticky="ew")
 
+        self.files_window: tk.Toplevel | None = None
+
         actions = ttk.Frame(top_left)
         actions.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        for idx in range(4):
+        for idx in range(5):
             actions.columnconfigure(idx, weight=1)
-        btn = ttk.Button(actions, text="Manual", command=self.show_manual)
+        btn = ttk.Button(actions, text="Файлы и прошивка", command=self.show_files_firmware_window)
         btn.grid(row=0, column=0, padx=3, sticky="ew")
         self.action_widgets.append(btn)
-        btn = ttk.Button(actions, text="Сброс USB", command=self.reset_usb_session)
+        btn = ttk.Button(actions, text="Manual", command=self.show_manual)
         btn.grid(row=0, column=1, padx=3, sticky="ew")
         self.action_widgets.append(btn)
-        btn = ttk.Button(actions, text="Экспорт Cura", command=self.export_cura_bundle)
+        btn = ttk.Button(actions, text="Сброс USB", command=self.reset_usb_session)
         btn.grid(row=0, column=2, padx=3, sticky="ew")
         self.action_widgets.append(btn)
-        btn = ttk.Button(actions, text="Мелодия", command=self.play_melody_button)
+        btn = ttk.Button(actions, text="Экспорт Cura", command=self.export_cura_bundle)
         btn.grid(row=0, column=3, padx=3, sticky="ew")
+        self.action_widgets.append(btn)
+        btn = ttk.Button(actions, text="Мелодия", command=self.play_melody_button)
+        btn.grid(row=0, column=4, padx=3, sticky="ew")
         self.action_widgets.append(btn)
 
         substatus = ttk.Frame(top_left)
@@ -729,7 +859,7 @@ class K9ControlCenter:
 
         left = ttk.Frame(self.main_pane, padding=6)
         left.columnconfigure(0, weight=1)
-        left.rowconfigure(1, weight=1)
+        left.rowconfigure(0, weight=1)
         self.main_pane.add(left, weight=1)
 
         right = ttk.Frame(self.main_pane, padding=6)
@@ -745,28 +875,8 @@ class K9ControlCenter:
         self.temp_canvas.grid(row=1, column=0, sticky="nsew")
         self.temp_canvas.bind("<Configure>", lambda _event: self._draw_temp_graph())
 
-        upload = ttk.LabelFrame(left, text="Файлы и прошивка", padding=8)
-        upload.grid(row=0, column=0, sticky="ew")
-        upload.columnconfigure(1, weight=1)
-        upload.columnconfigure(2, minsize=110)
-        upload.columnconfigure(3, minsize=110)
-
-        ttk.Label(upload, text="G-code").grid(row=0, column=0, sticky="w")
-        ttk.Entry(upload, textvariable=self.local_gcode_var).grid(row=0, column=1, columnspan=2, sticky="ew", padx=4)
-        ttk.Button(upload, text="Выбрать", command=self.pick_gcode).grid(row=0, column=3, padx=4, sticky="ew")
-        ttk.Label(upload, text="Имя на SD").grid(row=1, column=0, sticky="w")
-        ttk.Entry(upload, textvariable=self.dest_name_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=4)
-        ttk.Button(upload, text="Залить G-code", command=self.upload_gcode).grid(row=1, column=3, padx=4, sticky="ew")
-        ttk.Button(upload, text="Залить и старт", command=self.upload_and_start_gcode).grid(row=2, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
-
-        ttk.Separator(upload, orient="horizontal").grid(row=3, column=0, columnspan=4, sticky="ew", pady=8)
-        ttk.Label(upload, text="Прошивка").grid(row=4, column=0, sticky="w")
-        ttk.Entry(upload, textvariable=self.firmware_var).grid(row=4, column=1, columnspan=2, sticky="ew", padx=4)
-        ttk.Button(upload, text="Выбрать", command=self.pick_firmware).grid(row=4, column=3, padx=4, sticky="ew")
-        ttk.Button(upload, text="Залить прошивку", command=self.flash_firmware).grid(row=5, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
-
         self.left_split = tk.PanedWindow(left, orient="vertical", sashwidth=6, bd=0, opaqueresize=True)
-        self.left_split.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        self.left_split.grid(row=0, column=0, sticky="nsew")
 
         live_frame = ttk.LabelFrame(self.left_split, text="Параметры в реальном времени", padding=8)
         live_frame.columnconfigure(0, weight=1)
@@ -778,21 +888,25 @@ class K9ControlCenter:
 
         sd_frame = ttk.LabelFrame(self.left_split, text="Файлы на SD принтера", padding=8)
         sd_frame.columnconfigure(0, weight=1)
-        sd_frame.rowconfigure(2, weight=1)
+        sd_frame.columnconfigure(1, weight=0)
+        sd_frame.rowconfigure(4, weight=1)
 
         ttk.Label(sd_frame, textvariable=self.selected_sd_var).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(sd_frame, textvariable=self.active_sd_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.sd_notice_label = tk.Label(sd_frame, textvariable=self.sd_notice_var, anchor="w", justify="left", wraplength=320)
+        self.sd_notice_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
-        self.sd_listbox = tk.Listbox(sd_frame, height=4, exportselection=False)
-        self.sd_listbox.grid(row=2, column=0, sticky="nsew", pady=(6, 0))
-        self.sd_listbox.bind("<Double-1>", lambda _event: self.start_selected_print_with_home())
-        self.sd_listbox.bind("<<ListboxSelect>>", lambda _event: self._sync_selected_sd_label())
-        sd_scroll = ttk.Scrollbar(sd_frame, orient="vertical", command=self.sd_listbox.yview)
-        sd_scroll.grid(row=3, column=1, sticky="ns")
-        self.sd_listbox.configure(yscrollcommand=sd_scroll.set)
+        ttk.Label(sd_frame, text="Файлы для печати").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        self.sd_print_listbox = tk.Listbox(sd_frame, height=4, exportselection=False)
+        self.sd_print_listbox.grid(row=4, column=0, sticky="nsew", pady=(4, 0))
+        self.sd_print_listbox.bind("<Double-1>", lambda _event: self.start_selected_print_with_home())
+        self.sd_print_listbox.bind("<<ListboxSelect>>", lambda _event: self._on_sd_listbox_select("print"))
+        sd_print_scroll = ttk.Scrollbar(sd_frame, orient="vertical", command=self.sd_print_listbox.yview)
+        sd_print_scroll.grid(row=4, column=1, sticky="ns", pady=(4, 0))
+        self.sd_print_listbox.configure(yscrollcommand=sd_print_scroll.set)
 
         buttons = ttk.Frame(sd_frame)
-        buttons.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        buttons.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         for idx in range(3):
             buttons.columnconfigure(idx, weight=1)
         ttk.Button(buttons, text="Обновить список", command=self.refresh_sd_files).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
@@ -838,7 +952,7 @@ class K9ControlCenter:
         ttk.Button(motion, text="Стол к себе", command=lambda: self.jog_axis("Y", self.step_var.get())).grid(row=2, column=3, padx=2, pady=2, sticky="ew")
         ttk.Button(motion, text="Голова вниз", command=lambda: self.jog_axis("Z", -self.step_var.get())).grid(row=3, column=0, padx=2, pady=2, sticky="ew")
         ttk.Button(motion, text="Голова вверх", command=lambda: self.jog_axis("Z", self.step_var.get())).grid(row=3, column=1, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="Статус", command=self.refresh_status).grid(row=3, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
+        ttk.Button(motion, text="Жёсткий стоп", command=self.hard_stop).grid(row=3, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
 
         level = ttk.LabelFrame(controls, text="Калибровка стола", padding=6)
         level.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
@@ -874,7 +988,7 @@ class K9ControlCenter:
         self.log_text.configure(state="disabled")
         self.views.add(self.log_frame, text="Журнал")
         self.views.add(self.metrics_frame, text="USB-метрики")
-        self.views.select(self.metrics_frame)
+        self.views.select(self.log_frame)
 
     def log(self, message: str) -> None:
         timestamp = time.strftime("%H:%M:%S")
@@ -884,6 +998,23 @@ class K9ControlCenter:
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
         self._append_ring_log(line)
+        lowered = message.lower()
+        if (
+            not self.printer_halted
+            and (
+                "printer halted" in lowered
+                or "kill() called" in lowered
+                or "homing failed" in lowered
+                or "bad x endstop" in lowered
+            )
+        ):
+            self.printer_halted = True
+            self.busy_var.set("USB: printer halted")
+            messagebox.showwarning(
+                "Little Hands",
+                "Прошивка остановила принтер (Printer halted / Homing Failed).\n"
+                "Нужен power cycle: выключи принтер по питанию на 5–10 секунд и включи снова.",
+            )
 
     def _append_ring_log(self, line: str) -> None:
         payload = (line.rstrip() + "\n").encode("utf-8", "replace")
@@ -922,7 +1053,7 @@ class K9ControlCenter:
         elif not self.sd_var.get():
             self.sd_var.set("SD: unknown")
 
-        self.fw_var.set(self.last_fw_line)
+        self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else "")
         self.header_marquee_source = "   •   ".join(
             part for part in (
                 self.temp_var.get().strip(),
@@ -933,6 +1064,18 @@ class K9ControlCenter:
         )
         self._render_live_status()
         self.root.after(500, self._refresh_header_from_cache)
+
+    def _set_pending_flash_finalize(self, source_name: str) -> None:
+        self.pending_flash_finalize = {
+            "source_name": source_name,
+            "requested_at": time.time(),
+        }
+        self.eeprom_confirmed = False
+        self._save_ui_state()
+
+    def _clear_pending_flash_finalize(self) -> None:
+        self.pending_flash_finalize = None
+        self._save_ui_state()
 
     def _tick_header_marquee(self) -> None:
         source = (self.header_marquee_source or "").strip()
@@ -967,7 +1110,7 @@ class K9ControlCenter:
         heater_line = f"Heater PWM @: {self.last_heater_power if self.last_heater_power is not None else '?'}"
         pos_line = self.last_position_line
         zero_line = "да" if self.session_zero_defined else "нет"
-        fw_line = self.last_fw_line.replace("Firmware: ", "", 1) if self.last_fw_line else "-"
+        fw_line = self.last_fw_identity or "-"
         if self.current_print_start_ts:
             start_line = f"Старт печати: {time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))}"
         else:
@@ -1010,6 +1153,72 @@ class K9ControlCenter:
             self.left_split.sash_place(0, 0, left_y)
         except Exception:
             pass
+
+    def _populate_files_firmware_container(self, parent) -> None:
+        for child in parent.winfo_children():
+            child.destroy()
+        parent.columnconfigure(1, weight=1)
+        parent.columnconfigure(2, minsize=110)
+        parent.columnconfigure(3, minsize=110)
+
+        ttk.Label(parent, text="G-code").grid(row=0, column=0, sticky="w")
+        ttk.Entry(parent, textvariable=self.local_gcode_var).grid(row=0, column=1, columnspan=2, sticky="ew", padx=4)
+        btn = ttk.Button(parent, text="Выбрать", command=self.pick_gcode)
+        btn.grid(row=0, column=3, padx=4, sticky="ew")
+        self.action_widgets.append(btn)
+
+        ttk.Label(parent, text="Имя на SD").grid(row=1, column=0, sticky="w")
+        ttk.Entry(parent, textvariable=self.dest_name_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=4)
+        btn = ttk.Button(parent, text="Залить G-code", command=self.upload_gcode)
+        btn.grid(row=1, column=3, padx=4, sticky="ew")
+        self.action_widgets.append(btn)
+
+        btn = ttk.Button(parent, text="Залить и старт", command=self.upload_and_start_gcode)
+        btn.grid(row=2, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
+        self.action_widgets.append(btn)
+
+        ttk.Separator(parent, orient="horizontal").grid(row=3, column=0, columnspan=4, sticky="ew", pady=8)
+        ttk.Label(parent, text="Прошивка").grid(row=4, column=0, sticky="w")
+        ttk.Entry(parent, textvariable=self.firmware_var).grid(row=4, column=1, columnspan=2, sticky="ew", padx=4)
+        btn = ttk.Button(parent, text="Выбрать", command=self.pick_firmware)
+        btn.grid(row=4, column=3, padx=4, sticky="ew")
+        self.action_widgets.append(btn)
+
+        btn = ttk.Button(parent, text="Создать EEPROM.DAT", command=self.create_eeprom_via_printer)
+        btn.grid(row=5, column=1, padx=4, pady=(4, 0), sticky="ew")
+        self.action_widgets.append(btn)
+
+        btn = ttk.Button(parent, text="Залить прошивку", command=self.flash_firmware)
+        btn.grid(row=5, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
+        self.action_widgets.append(btn)
+
+        status = tk.Label(parent, textvariable=self.files_status_var, anchor="w", justify="left", wraplength=700)
+        status.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        status.configure(bg=self.colors["panel"], fg=self.colors["muted"], font=("DejaVu Sans", 9))
+
+    def show_files_firmware_window(self) -> None:
+        if self.files_window and self.files_window.winfo_exists():
+            self.files_window.deiconify()
+            self.files_window.lift()
+            self.files_window.focus_force()
+            return
+
+        win = tk.Toplevel(self.root)
+        self.files_window = win
+        win.title("Little Hands — Файлы и прошивка")
+        win.geometry("760x280")
+        win.minsize(680, 240)
+        win.configure(bg=self.colors["bg"])
+
+        frame = ttk.LabelFrame(win, text="Файлы и прошивка", padding=10)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self._populate_files_firmware_container(frame)
+
+        def _on_close() -> None:
+            self.files_window = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
 
     def _set_busy_ui(self, busy: bool, label: str | None = None) -> None:
         self.busy_var.set(label or ("USB: busy" if busy else "USB: idle"))
@@ -1059,9 +1268,10 @@ class K9ControlCenter:
                 self.sd_var.set(self.last_sd_summary)
             elif kind == "fw":
                 self.last_fw_line = str(payload).strip()
-                self.fw_var.set(self.last_fw_line)
+                self._refresh_fw_identity()
+                self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else self.last_fw_line)
             elif kind == "pos":
-                self.last_position_line = str(payload).strip()
+                self.last_position_line = self._format_operator_position_line(str(payload))
                 self.last_position_sample_ts = time.time()
             elif kind == "progress":
                 label, value = payload  # type: ignore[misc]
@@ -1077,7 +1287,19 @@ class K9ControlCenter:
                 self._set_busy_ui(bool(busy), str(label))
             elif kind == "metrics":
                 key, value = payload  # type: ignore[misc]
-                self.metrics_sections[str(key)] = str(value).strip()
+                key_str = str(key)
+                value_str = str(value).strip()
+                if key_str == "m114":
+                    value_str = self._format_m114_for_metrics(value_str)
+                self.metrics_sections[key_str] = value_str
+                if key_str == "m115":
+                    self.last_m115_raw = value_str
+                    self._refresh_fw_identity()
+                    self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else "")
+                elif key_str == "m503":
+                    self.last_m503_raw = value_str
+                    self._refresh_fw_identity()
+                    self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else "")
                 self._render_metrics()
             elif kind == "sd-files":
                 self._apply_sd_files(payload)  # type: ignore[arg-type]
@@ -1086,6 +1308,8 @@ class K9ControlCenter:
             elif kind == "ports":
                 ports, detected = payload  # type: ignore[misc]
                 self._set_port_choices(list(ports), str(detected) if detected else None)
+            elif kind == "files-status":
+                self.files_status_var.set(str(payload))
             elif kind == "find-port-ui":
                 active = bool(payload)
                 self._set_find_port_busy(active)
@@ -1110,16 +1334,60 @@ class K9ControlCenter:
         self.metrics_text.insert("1.0", rendered)
         self.metrics_text.configure(state="disabled")
 
+    def _operator_axis_name(self, axis: str) -> str:
+        axis = axis.upper()
+        if axis == "Y":
+            return "Z"
+        if axis == "Z":
+            return "Y"
+        return axis
+
+    def _operator_axis_hint(self, axis: str) -> str:
+        axis = axis.upper()
+        if axis == "Y":
+            return "стол"
+        if axis == "Z":
+            return "голова вверх/вниз"
+        if axis == "X":
+            return "голова влево/вправо"
+        return axis
+
+    def _format_operator_position_line(self, raw_line: str) -> str:
+        text = (raw_line or "").strip()
+        m = re.search(r"X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)", text)
+        if not m:
+            return text
+        x, y_raw, z_raw = m.groups()
+        return f"X:{x} Y:{z_raw} Z:{y_raw}"
+
+    def _format_m114_for_metrics(self, raw_text: str) -> str:
+        text = (raw_text or "").strip()
+        if not text:
+            return text
+        raw_line = next((line.strip() for line in text.splitlines() if "X:" in line and "Y:" in line and "Z:" in line), "")
+        if not raw_line:
+            return text
+        operator_line = self._format_operator_position_line(raw_line)
+        return f"Operator view: {operator_line}\nRaw M114: {raw_line}"
+
+    def _is_printable_sd_path(self, path: str) -> bool:
+        return Path(path.strip().lower()).suffix in PRINTABLE_SD_EXTS
+
     def _apply_sd_files(self, files: list[str]) -> None:
         previous_path = self._selected_sd_path()
         self.sd_list = files
+        self.sd_print_files = []
+        self.sd_other_files = []
         self.sd_display_to_path = {}
-        self.sd_listbox.delete(0, "end")
+        self.sd_print_listbox.delete(0, "end")
         if not files:
-            self.sd_listbox.insert("end", "(empty)")
+            self.sd_print_listbox.insert("end", "(empty)")
             self.selected_sd_var.set("Выбрано на SD: -")
+            self.sd_notice_var.set("SD-карта читается, но список файлов пуст.")
             return
-        selected_index = None
+
+        selected_print_index = None
+        lowered_paths: list[str] = []
         for idx, entry in enumerate(files):
             display = entry
             path = entry
@@ -1127,27 +1395,83 @@ class K9ControlCenter:
                 display = entry
                 path = entry.split()[0]
             self.sd_display_to_path[display] = path
-            self.sd_listbox.insert("end", display)
-            if previous_path and path == previous_path:
-                selected_index = idx
-        if selected_index is not None:
-            self.sd_listbox.selection_set(selected_index)
-            self.sd_listbox.see(selected_index)
-        elif files:
-            self.sd_listbox.selection_set(0)
+            lowered_paths.append(path.strip().lower())
+            if self._is_printable_sd_path(path):
+                self.sd_print_files.append(display)
+                self.sd_print_listbox.insert("end", display)
+                if previous_path and path == previous_path:
+                    selected_print_index = len(self.sd_print_files) - 1
+            else:
+                self.sd_other_files.append(display)
+
+        if not self.sd_print_files:
+            self.sd_print_listbox.insert("end", "(empty)")
+
+        if selected_print_index is not None:
+            self.sd_print_listbox.selection_set(selected_print_index)
+            self.sd_print_listbox.see(selected_print_index)
+        elif self.sd_print_files:
+            self.sd_print_listbox.selection_set(0)
+        self._sync_selected_sd_label()
+        self._update_sd_notice(lowered_paths)
+
+    def _update_sd_notice(self, lowered_paths: list[str]) -> None:
+        has_eeprom = any(Path(path).name.lower() == "eeprom.dat" for path in lowered_paths)
+        self.sd_has_eeprom = has_eeprom or self.eeprom_confirmed
+        has_bin = any(Path(path).name.lower() == "mkslite.bin" for path in lowered_paths)
+        has_cur = any(Path(path).name.lower() == "mkslite.cur" for path in lowered_paths)
+        notes: list[str] = []
+        if has_bin:
+            notes.append("На карте есть mksLite.bin: при следующем старте принтер может снова прошиться.")
+        elif has_cur:
+            notes.append("На карте есть mksLite.CUR: это след прошлой прошивки, обычно его можно удалить.")
+        self.sd_notice_var.set(" ".join(notes))
+
+    def _on_sd_listbox_select(self, source: str) -> None:
+        if source != "print":
+            self.sd_print_listbox.selection_clear(0, "end")
         self._sync_selected_sd_label()
 
     def _sync_selected_sd_label(self) -> None:
         path = self._selected_sd_path()
         self.selected_sd_var.set(f"Выбрано на SD: {path or '-'}")
 
+    def _selected_sd_display(self) -> str | None:
+        print_sel = self.sd_print_listbox.curselection()
+        if print_sel:
+            display = self.sd_print_listbox.get(print_sel[0])
+            return None if display == "(empty)" else display
+        return None
+
     def _port(self) -> str:
         return self.port_var.get().strip()
+
+    def _classify_port(self, meta: dict[str, str]) -> str:
+        hay = " ".join(str(v) for v in meta.values()).lower()
+        vid = (meta.get("vid") or "").upper()
+        pid = (meta.get("pid") or "").upper()
+        detected = (meta.get("detected") or "").lower()
+        if detected == "marlin":
+            return "Marlin / принтер"
+        if detected == "marlin-like":
+            return "похож на принтер"
+        if vid == "1A86" and pid == "7523":
+            return "CH340 / вероятный K9"
+        if "ch340" in hay or "wch" in hay:
+            return "CH340 / вероятный K9"
+        if vid == "0403" and pid == "6001":
+            return "FTDI / не принтер"
+        if "ftdi" in hay or "ft232" in hay:
+            return "FTDI / не принтер"
+        if meta.get("device", "").startswith("/dev/ttyACM"):
+            return "ACM / проверить"
+        return "serial / проверить"
 
     def _port_label(self, meta: dict[str, str]) -> str:
         device = meta.get("device", "")
         desc = meta.get("description", "") or meta.get("product", "") or "serial"
-        return f"{device} — {desc}"
+        kind = self._classify_port(meta)
+        return f"{device} — {kind} — {desc}"
 
     def _set_port_choices(self, ports: list[dict[str, str]], preferred: str | None = None) -> None:
         self.port_choices = [DISCONNECTED_PORT_LABEL] + [self._port_label(meta) for meta in ports if meta.get("device")]
@@ -1164,13 +1488,8 @@ class K9ControlCenter:
                     self.port_display_var.set(self._port_label(meta))
                     self.port_var.set(selected_device)
                     return
-        if ports:
-            first = ports[0]
-            self.port_display_var.set(self._port_label(first))
-            self.port_var.set(first.get("device", ""))
-        else:
-            self.port_display_var.set(DISCONNECTED_PORT_LABEL)
-            self.port_var.set("")
+        self.port_display_var.set(DISCONNECTED_PORT_LABEL)
+        self.port_var.set("")
 
     def _on_port_selected(self) -> None:
         text = self.port_display_var.get().strip()
@@ -1329,11 +1648,17 @@ class K9ControlCenter:
     def pick_gcode(self) -> None:
         path = filedialog.askopenfilename(
             title="Выбрать G-code",
+            parent=self.files_window if self.files_window and self.files_window.winfo_exists() else self.root,
             filetypes=[("G-code", "*.gcode *.gco *.g"), ("All files", "*.*")],
         )
         if path:
             self.local_gcode_var.set(path)
             self.dest_name_var.set(sdtool.make_sd_name(Path(path).name))
+            self.files_status_var.set(f"G-code выбран: {Path(path).name}")
+            if self.files_window and self.files_window.winfo_exists():
+                self.files_window.deiconify()
+                self.files_window.lift()
+                self.files_window.focus_force()
 
     def prepare_gcode(self) -> None:
         source = Path(self.local_gcode_var.get().strip()).expanduser()
@@ -1351,14 +1676,21 @@ class K9ControlCenter:
     def pick_firmware(self) -> None:
         path = filedialog.askopenfilename(
             title="Выбрать прошивку",
+            parent=self.files_window if self.files_window and self.files_window.winfo_exists() else self.root,
             filetypes=[("Firmware", "*.bin"), ("All files", "*.*")],
         )
         if path:
             self.firmware_var.set(path)
+            self.files_status_var.set(f"Прошивка выбрана: {Path(path).name}")
+            if self.files_window and self.files_window.winfo_exists():
+                self.files_window.deiconify()
+                self.files_window.lift()
+                self.files_window.focus_force()
 
     def refresh_status(self) -> None:
         def task() -> None:
             caps, sd = sdtool.preflight(self._port(), self._baud())
+            self.printer_halted = False
             fw_line = next((line for line in caps.splitlines() if line.startswith("FIRMWARE_NAME:")), "")
             if fw_line:
                 self._post("fw", self._format_fw_line(fw_line))
@@ -1500,6 +1832,7 @@ class K9ControlCenter:
 
             def on_progress(stage: str, percent: float) -> None:
                 self._post("progress", (f"{stage}: {percent:.1f}%", percent))
+                self._post("files-status", f"Заливка G-code: {stage} {percent:.1f}%")
                 if last_stage["name"] != stage:
                     last_stage["name"] = stage
                     self._post("log", f"Этап записи: {stage}")
@@ -1507,8 +1840,10 @@ class K9ControlCenter:
             self._post("log", f"Локальный файл: {source}")
             self._post("log", f"Размер файла: {size_mib:.2f} MiB. Большие G-code могут писаться 1-5 минут.")
             self._post("progress", ("Upload (preflight): 0.0%", 0.0))
+            self._post("files-status", f"Заливка G-code: preflight 0.0%")
             method = sdtool.upload_gcode_auto(self._port(), self._baud(), source, dest, progress_cb=on_progress)
             self._post("progress", ("Upload complete: 100.0%", 100.0))
+            self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method})")
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
@@ -1529,13 +1864,16 @@ class K9ControlCenter:
 
             def on_progress(stage: str, percent: float) -> None:
                 self._post("progress", (f"{stage}: {percent:.1f}%", percent))
+                self._post("files-status", f"Заливка и старт: {stage} {percent:.1f}%")
                 if last_stage["name"] != stage:
                     last_stage["name"] = stage
                     self._post("log", f"Этап записи: {stage}")
 
             self._post("log", f"Локальный файл: {source}")
             self._post("log", f"Размер файла: {size_mib:.2f} MiB. Большие G-code могут писаться 1-5 минут.")
+            self._post("files-status", "Заливка и старт: preflight 0.0%")
             method = sdtool.upload_gcode_auto(self._port(), self._baud(), source, dest, progress_cb=on_progress)
+            self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method}). Запускаю печать...")
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
@@ -1559,26 +1897,74 @@ class K9ControlCenter:
             "Залить прошивку на SD принтера и выполнить M997?\nПосле этого принтер перезагрузится.",
         ):
             return
+        self.files_status_var.set(f"Шью: {source.name} ...")
 
         def task() -> None:
             sdtool.flash_firmware(self._port(), self._baud(), source, purge_bin=True)
-            self._post("log", f"Прошивка залита: {source.name} -> mksLite.bin, отправлен M997")
+            self._set_pending_flash_finalize(source.name)
+            result = (
+                f"Прошивка отправлена: {source.name} -> mksLite.bin, M997 отправлен. "
+                "Передача по USB завершилась успешно. После перезапуска принтера Little Hands автоматически выполнит "
+                "M502/M500 и проверит EEPROM. После прошивки на карте вручную оставь EEPROM.DAT и нужные G-code, "
+                "а mksLite.bin / mksLite.CUR удали."
+            )
+            self._post("files-status", result)
+            self._post("log", result)
+            self._post("info", result)
 
         self._run_task("Заливка прошивки", task)
 
+    def create_eeprom_via_printer(self) -> None:
+        if not messagebox.askyesno(
+            "Little Hands",
+            "Попробовать создать EEPROM через принтер командами M502/M500?\n"
+            "После этого проверь наличие EEPROM.DAT на карте вручную.",
+        ):
+            return
+
+        self.files_status_var.set("Создаю EEPROM через M502/M500 ...")
+
+        def task() -> None:
+            out = sdtool.run_commands(
+                self._port(),
+                self._baud(),
+                ["M502", "M500", "M21"],
+                settle_after_each=0.5,
+                final_wait=1.5,
+                read_seconds=3.0,
+            )
+            self._post("metrics", ("m503", sdtool.query_command(self._port(), self._baud(), "M503", wait_before_read=0.5, read_seconds=2.0)))
+            msg = (
+                "Команды M502/M500 отправлены. Проверь наличие EEPROM.DAT на карте вручную. "
+                "Если эта прошивка не показывает файл в списке SD, ориентируйся на успешный ответ Settings Stored."
+            )
+            if "Settings Stored" in out:
+                self.eeprom_confirmed = True
+            self._post("files-status", msg)
+            self._post("log", (out.strip() + "\n" + msg).strip())
+            self._post("info", msg)
+
+        self._run_task("Создание EEPROM", task)
+
     def _selected_sd_path(self) -> str | None:
-        selection = self.sd_listbox.curselection()
+        display = self._selected_sd_display()
+        if not display:
+            return None
+        return self.sd_display_to_path.get(display, display)
+
+    def _selected_print_sd_path(self) -> str | None:
+        selection = self.sd_print_listbox.curselection()
         if not selection:
             return None
-        display = self.sd_listbox.get(selection[0])
+        display = self.sd_print_listbox.get(selection[0])
         if display == "(empty)":
             return None
         return self.sd_display_to_path.get(display, display)
 
     def start_selected_print(self) -> None:
-        path = self._selected_sd_path()
+        path = self._selected_print_sd_path()
         if not path:
-            messagebox.showerror("K9 Control Center", "Выбери файл на SD.")
+            messagebox.showerror("K9 Control Center", "Выбери файл в секции 'Файлы для печати'.")
             return
 
         def task() -> None:
@@ -1586,6 +1972,8 @@ class K9ControlCenter:
             self.current_print_file = path
             self.current_print_start_ts = time.time()
             self.current_print_progress_pct = 0.0
+            self.print_state_restored_from_log = False
+            self.print_start_watchdog_alerted = False
             self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
             self._post("active-sd", f"Печатается: {path}")
             self._post("log", out.strip() or f"Печать запущена: {path}")
@@ -1595,9 +1983,9 @@ class K9ControlCenter:
         self._run_task("Запуск SD-печати", task)
 
     def start_selected_print_with_home(self) -> None:
-        path = self._selected_sd_path()
+        path = self._selected_print_sd_path()
         if not path:
-            messagebox.showerror("Little Hands", "Выбери файл на SD.")
+            messagebox.showerror("Little Hands", "Выбери файл в секции 'Файлы для печати'.")
             return
         if not self.session_zero_defined:
             messagebox.showerror("Little Hands", "Сначала выставь стартовую позу и нажми 'Запомнить старт'.")
@@ -1608,6 +1996,8 @@ class K9ControlCenter:
             self.current_print_file = path
             self.current_print_start_ts = time.time()
             self.current_print_progress_pct = 0.0
+            self.print_state_restored_from_log = False
+            self.print_start_watchdog_alerted = False
             self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
             self._post("active-sd", f"Печатается: {path}")
             self._post("log", out.strip() or f"Печать с SD запущена от сохранённого старта: {path}")
@@ -1615,6 +2005,59 @@ class K9ControlCenter:
             self.suppress_next_completion_chime = False
 
         self._run_task("Запуск печати с SD", task)
+
+    def _ensure_eeprom_present(self) -> bool:
+        if self.sd_has_eeprom:
+            return True
+
+        self._post("files-status", "EEPROM.DAT отсутствует -> пытаюсь инициализировать через M502/M500 ...")
+        self._post("log", "EEPROM.DAT отсутствует -> пытаюсь инициализировать через M502/M500 ...")
+        try:
+            out = sdtool.run_commands(
+                self._port(),
+                self._baud(),
+                ["M502", "M500", "M21"],
+                settle_after_each=0.5,
+                final_wait=1.5,
+                read_seconds=3.0,
+            )
+            self._post("metrics", ("m503", sdtool.query_command(self._port(), self._baud(), "M503", wait_before_read=0.5, read_seconds=2.0)))
+            for attempt in range(4):
+                if attempt:
+                    time.sleep(0.8)
+                files, status, _raw = sdtool.read_sd_listing(self._port(), self._baud())
+                if status == "ok":
+                    self._post("sd-files", files)
+                    lowered = [Path((entry.split()[0] if " " in entry else entry)).name.lower() for entry in files]
+                    if "eeprom.dat" in lowered:
+                        self.eeprom_confirmed = True
+                        self._post("files-status", "EEPROM.DAT создан. Теперь печать разрешена.")
+                        self._post("log", out.strip() or "EEPROM.DAT создан. Теперь печать разрешена.")
+                        return True
+            if "Settings Stored" in out:
+                self.eeprom_confirmed = True
+                files = self.sd_list[:] if self.sd_list else []
+                if files:
+                    lowered = [Path((entry.split()[0] if " " in entry else entry)).name.lower() for entry in files]
+                    self._update_sd_notice(lowered)
+                msg = "EEPROM сохранён командой M500. Файл может не отображаться в списке SD этой прошивки. Печать разрешена."
+                self._post("files-status", msg)
+                self._post("log", msg)
+                return True
+            msg = (
+                "EEPROM.DAT не создан. Печать заблокирована. Оставь SD в принтере, "
+                "выключи принтер по питанию на 5–10 секунд, включи снова и нажми 'Обновить список'."
+            )
+            self._post("files-status", msg)
+            self._post("log", msg)
+            self._post("info", msg)
+            return False
+        except Exception as exc:
+            msg = f"Не удалось инициализировать EEPROM.DAT: {exc}"
+            self._post("files-status", msg)
+            self._post("log", msg)
+            self._post("info", msg)
+            return False
 
     def pause_print(self) -> None:
         def task() -> None:
@@ -1630,13 +2073,70 @@ class K9ControlCenter:
 
         self._run_task("Продолжение печати", task)
 
+    def _clear_print_session_state(self, progress_label: str, progress_value: float = 0.0) -> None:
+        self.current_print_file = "-"
+        self.current_print_start_ts = None
+        self.current_print_progress_pct = None
+        self.print_state_restored_from_log = False
+        self.print_was_active = False
+        self.print_start_watchdog_alerted = False
+        self._post("active-sd", "Печатается: -")
+        self._post("progress", (progress_label, progress_value))
+        self._post("sd", "SD: idle")
+
     def stop_print(self) -> None:
         def task() -> None:
             self.suppress_next_completion_chime = True
-            out = sdtool.stop_sd_print(self._port(), self._baud())
-            self._post("log", out.strip() or "Стоп отправлен")
+            out = ""
+            error_text = None
+            try:
+                out = sdtool.stop_sd_print(self._port(), self._baud())
+            except Exception as exc:
+                error_text = str(exc)
+            finally:
+                self._clear_print_session_state("Print: stopped", 0.0)
+            if out.strip():
+                self._post("log", out.strip())
+            elif error_text:
+                self._post("log", f"Стоп отправлен локально, но принтер ответил неуверенно: {error_text}")
+            else:
+                self._post("log", "Стоп отправлен")
 
         self._run_task("Остановка печати", task)
+
+    def hard_stop(self) -> None:
+        if not messagebox.askyesno(
+            "Little Hands",
+            "Выполнить жёсткий стоп?\n"
+            "Будет отправлена остановка печати, снят нагрев, отключены моторы и сброшено состояние задания в приложении.",
+        ):
+            return
+
+        def task() -> None:
+            self.suppress_next_completion_chime = True
+            out = ""
+            error_text = None
+            try:
+                out = sdtool.run_commands(
+                    self._port(),
+                    self._baud(),
+                    ["M524", "M104 S0", "M140 S0", "M107", "M400", "M18"],
+                    settle_after_each=0.4,
+                    final_wait=1.2,
+                    read_seconds=2.5,
+                )
+            except Exception as exc:
+                error_text = str(exc)
+            finally:
+                self._clear_print_session_state("Print: hard stop", 0.0)
+            if out.strip():
+                self._post("log", out.strip())
+            elif error_text:
+                self._post("log", f"Жёсткий стоп выполнен локально, но принтер ответил неуверенно: {error_text}")
+            else:
+                self._post("log", "Жёсткий стоп отправлен")
+
+        self._run_task("Жёсткий стоп", task)
 
     def delete_selected_file(self) -> None:
         path = self._selected_sd_path()
@@ -1690,18 +2190,20 @@ class K9ControlCenter:
 
     def jog_axis(self, axis: str, distance: float) -> None:
         feedrate = 1200 if axis == "Y" else 2400
+        display_axis = self._operator_axis_name(axis)
+        display_hint = self._operator_axis_hint(axis)
 
         def task() -> None:
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
-                ["G91", f"G1 {axis}{distance:.3f} F{feedrate}", "G90"],
+                ["M17", "G90", "M211 S0", "G91", f"G1 {axis}{distance:.3f} F{feedrate}", "G90"],
                 final_wait=0.8,
                 read_seconds=1.5,
             )
-            self._post("log", out.strip() or f"{axis} {'+' if distance >= 0 else ''}{distance:g}")
+            self._post("log", out.strip() or f"{display_axis} ({display_hint}) {'+' if distance >= 0 else ''}{distance:g}")
 
-        self._run_task(f"Сдвиг {axis}", task)
+        self._run_task(f"Сдвиг {display_axis}", task)
 
     def move_level_point(self, x: float, y: float) -> None:
         def task() -> None:
@@ -1780,6 +2282,15 @@ class K9ControlCenter:
                     )
             elif "Not SD printing" in sd:
                 self._post("progress", ("Print: idle", 0.0))
+                if self.print_state_restored_from_log and not self.print_was_active:
+                    self.current_print_file = "-"
+                    self.current_print_start_ts = None
+                    self.current_print_progress_pct = None
+                    self.print_state_restored_from_log = False
+                    self.print_start_watchdog_alerted = False
+                    self._post("active-sd", "Печатается: -")
+                    self._post("log", "Сбросил восстановленное из лога состояние печати: на текущем принтере активной SD-печати нет.")
+                    return
                 if self.print_was_active:
                     self.print_was_active = False
                     if self.suppress_next_completion_chime:
@@ -1793,8 +2304,87 @@ class K9ControlCenter:
                     self.current_print_file = "-"
                     self.current_print_start_ts = None
                     self.current_print_progress_pct = None
+                    self.print_state_restored_from_log = False
+                    self.print_start_watchdog_alerted = False
                     self._post("active-sd", "Печатается: -")
+                elif (
+                    self.current_print_file != "-"
+                    and self.current_print_start_ts
+                    and not self.print_start_watchdog_alerted
+                    and (now - self.current_print_start_ts) >= 20.0
+                ):
+                    self.print_start_watchdog_alerted = True
+                    msg = (
+                        "Печать была запущена, но принтер долго не начал двигаться. "
+                        "Проверь, что EEPROM сохранён корректно, и если нужно создай его через окно "
+                        "'Файлы и прошивка'."
+                    )
+                    self._post("log", msg)
+                    self._post("info", msg)
             self._post("metrics", ("m27", sd))
+            if (
+                self.pending_flash_finalize
+                and not self.flash_finalize_in_progress
+                and (now - self.flash_finalize_last_attempt_ts) >= 8.0
+                and "Not SD printing" in sd
+            ):
+                self.flash_finalize_in_progress = True
+                self.flash_finalize_last_attempt_ts = now
+                source_name = str(self.pending_flash_finalize.get("source_name", "mksLite.bin"))
+                self._post("files-status", f"Автозавершение прошивки: {source_name} -> выполняю M502/M500 ...")
+                self._post("log", f"Автозавершение прошивки: {source_name} -> выполняю M502/M500 ...")
+                try:
+                    out = sdtool.run_commands(
+                        self._port(),
+                        self._baud(),
+                        ["M502", "M500", "M21"],
+                        settle_after_each=0.5,
+                        final_wait=1.5,
+                        read_seconds=3.0,
+                    )
+                    self._post("metrics", ("m503", sdtool.query_command(self._port(), self._baud(), "M503", wait_before_read=0.5, read_seconds=2.0)))
+                    files: list[str] = []
+                    has_eeprom = False
+                    for attempt in range(4):
+                        if attempt:
+                            time.sleep(0.8)
+                        try:
+                            files, status, _raw = sdtool.read_sd_listing(self._port(), self._baud())
+                        except Exception:
+                            continue
+                        if status == "ok":
+                            self._post("sd-files", files)
+                        lowered = [Path((entry.split()[0] if " " in entry else entry)).name.lower() for entry in files]
+                        has_eeprom = "eeprom.dat" in lowered
+                        if has_eeprom:
+                            break
+                    if has_eeprom:
+                        self.eeprom_confirmed = True
+                        result = (
+                            f"Автозавершение прошивки выполнено: M502/M500 прошли, EEPROM.DAT создан "
+                            f"для {source_name}."
+                        )
+                    elif "Settings Stored" in out:
+                        self.eeprom_confirmed = True
+                        result = (
+                            f"Автозавершение прошивки выполнено: M502/M500 прошли для {source_name}. "
+                            "EEPROM сохранён, но файл не виден в списке SD этой прошивки."
+                        )
+                    else:
+                        result = (
+                            f"Автозавершение прошивки почти завершено: M502/M500 отправлены для {source_name}, "
+                            "но EEPROM.DAT ещё не виден. Надёжный следующий шаг: оставь SD в принтере, "
+                            "выключи принтер по питанию на 5–10 секунд, включи снова и нажми 'Обновить список'."
+                        )
+                    self._clear_pending_flash_finalize()
+                    self._post("files-status", result)
+                    self._post("log", (out.strip() + "\n" + result).strip())
+                    self._post("info", result)
+                except Exception as exc:
+                    self._post("files-status", f"Автозавершение прошивки не удалось: {exc}")
+                    self._post("log", f"Автозавершение прошивки не удалось: {exc}")
+                finally:
+                    self.flash_finalize_in_progress = False
         except Exception:
             pass
         finally:

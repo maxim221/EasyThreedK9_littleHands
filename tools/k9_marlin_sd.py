@@ -109,8 +109,6 @@ def detect_printer_port(baud: int = 115200, probe_timeout_s: float = 2.8) -> tup
                 meta["detected"] = "timeout"
         except Exception:
             continue
-    if ranked:
-        return ranked[0].get("device") or None, ranked
     return None, ranked
 
 
@@ -239,8 +237,22 @@ def parse_m20_listing(text: str) -> list[str]:
             continue
         if "End file list" in line:
             break
+        lower = line.lower()
         if not in_list:
-            continue
+            # Some K9 builds return file rows without "Begin file list".
+            looks_like_file = (
+                lower.endswith((".gco", ".gcode", ".g"))
+                or ".gco " in lower
+                or ".gcode" in lower
+                or lower.endswith("eeprom.dat")
+                or "eeprom.dat" in lower
+                or lower.endswith("mkslite.bin")
+                or "mkslite.bin" in lower
+                or lower.endswith("mkslite.cur")
+                or "mkslite.cur" in lower
+            )
+            if not looks_like_file:
+                continue
         if line == "ok":
             continue
         files.append(line)
@@ -248,24 +260,33 @@ def parse_m20_listing(text: str) -> list[str]:
 
 
 def read_sd_listing(port: str, baud: int, firmware_only: bool = False) -> tuple[list[str], str, str]:
-    with open_serial(port, baud) as ser:
-        sync_ascii(ser)
-        ensure_sd_ready(ser)
-        cmd = "M20 F" if firmware_only else "M20 L"
-        send_line(ser, cmd)
-        time.sleep(1.2)
-        out = read_for(ser, 2.0)
-    if "No SD card" in out or "No media" in out:
-        raise RuntimeError("Printer reports no SD card / no media")
-    files = parse_m20_listing(out)
-    if "Begin file list" in out:
-        return files, "ok", out
-    lowered = out.lower()
-    if "busy" in lowered or "processing" in lowered or "sd printing byte" in lowered:
-        return [], "busy", out
-    if not out.strip():
-        return [], "unavailable", out
-    return files, "unavailable", out
+    commands = ["M20 F"] if firmware_only else ["M20 L", "M20"]
+    last_out = ""
+    last_status = "unavailable"
+
+    for cmd in commands:
+        for _attempt in range(2):
+            with open_serial(port, baud) as ser:
+                sync_ascii(ser)
+                ensure_sd_ready(ser)
+                send_line(ser, cmd)
+                time.sleep(1.2)
+                out = read_for(ser, 2.0)
+            last_out = out
+            if "No SD card" in out or "No media" in out:
+                raise RuntimeError("Printer reports no SD card / no media")
+            files = parse_m20_listing(out)
+            if "Begin file list" in out or ("End file list" in out and files) or files:
+                return files, "ok", out
+            lowered = out.lower()
+            if "busy" in lowered or "processing" in lowered or "sd printing byte" in lowered:
+                return [], "busy", out
+            last_status = "unavailable"
+            time.sleep(0.3)
+
+    if not last_out.strip():
+        return [], "unavailable", last_out
+    return [], last_status, last_out
 
 
 def list_files(port: str, baud: int, firmware_only: bool = False) -> list[str]:
@@ -420,7 +441,14 @@ def pause_sd_print(port: str, baud: int) -> str:
 
 
 def stop_sd_print(port: str, baud: int) -> str:
-    return query_command(port, baud, "M524", wait_before_read=0.6, read_seconds=1.5)
+    return run_commands(
+        port,
+        baud,
+        ["M524", "M104 S0", "M140 S0", "M107", "M400"],
+        settle_after_each=0.4,
+        final_wait=1.2,
+        read_seconds=2.5,
+    )
 
 
 def resume_sd_print(port: str, baud: int) -> str:
