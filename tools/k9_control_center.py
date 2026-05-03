@@ -169,7 +169,9 @@ class K9ControlCenter:
         self.temp_var = tk.StringVar(value="Hotend: ? / ? C")
         self.sd_var = tk.StringVar(value="SD: unknown")
         self.fw_var = tk.StringVar(value="")
-        self.progress_var = tk.StringVar(value="Print: idle")
+        self.progress_var = tk.StringVar(value="Печать: простой")
+        self.print_start_var = tk.StringVar(value="Старт: -")
+        self.print_eta_var = tk.StringVar(value="ETA: -")
         self.busy_var = tk.StringVar(value="USB: idle")
         self.header_marquee_var = tk.StringVar(value="")
         self.selected_sd_var = tk.StringVar(value="Выбрано на SD: -")
@@ -177,7 +179,7 @@ class K9ControlCenter:
         self.sd_notice_var = tk.StringVar(value="")
         self.files_status_var = tk.StringVar(value="Выбери G-code или прошивку.")
         self.step_var = tk.DoubleVar(value=5.0)
-        self.melody_on_complete_var = tk.BooleanVar(value=True)
+        self.computer_melody_on_complete_var = tk.BooleanVar(value=True)
 
         self.sd_list: list[str] = []
         self.sd_print_files: list[str] = []
@@ -834,14 +836,16 @@ class K9ControlCenter:
         btn = ttk.Button(actions, text="Экспорт Cura", command=self.export_cura_bundle)
         btn.grid(row=0, column=3, padx=3, sticky="ew")
         self.action_widgets.append(btn)
-        btn = ttk.Button(actions, text="Мелодия", command=self.play_melody_button)
+        btn = ttk.Button(actions, text="Звук ПК", command=self.play_computer_melody_button)
         btn.grid(row=0, column=4, padx=3, sticky="ew")
         self.action_widgets.append(btn)
 
         substatus = ttk.Frame(top_left)
         substatus.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         substatus.columnconfigure(0, weight=1)
-        ttk.Checkbutton(substatus, text="Мелодия после печати", variable=self.melody_on_complete_var).grid(row=0, column=0, sticky="w")
+        toggles = ttk.Frame(substatus)
+        toggles.grid(row=0, column=0, sticky="ew")
+        ttk.Checkbutton(toggles, text="Звук окончания печати ПК", variable=self.computer_melody_on_complete_var).pack(side="left")
         self.progress_wrap = tk.Frame(substatus, bd=0, highlightthickness=0)
         self.progress_wrap.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         self.progress_wrap.columnconfigure(0, weight=1)
@@ -889,24 +893,26 @@ class K9ControlCenter:
         sd_frame = ttk.LabelFrame(self.left_split, text="Файлы на SD принтера", padding=8)
         sd_frame.columnconfigure(0, weight=1)
         sd_frame.columnconfigure(1, weight=0)
-        sd_frame.rowconfigure(4, weight=1)
+        sd_frame.rowconfigure(6, weight=1)
 
         ttk.Label(sd_frame, textvariable=self.selected_sd_var).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(sd_frame, textvariable=self.active_sd_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        ttk.Label(sd_frame, textvariable=self.print_start_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        ttk.Label(sd_frame, textvariable=self.print_eta_var).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.sd_notice_label = tk.Label(sd_frame, textvariable=self.sd_notice_var, anchor="w", justify="left", wraplength=320)
-        self.sd_notice_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.sd_notice_label.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
-        ttk.Label(sd_frame, text="Файлы для печати").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(sd_frame, text="Файлы для печати").grid(row=5, column=0, sticky="w", pady=(6, 0))
         self.sd_print_listbox = tk.Listbox(sd_frame, height=4, exportselection=False)
-        self.sd_print_listbox.grid(row=4, column=0, sticky="nsew", pady=(4, 0))
+        self.sd_print_listbox.grid(row=6, column=0, sticky="nsew", pady=(4, 0))
         self.sd_print_listbox.bind("<Double-1>", lambda _event: self.start_selected_print_with_home())
         self.sd_print_listbox.bind("<<ListboxSelect>>", lambda _event: self._on_sd_listbox_select("print"))
         sd_print_scroll = ttk.Scrollbar(sd_frame, orient="vertical", command=self.sd_print_listbox.yview)
-        sd_print_scroll.grid(row=4, column=1, sticky="ns", pady=(4, 0))
+        sd_print_scroll.grid(row=6, column=1, sticky="ns", pady=(4, 0))
         self.sd_print_listbox.configure(yscrollcommand=sd_print_scroll.set)
 
         buttons = ttk.Frame(sd_frame)
-        buttons.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        buttons.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         for idx in range(3):
             buttons.columnconfigure(idx, weight=1)
         ttk.Button(buttons, text="Обновить список", command=self.refresh_sd_files).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
@@ -991,6 +997,17 @@ class K9ControlCenter:
         self.views.select(self.log_frame)
 
     def log(self, message: str) -> None:
+        cleaned_lines: list[str] = []
+        for raw_line in str(message).splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.lower() == "ok":
+                continue
+            cleaned_lines.append(line)
+        if not cleaned_lines:
+            return
+        message = "\n".join(cleaned_lines)
         timestamp = time.strftime("%H:%M:%S")
         line = f"{timestamp} {message}"
         self.log_text.configure(state="normal")
@@ -1113,24 +1130,26 @@ class K9ControlCenter:
         fw_line = self.last_fw_identity or "-"
         if self.current_print_start_ts:
             start_line = f"Старт печати: {time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))}"
+            self.print_start_var.set(f"Старт: {time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))}")
         else:
             start_line = "Старт печати: -"
+            self.print_start_var.set("Старт: -")
         eta_line = "Окончание: -"
+        self.print_eta_var.set("ETA: -")
         if self.current_print_start_ts and self.current_print_progress_pct and self.current_print_progress_pct > 0.1:
             elapsed = max(1.0, now - self.current_print_start_ts)
             total_est = elapsed / (self.current_print_progress_pct / 100.0)
             eta_ts = self.current_print_start_ts + total_est
             eta_line = f"Окончание: ~{time.strftime('%H:%M:%S', time.localtime(eta_ts))}"
+            self.print_eta_var.set(f"ETA: ~{time.strftime('%H:%M:%S', time.localtime(eta_ts))}")
 
         lines = [
             temp_line,
             heater_line,
             f"SD: {self.last_sd_summary}",
             f"Возраст SD-статуса: {sd_age}",
-            f"Печать: {self.progress_var.get()}",
+            self.progress_var.get(),
             f"Файл: {self.current_print_file}",
-            start_line,
-            eta_line,
             f"Позиция: {pos_line}",
             f"Старт сохранён: {zero_line}",
             f"Прошивка: {fw_line}",
@@ -1605,9 +1624,9 @@ class K9ControlCenter:
         manual_path.write_text(MANUAL_TEXT + "\n", encoding="utf-8")
         self.log(f"Экспорт Cura готов: {target_root} ({copied} файлов)")
 
-    def play_melody_button(self) -> None:
+    def play_computer_melody_button(self) -> None:
         self._play_completion_melody()
-        self.log("Тестовая мелодия проиграна")
+        self.log("Тестовая мелодия на компьютере проиграна")
 
     def _play_completion_melody(self) -> None:
         if shutil.which("paplay"):
@@ -1621,6 +1640,25 @@ class K9ControlCenter:
                 return
         for delay_ms in (0, 180, 420):
             self.root.after(delay_ms, self.root.bell)
+
+    def _run_printer_completion_sequence(self) -> str:
+        # Natural print completion: lift the head a little and present the part.
+        commands = [
+            "M17",
+            "G91",
+            "G1 Z20 F600",
+            "G1 Y20 F900",
+            "G90",
+            "M400",
+        ]
+        return sdtool.run_commands(
+            self._port(),
+            self._baud(),
+            commands,
+            settle_after_each=0.15,
+            final_wait=0.6,
+            read_seconds=2.5,
+        )
 
     def _run_task(self, label: str, func, *, require_port: bool = True) -> None:
         if require_port and not self._port():
@@ -1881,7 +1919,7 @@ class K9ControlCenter:
             self.current_print_file = dest
             self._post("active-sd", f"Печатается: {dest}")
             self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {dest}")
-            self._post("progress", ("Print: started", 0.0))
+            self._post("progress", ("Печать: старт", 0.0))
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2094,7 +2132,7 @@ class K9ControlCenter:
             except Exception as exc:
                 error_text = str(exc)
             finally:
-                self._clear_print_session_state("Print: stopped", 0.0)
+                self._clear_print_session_state("Печать: остановлена", 0.0)
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
@@ -2128,7 +2166,7 @@ class K9ControlCenter:
             except Exception as exc:
                 error_text = str(exc)
             finally:
-                self._clear_print_session_state("Print: hard stop", 0.0)
+                self._clear_print_session_state("Печать: жёсткий стоп", 0.0)
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
@@ -2274,14 +2312,14 @@ class K9ControlCenter:
                     self._post("active-sd", f"Печатается: {self.current_print_file}")
                 else:
                     self._post("active-sd", "Печатается: идёт печать (имя не восстановлено)")
-                self._post("progress", (f"Print: {pct:.1f}% ({done}/{total})", pct))
+                self._post("progress", (f"Печать: {pct:.1f}% ({done}/{total})", pct))
                 if now - self.last_telemetry_log_ts >= 5.0 and current_temp is not None and target_temp is not None:
                     self.last_telemetry_log_ts = now
                     self._append_ring_log(
                         f"{time.strftime('%H:%M:%S')} TELEMETRY file={self.current_print_file} progress={pct:.1f}% temp={current_temp:.2f}/{target_temp:.2f} sd=\"{summary}\""
                     )
             elif "Not SD printing" in sd:
-                self._post("progress", ("Print: idle", 0.0))
+                self._post("progress", ("Печать: простой", 0.0))
                 if self.print_state_restored_from_log and not self.print_was_active:
                     self.current_print_file = "-"
                     self.current_print_start_ts = None
@@ -2293,11 +2331,24 @@ class K9ControlCenter:
                     return
                 if self.print_was_active:
                     self.print_was_active = False
+                    completion_move_result = ""
+                    computer_melody_enabled = bool(self.computer_melody_on_complete_var.get())
+                    if not self.suppress_next_completion_chime:
+                        try:
+                            completion_move_result = self._run_printer_completion_sequence().strip()
+                        except Exception as exc:
+                            self._post("log", f"Пост-обработка после печати не удалась: {exc}")
                     if self.suppress_next_completion_chime:
                         self.suppress_next_completion_chime = False
-                    elif self.melody_on_complete_var.get():
-                        self._post("melody", None)
-                        self._post("log", "Печать завершена: проигрываю мелодию")
+                    else:
+                        if computer_melody_enabled:
+                            self._post("melody", None)
+                        if completion_move_result:
+                            self._post("log", completion_move_result)
+                        if computer_melody_enabled:
+                            self._post("log", "Печать завершена: стол выдвинут, голова поднята, проиграна мелодия на компьютере")
+                        else:
+                            self._post("log", "Печать завершена: стол выдвинут, голова поднята")
                     self._append_ring_log(
                         f"{time.strftime('%H:%M:%S')} PRINT_END file={self.current_print_file} temp={current_temp if current_temp is not None else '?'}"
                     )

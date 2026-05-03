@@ -1550,3 +1550,9 @@ After each test print, append:
     - firmware `LH v4 YZSwap AutoFan45 FAN1 Z600 E1040`
     - Cura machine `lilHands K9 warm mat`
     - Cura profile `codex - K9 warm mat cautious`
+- 2026-05-03: final UI cleanup for the current operator workflow:
+  - removed the experimental stepper-melody feature from `Little Hands`
+  - left only the computer completion sound as an optional end-of-print notification
+  - restored `Печать: ...` inside the progress bar
+  - moved `Старт` and `ETA` into the `Файлы на SD принтера` block so active print metadata stays next to file selection / SD controls
+  - removed redundant duplicate start / ETA lines from `Параметры в реальном времени`
