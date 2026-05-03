@@ -1556,3 +1556,11 @@ After each test print, append:
   - restored `Печать: ...` inside the progress bar
   - moved `Старт` and `ETA` into the `Файлы на SD принтера` block so active print metadata stays next to file selection / SD controls
   - removed redundant duplicate start / ETA lines from `Параметры в реальном времени`
+- 2026-05-03: added two practical safety rules to `Little Hands` for the second K9 workflow:
+  - local G-code upload is now blocked if the file looks wrong for the current manual-zero K9 baseline
+    - explicit `G28` in the startup section is treated as unsafe
+    - `TARGET_MACHINE.NAME:Unknown` is treated as suspicious and the user is told to re-slice on `lilHands K9 warm mat`
+  - after a naturally observed print completion, `Little Hands` now reminds the operator to:
+    - remove the printed part
+    - press `К старту`
+    - then press `Запомнить старт` if the pose still matches the expected start pose

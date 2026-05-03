@@ -1697,6 +1697,7 @@ class K9ControlCenter:
                 self.files_window.deiconify()
                 self.files_window.lift()
                 self.files_window.focus_force()
+            self._warn_if_gcode_looks_wrong(Path(path))
 
     def prepare_gcode(self) -> None:
         source = Path(self.local_gcode_var.get().strip()).expanduser()
@@ -1710,6 +1711,59 @@ class K9ControlCenter:
             self.log("Предупреждение: для текущего baseline нужен обычный Cura G-code, не старый _k9xz remap.")
         else:
             self.log("Baseline использует обычный Cura G-code: auto-fan FAN1 + физический swap Y/Z + запуск от сохранённого 0.")
+
+    def _inspect_gcode_file(self, source: Path) -> dict[str, object]:
+        info: dict[str, object] = {
+            "has_g28": False,
+            "target_machine_unknown": False,
+            "start_gcode_comment": "",
+        }
+        try:
+            lines = source.read_text(encoding="utf-8", errors="replace").splitlines()[:120]
+        except Exception:
+            return info
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(";TARGET_MACHINE.NAME:Unknown"):
+                info["target_machine_unknown"] = True
+            if stripped.startswith("; Little Hands"):
+                info["start_gcode_comment"] = stripped
+            if not stripped or stripped.startswith(";"):
+                continue
+            code = stripped.split(";", 1)[0].strip().upper()
+            if code.startswith("G28"):
+                info["has_g28"] = True
+        return info
+
+    def _warn_if_gcode_looks_wrong(self, source: Path) -> None:
+        info = self._inspect_gcode_file(source)
+        if info.get("has_g28"):
+            self.log(
+                "Предупреждение: выбранный G-code содержит G28. Для K9 с Little Hands такой файл опасен: "
+                "принтер после 'К старту' не должен делать обычный home."
+            )
+        elif info.get("target_machine_unknown"):
+            self.log(
+                "Предупреждение: G-code выглядит старым или слайсился не на машине 'lilHands K9 warm mat' "
+                "(TARGET_MACHINE.NAME:Unknown)."
+            )
+
+    def _validate_gcode_for_current_k9(self, source: Path) -> tuple[bool, str]:
+        info = self._inspect_gcode_file(source)
+        if info.get("has_g28"):
+            return (
+                False,
+                "Этот G-code содержит G28 в стартовых командах. Для текущего K9 это неверно: "
+                "принтер уже ставится в старт через 'К старту', а обычный home потом ломает запуск. "
+                "Переслайсь модель на машине 'lilHands K9 warm mat' и профиле 'codex - K9 warm mat cautious'.",
+            )
+        if info.get("target_machine_unknown"):
+            return (
+                False,
+                "Этот G-code выглядит старым или был слайсен не на 'lilHands K9 warm mat' "
+                "(TARGET_MACHINE.NAME:Unknown). Переслайсь модель заново и залей новый файл.",
+            )
+        return True, ""
 
     def pick_firmware(self) -> None:
         path = filedialog.askopenfilename(
@@ -1862,6 +1916,11 @@ class K9ControlCenter:
         if not source.is_file():
             messagebox.showerror("K9 Control Center", "Выбери существующий G-code файл.")
             return
+        ok, reason = self._validate_gcode_for_current_k9(source)
+        if not ok:
+            messagebox.showerror("Little Hands", reason)
+            self.log(reason)
+            return
         dest = self.dest_name_var.get().strip() or source.name
         size_mib = source.stat().st_size / (1024 * 1024)
 
@@ -1892,6 +1951,11 @@ class K9ControlCenter:
         source = Path(self.local_gcode_var.get().strip()).expanduser().resolve()
         if not source.is_file():
             messagebox.showerror("Little Hands", "Выбери существующий G-code файл.")
+            return
+        ok, reason = self._validate_gcode_for_current_k9(source)
+        if not ok:
+            messagebox.showerror("Little Hands", reason)
+            self.log(reason)
             return
         dest = (self.dest_name_var.get().strip() or sdtool.make_sd_name(source.name))
         self.dest_name_var.set(dest)
@@ -2349,6 +2413,14 @@ class K9ControlCenter:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята, проиграна мелодия на компьютере")
                         else:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята")
+                        self._post(
+                            "info",
+                            "Печать завершена.\n\n"
+                            "1. Сними модель со стола.\n"
+                            "2. Нажми 'К старту'.\n"
+                            "3. Если поза совпала со стартовой, нажми 'Запомнить старт'.\n\n"
+                            "Так у тебя останется валидный старт для следующей печати."
+                        )
                     self._append_ring_log(
                         f"{time.strftime('%H:%M:%S')} PRINT_END file={self.current_print_file} temp={current_temp if current_temp is not None else '?'}"
                     )
