@@ -1460,6 +1460,7 @@ class K9ControlCenter:
             pass
 
     def _populate_files_firmware_container(self, parent) -> None:
+        lang = self.lang_var.get().strip() or "ru"
         for child in parent.winfo_children():
             child.destroy()
         self.files_window_content = parent
@@ -1470,34 +1471,34 @@ class K9ControlCenter:
         self.files_gcode_label = ttk.Label(parent, text="G-code")
         self.files_gcode_label.grid(row=0, column=0, sticky="w")
         ttk.Entry(parent, textvariable=self.local_gcode_var).grid(row=0, column=1, columnspan=2, sticky="ew", padx=4)
-        self.pick_gcode_button = ttk.Button(parent, text="Выбрать", command=self.pick_gcode)
+        self.pick_gcode_button = ttk.Button(parent, text=self._t("pick_gcode"), command=self.pick_gcode)
         self.pick_gcode_button.grid(row=0, column=3, padx=4, sticky="ew")
         self.action_widgets.append(self.pick_gcode_button)
 
-        self.sd_name_label = ttk.Label(parent, text="Имя на SD")
+        self.sd_name_label = ttk.Label(parent, text=self._t("sd_name"))
         self.sd_name_label.grid(row=1, column=0, sticky="w")
         ttk.Entry(parent, textvariable=self.dest_name_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=4)
-        self.upload_gcode_button = ttk.Button(parent, text="Залить G-code", command=self.upload_gcode)
+        self.upload_gcode_button = ttk.Button(parent, text=self._t("upload_gcode"), command=self.upload_gcode)
         self.upload_gcode_button.grid(row=1, column=3, padx=4, sticky="ew")
         self.action_widgets.append(self.upload_gcode_button)
 
-        self.upload_and_start_button = ttk.Button(parent, text="Залить и старт", command=self.upload_and_start_gcode)
+        self.upload_and_start_button = ttk.Button(parent, text=self._t("upload_and_start"), command=self.upload_and_start_gcode)
         self.upload_and_start_button.grid(row=2, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
         self.action_widgets.append(self.upload_and_start_button)
 
         ttk.Separator(parent, orient="horizontal").grid(row=3, column=0, columnspan=4, sticky="ew", pady=8)
-        self.firmware_label = ttk.Label(parent, text="Прошивка")
+        self.firmware_label = ttk.Label(parent, text=self._t("firmware"))
         self.firmware_label.grid(row=4, column=0, sticky="w")
         ttk.Entry(parent, textvariable=self.firmware_var).grid(row=4, column=1, columnspan=2, sticky="ew", padx=4)
-        self.pick_firmware_button = ttk.Button(parent, text="Выбрать", command=self.pick_firmware)
+        self.pick_firmware_button = ttk.Button(parent, text=self._t("pick_gcode"), command=self.pick_firmware)
         self.pick_firmware_button.grid(row=4, column=3, padx=4, sticky="ew")
         self.action_widgets.append(self.pick_firmware_button)
 
-        self.create_eeprom_button = ttk.Button(parent, text="Создать EEPROM.DAT", command=self.create_eeprom_via_printer)
+        self.create_eeprom_button = ttk.Button(parent, text=self._t("create_eeprom"), command=self.create_eeprom_via_printer)
         self.create_eeprom_button.grid(row=5, column=1, padx=4, pady=(4, 0), sticky="ew")
         self.action_widgets.append(self.create_eeprom_button)
 
-        self.flash_firmware_button = ttk.Button(parent, text="Залить прошивку", command=self.flash_firmware)
+        self.flash_firmware_button = ttk.Button(parent, text=self._t("flash_firmware"), command=self.flash_firmware)
         self.flash_firmware_button.grid(row=5, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
         self.action_widgets.append(self.flash_firmware_button)
 
