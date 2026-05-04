@@ -1965,10 +1965,12 @@ class K9ControlCenter:
         # Natural print completion: lift the head a little and present the part.
         commands = [
             "M17",
+            "G90",
+            "M211 S0",
             "G91",
             "G1 Z20 F600",
-            "G1 Y20 F900",
             "G90",
+            "G1 Y95 F900",
             "M400",
         ]
         return sdtool.run_commands(
