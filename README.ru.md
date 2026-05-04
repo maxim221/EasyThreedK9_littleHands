@@ -39,6 +39,10 @@ Little Hands — это Linux-приложение для управления �
   - [README.ru.md](README.ru.md)
   - [Установка на Linux / Raspberry Pi](docs/INSTALL_LINUX.ru.md)
   - [Принтер и прошивка](docs/PRINTER_AND_FIRMWARE.ru.md)
+- 中文:
+  - [README.zh.md](README.zh.md)
+  - [Linux / Raspberry Pi 安装](docs/INSTALL_LINUX.zh.md)
+  - [打印机与固件说明](docs/PRINTER_AND_FIRMWARE.zh.md)
 
 ## Какая Конфигурация Сейчас Поддерживается
 

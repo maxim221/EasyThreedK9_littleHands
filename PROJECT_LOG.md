@@ -1619,5 +1619,25 @@ After each test print, append:
     - current `LH v4` baseline
 - Publishing note:
   - local docs and repo content are now prepared for a public GitHub repository
-  - local `git remote` is still unset
+  - local `origin` now points to:
+    - `https://github.com/maxim221/EasyThreedK9_littleHands.git`
   - current `gh auth status` for account `maxim221` reports an invalid token, so actual remote push may still need re-authentication before publication
+
+## 2026-05-04 UI Language Toggle And Chinese Docs
+
+- Added a visible language selector in `Little Hands`:
+  - `RU`
+  - `EN`
+  - `中文`
+- The selector now updates the main visible interface elements:
+  - top action buttons
+  - major section titles
+  - manual window text
+  - files/firmware window labels
+  - key SD labels such as selected file / active print / start time
+- Added Chinese public docs:
+  - `README.zh.md`
+  - `docs/INSTALL_LINUX.zh.md`
+  - `docs/PRINTER_AND_FIRMWARE.zh.md`
+- `README.md` and `README.ru.md` now link to all three language variants.
+- Verified that `Little Hands` still launches after the localization changes.

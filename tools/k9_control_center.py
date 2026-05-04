@@ -161,6 +161,85 @@ CURA_EXPORT_PATTERNS = [
     "extruders/*.extruder.cfg",
 ]
 DISCONNECTED_PORT_LABEL = "— не подключаться —"
+LANG_CHOICES = [("RU", "ru"), ("EN", "en"), ("中文", "zh")]
+
+MANUAL_TEXTS = {
+    "ru": MANUAL_TEXT,
+    "en": textwrap.dedent(
+        """
+        Little Hands baseline printing mode
+
+        Current working hardware setup
+        - Firmware: LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin
+        - Fan: the only fan is connected to FAN1 and works as the hotend auto-fan
+          below 45C = off, above 45C = on
+        - External hotbed / warm mat is not controlled by the printer firmware
+        - Effective operator motion:
+          X = printhead left / right
+          Y = printhead up / down
+          Z = bed in the print plane
+
+        Fixed print home
+        - X fully left
+        - Z bed fully back / away from the operator
+        - Y nozzle touching the bed
+        - This pose is the print zero for the current power-on session
+        - Cura start G-code uses G92 and treats this pose as X0 Y0 Z0 in the
+          operator-facing Little Hands convention
+        - Do not use plain G28 in the normal print workflow
+
+        Normal workflow
+        1. Slice in Cura on the validated machine/profile.
+        2. Upload G-code to SD from this app or copy it by card.
+        3. Move the printer into the fixed print-start pose.
+        4. Press "Запомнить старт" to save this pose as print zero.
+        5. Use "К старту" to return to this saved zero.
+        6. Use "Старт печати" to return to the saved zero and then send M24.
+
+        Diagnostics
+        - This printer does not have a reliable standard Marlin endstop-based home.
+        - "Запомнить старт" stores the current physical pose as print zero for this session.
+        - "К старту" returns to that stored print zero.
+        - After a failed start, the safest recovery is usually a printer power cycle.
+        """
+    ).strip(),
+    "zh": textwrap.dedent(
+        """
+        Little Hands 当前基线打印模式
+
+        当前可工作的硬件配置
+        - 固件：LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin
+        - 风扇：唯一风扇接在 FAN1，上端热端 45C 以上自动开启，以下关闭
+        - 外部热床 / 保温垫不由打印机固件控制
+        - 面向操作者的运动定义：
+          X = 喷头左右
+          Y = 喷头上下
+          Z = 平台前后
+
+        固定打印起点
+        - X 最左
+        - Z 平台最靠后 / 远离操作者
+        - Y 喷嘴刚好接触床面
+        - 这个姿态作为当前上电会话中的打印零点
+        - Cura 起始 G-code 使用 G92，并按 Little Hands 的操作者坐标把它当作 X0 Y0 Z0
+        - 正常打印流程不要使用普通 G28
+
+        正常流程
+        1. 在已验证的 Cura 机器/配置上切片。
+        2. 通过本程序上传 G-code 到 SD，或手动拷卡。
+        3. 将打印机移动到固定起始姿态。
+        4. 点击“Запомнить старт”保存当前零点。
+        5. 点击“К старту”返回该零点。
+        6. 点击“Старт печати”回到零点并发送 M24。
+
+        诊断说明
+        - 这台打印机没有可靠的标准 Marlin 限位回零。
+        - “Запомнить старт”会把当前物理姿态设为本次会话的打印零点。
+        - “К старту”会回到这个零点。
+        - 如果启动失败，最稳妥的恢复方式通常还是断电重启打印机。
+        """
+    ).strip(),
+}
 
 
 class K9ControlCenter:
@@ -178,6 +257,8 @@ class K9ControlCenter:
 
         self.port_var = tk.StringVar(value="/dev/ttyUSB0")
         self.port_display_var = tk.StringVar(value="/dev/ttyUSB0")
+        self.lang_var = tk.StringVar(value=str(self.ui_state.get("language", "ru")))
+        self.lang_display_var = tk.StringVar()
         self.local_gcode_var = tk.StringVar()
         self.dest_name_var = tk.StringVar(value="MODEL.GCO")
         self.firmware_var = tk.StringVar(value=str(DEFAULT_FIRMWARE))
@@ -240,6 +321,10 @@ class K9ControlCenter:
             self.pending_flash_finalize = None
         self.flash_finalize_in_progress = False
         self.flash_finalize_last_attempt_ts = 0.0
+        self.files_window_content: ttk.LabelFrame | None = None
+        self.files_window_status_label: tk.Label | None = None
+        self.manual_window: tk.Toplevel | None = None
+        self.manual_text_widget: ScrolledText | None = None
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         GUI_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -248,9 +333,10 @@ class K9ControlCenter:
         self._build_ui()
         if self.pending_flash_finalize:
             source_name = str(self.pending_flash_finalize.get("source_name", "mksLite.bin"))
-            self.files_status_var.set(
-                f"Ожидаю перезапуск принтера после прошивки {source_name}. Потом автоматически выполню M502/M500."
-            )
+            self.files_status_var.set(self._t("files_status_flash_pending").format(source=source_name))
+        else:
+            self.files_status_var.set(self._t("choose_gcode_or_firmware"))
+        self._apply_language()
         self._apply_theme()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(150, self._drain_events)
@@ -366,7 +452,7 @@ class K9ControlCenter:
                 last_end = me.group(4).strip()
         if last_active and last_active != "-" and last_active != last_end:
             self.current_print_file = last_active
-            self.active_sd_var.set(f"Печатается: {last_active}")
+            self.active_sd_var.set(self._format_label_value("active_sd", last_active))
             self.current_print_start_ts = last_start_ts or first_active_telem_ts
             self.current_print_progress_pct = last_progress_pct
             self.print_state_restored_from_log = True
@@ -384,6 +470,7 @@ class K9ControlCenter:
 
     def _save_ui_state(self) -> None:
         state: dict[str, object] = {"geometry": self.root.winfo_geometry()}
+        state["language"] = self.lang_var.get().strip() or "ru"
         if self.pending_flash_finalize:
             state["pending_flash_finalize"] = self.pending_flash_finalize
         try:
@@ -391,6 +478,107 @@ class K9ControlCenter:
             state["selected_view"] = "log" if str(current) == str(self.log_frame) else "metrics"
         except Exception:
             pass
+
+    def _t(self, key: str) -> str:
+        lang = self.lang_var.get().strip() or "ru"
+        table = {
+            "language": {"ru": "Язык", "en": "Language", "zh": "语言"},
+            "find": {"ru": "Найти", "en": "Find", "zh": "查找"},
+            "disconnect": {"ru": "Откл.", "en": "Off", "zh": "断开"},
+            "files_and_firmware": {"ru": "Файлы и прошивка", "en": "Files && Firmware", "zh": "文件和固件"},
+            "manual": {"ru": "Manual", "en": "Manual", "zh": "说明"},
+            "reset_usb": {"ru": "Сброс USB", "en": "Reset USB", "zh": "重置 USB"},
+            "export_cura": {"ru": "Экспорт Cura", "en": "Export Cura", "zh": "导出 Cura"},
+            "sound_pc_short": {"ru": "Звук ПК", "en": "PC sound", "zh": "电脑提示音"},
+            "sound_pc_complete": {"ru": "Звук окончания печати ПК", "en": "PC completion sound", "zh": "打印完成电脑提示音"},
+            "temp_graph": {"ru": "Температура hotend", "en": "Hotend temperature", "zh": "热端温度"},
+            "live_params": {"ru": "Параметры в реальном времени", "en": "Realtime parameters", "zh": "实时参数"},
+            "sd_files": {"ru": "Файлы на SD принтера", "en": "Printer SD files", "zh": "打印机 SD 文件"},
+            "printable_files": {"ru": "Файлы для печати", "en": "Printable files", "zh": "可打印文件"},
+            "refresh_list": {"ru": "Обновить список", "en": "Refresh list", "zh": "刷新列表"},
+            "start_print": {"ru": "Старт печати", "en": "Start print", "zh": "开始打印"},
+            "delete": {"ru": "Удалить", "en": "Delete", "zh": "删除"},
+            "pause": {"ru": "Пауза", "en": "Pause", "zh": "暂停"},
+            "resume": {"ru": "Продолжить", "en": "Resume", "zh": "继续"},
+            "stop": {"ru": "Стоп", "en": "Stop", "zh": "停止"},
+            "manual_controls": {"ru": "Ручное управление", "en": "Manual control", "zh": "手动控制"},
+            "save_start": {"ru": "Запомнить старт", "en": "Save start", "zh": "保存起点"},
+            "go_start": {"ru": "К старту", "en": "Go to start", "zh": "回到起点"},
+            "motors_off": {"ru": "Моторы выкл", "en": "Motors off", "zh": "关闭电机"},
+            "step": {"ru": "Шаг", "en": "Step", "zh": "步长"},
+            "head_left": {"ru": "Голова влево", "en": "Head left", "zh": "喷头左移"},
+            "head_right": {"ru": "Голова вправо", "en": "Head right", "zh": "喷头右移"},
+            "bed_away": {"ru": "Стол от себя", "en": "Bed away", "zh": "平台后移"},
+            "bed_toward": {"ru": "Стол к себе", "en": "Bed toward", "zh": "平台前移"},
+            "head_down": {"ru": "Голова вниз", "en": "Head down", "zh": "喷头下移"},
+            "head_up": {"ru": "Голова вверх", "en": "Head up", "zh": "喷头上移"},
+            "hard_stop": {"ru": "Жёсткий стоп", "en": "Hard stop", "zh": "强制停止"},
+            "bed_level": {"ru": "Калибровка стола", "en": "Bed leveling", "zh": "平台调平"},
+            "level_points": {"ru": "Точки X/Y", "en": "X/Y points", "zh": "X/Y 点位"},
+            "journal": {"ru": "Журнал", "en": "Journal", "zh": "日志"},
+            "usb_metrics": {"ru": "USB-метрики", "en": "USB metrics", "zh": "USB 指标"},
+            "capture_metrics": {"ru": "Снять все метрики", "en": "Capture all metrics", "zh": "抓取全部指标"},
+            "save_log": {"ru": "Сохранить лог", "en": "Save log", "zh": "保存日志"},
+            "pick_gcode": {"ru": "Выбрать", "en": "Choose", "zh": "选择"},
+            "gcode": {"ru": "G-code", "en": "G-code", "zh": "G-code"},
+            "sd_name": {"ru": "Имя на SD", "en": "Name on SD", "zh": "SD 文件名"},
+            "upload_gcode": {"ru": "Залить G-code", "en": "Upload G-code", "zh": "上传 G-code"},
+            "upload_and_start": {"ru": "Залить и старт", "en": "Upload && start", "zh": "上传并开始"},
+            "firmware": {"ru": "Прошивка", "en": "Firmware", "zh": "固件"},
+            "create_eeprom": {"ru": "Создать EEPROM.DAT", "en": "Create EEPROM.DAT", "zh": "创建 EEPROM.DAT"},
+            "flash_firmware": {"ru": "Залить прошивку", "en": "Flash firmware", "zh": "写入固件"},
+            "files_window_title": {"ru": "Little Hands — Файлы и прошивка", "en": "Little Hands — Files and Firmware", "zh": "Little Hands — 文件和固件"},
+            "manual_title": {"ru": "Little Hands Manual", "en": "Little Hands Manual", "zh": "Little Hands 使用说明"},
+            "wait_m105": {"ru": "Жду первый ответ M105", "en": "Waiting for first M105 reply", "zh": "等待第一个 M105 响应"},
+            "selected_sd": {"ru": "Выбрано на SD", "en": "Selected on SD", "zh": "SD 已选择"},
+            "active_sd": {"ru": "Печатается", "en": "Printing", "zh": "正在打印"},
+            "start_time": {"ru": "Старт", "en": "Start", "zh": "开始时间"},
+            "choose_gcode_or_firmware": {"ru": "Выбери G-code или прошивку.", "en": "Choose a G-code file or firmware.", "zh": "请选择 G-code 或固件文件。"},
+            "sd_empty": {"ru": "SD-карта читается, но список файлов пуст.", "en": "The SD card is readable, but the file list is empty.", "zh": "SD 卡可读取，但文件列表为空。"},
+            "progress_idle": {"ru": "Печать: простой", "en": "Print: idle", "zh": "打印：空闲"},
+            "files_status_flash_pending": {
+                "ru": "Ожидаю перезапуск принтера после прошивки {source}. Потом автоматически выполню M502/M500.",
+                "en": "Waiting for printer reboot after flashing {source}. Then M502/M500 will run automatically.",
+                "zh": "正在等待打印机在刷写 {source} 后重启，随后会自动执行 M502/M500。",
+            },
+            "not_connected": {"ru": "— не подключаться —", "en": "— do not connect —", "zh": "— 不连接 —"},
+        }
+        return table.get(key, {}).get(lang, table.get(key, {}).get("ru", key))
+
+    def _format_label_value(self, key: str, value: str) -> str:
+        return f"{self._t(key)}: {value}"
+
+    def _refresh_translated_strings(self) -> None:
+        self.progress_var.set(self._t("progress_idle") if self.progress_var.get().startswith(("Печать: простой", "Print: idle", "打印：空闲")) else self.progress_var.get())
+        self.selected_sd_var.set(self._format_label_value("selected_sd", self._selected_sd_path() or "-"))
+        active_raw = self.current_print_file if self.current_print_file != "-" else "-"
+        if self.active_sd_var.get().endswith("(имя не восстановлено)"):
+            suffix = {
+                "ru": "идёт печать (имя не восстановлено)",
+                "en": "printing (name not recovered)",
+                "zh": "正在打印（文件名未恢复）",
+            }[self.lang_var.get() or "ru"]
+            self.active_sd_var.set(self._format_label_value("active_sd", suffix))
+        else:
+            self.active_sd_var.set(self._format_label_value("active_sd", active_raw))
+        if self.current_print_start_ts:
+            self.print_start_var.set(self._format_label_value("start_time", time.strftime("%H:%M:%S", time.localtime(self.current_print_start_ts))))
+        else:
+            self.print_start_var.set(self._format_label_value("start_time", "-"))
+        if not self.files_status_var.get() or self.files_status_var.get() == "Выбери G-code или прошивку.":
+            self.files_status_var.set(self._t("choose_gcode_or_firmware"))
+        if self.pending_flash_finalize:
+            source_name = str(self.pending_flash_finalize.get("source_name", "mksLite.bin"))
+            self.files_status_var.set(self._t("files_status_flash_pending").format(source=source_name))
+
+    def _on_language_selected(self, _event=None) -> None:
+        display = self.lang_display_var.get().strip()
+        for label, code in LANG_CHOICES:
+            if label == display:
+                self.lang_var.set(code)
+                break
+        self._apply_language()
+        self._save_ui_state()
         try:
             state["main_sash"] = int(self.main_pane.sashpos(0))
         except Exception:
@@ -505,7 +693,7 @@ class K9ControlCenter:
                 y = bottom - int(plot_h * frac)
                 c.create_line(left, y, right, y, fill="#22372d")
                 c.create_text(18, y, text=label, fill=colors["muted"], font=("DejaVu Sans", 8))
-            c.create_text(width // 2, height // 2, text="Жду первый ответ M105", fill=colors["muted"], font=("DejaVu Sans", 10))
+            c.create_text(width // 2, height // 2, text=self._t("wait_m105"), fill=colors["muted"], font=("DejaVu Sans", 10))
             return
 
         now = time.time()
@@ -821,8 +1009,9 @@ class K9ControlCenter:
 
         conn = ttk.Frame(top_left)
         conn.grid(row=0, column=0, sticky="ew")
-        conn.columnconfigure(4, weight=1)
-        ttk.Label(conn, text="Port").grid(row=0, column=0, sticky="w")
+        conn.columnconfigure(6, weight=1)
+        self.port_label = ttk.Label(conn, text="Port")
+        self.port_label.grid(row=0, column=0, sticky="w")
         self.port_combo = ttk.Combobox(conn, textvariable=self.port_display_var, width=28, state="readonly")
         self.port_combo.grid(row=0, column=1, padx=(4, 6), sticky="ew")
         self.port_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_port_selected())
@@ -830,8 +1019,14 @@ class K9ControlCenter:
         self.find_port_button.grid(row=0, column=2, padx=(0, 8), sticky="ew")
         self.disconnect_port_button = ttk.Button(conn, text="Откл.", command=self.disconnect_port)
         self.disconnect_port_button.grid(row=0, column=3, padx=(0, 8), sticky="ew")
+        self.lang_label = ttk.Label(conn, text="Язык")
+        self.lang_label.grid(row=0, column=4, sticky="w", padx=(0, 4))
+        self.lang_combo = ttk.Combobox(conn, textvariable=self.lang_display_var, width=6, state="readonly")
+        self.lang_combo["values"] = [label for label, _code in LANG_CHOICES]
+        self.lang_combo.grid(row=0, column=5, padx=(0, 8), sticky="ew")
+        self.lang_combo.bind("<<ComboboxSelected>>", self._on_language_selected)
         self.temp_status_label = tk.Label(conn, textvariable=self.header_marquee_var, anchor="w", padx=6)
-        self.temp_status_label.grid(row=0, column=4, padx=(12, 0), sticky="ew")
+        self.temp_status_label.grid(row=0, column=6, padx=(12, 0), sticky="ew")
 
         self.files_window: tk.Toplevel | None = None
 
@@ -839,28 +1034,29 @@ class K9ControlCenter:
         actions.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         for idx in range(5):
             actions.columnconfigure(idx, weight=1)
-        btn = ttk.Button(actions, text="Файлы и прошивка", command=self.show_files_firmware_window)
-        btn.grid(row=0, column=0, padx=3, sticky="ew")
-        self.action_widgets.append(btn)
-        btn = ttk.Button(actions, text="Manual", command=self.show_manual)
-        btn.grid(row=0, column=1, padx=3, sticky="ew")
-        self.action_widgets.append(btn)
-        btn = ttk.Button(actions, text="Сброс USB", command=self.reset_usb_session)
-        btn.grid(row=0, column=2, padx=3, sticky="ew")
-        self.action_widgets.append(btn)
-        btn = ttk.Button(actions, text="Экспорт Cura", command=self.export_cura_bundle)
-        btn.grid(row=0, column=3, padx=3, sticky="ew")
-        self.action_widgets.append(btn)
-        btn = ttk.Button(actions, text="Звук ПК", command=self.play_computer_melody_button)
-        btn.grid(row=0, column=4, padx=3, sticky="ew")
-        self.action_widgets.append(btn)
+        self.files_fw_button = ttk.Button(actions, text="Файлы и прошивка", command=self.show_files_firmware_window)
+        self.files_fw_button.grid(row=0, column=0, padx=3, sticky="ew")
+        self.action_widgets.append(self.files_fw_button)
+        self.manual_button = ttk.Button(actions, text="Manual", command=self.show_manual)
+        self.manual_button.grid(row=0, column=1, padx=3, sticky="ew")
+        self.action_widgets.append(self.manual_button)
+        self.reset_usb_button = ttk.Button(actions, text="Сброс USB", command=self.reset_usb_session)
+        self.reset_usb_button.grid(row=0, column=2, padx=3, sticky="ew")
+        self.action_widgets.append(self.reset_usb_button)
+        self.export_cura_button = ttk.Button(actions, text="Экспорт Cura", command=self.export_cura_bundle)
+        self.export_cura_button.grid(row=0, column=3, padx=3, sticky="ew")
+        self.action_widgets.append(self.export_cura_button)
+        self.pc_sound_button = ttk.Button(actions, text="Звук ПК", command=self.play_computer_melody_button)
+        self.pc_sound_button.grid(row=0, column=4, padx=3, sticky="ew")
+        self.action_widgets.append(self.pc_sound_button)
 
         substatus = ttk.Frame(top_left)
         substatus.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         substatus.columnconfigure(0, weight=1)
         toggles = ttk.Frame(substatus)
         toggles.grid(row=0, column=0, sticky="ew")
-        ttk.Checkbutton(toggles, text="Звук окончания печати ПК", variable=self.computer_melody_on_complete_var).pack(side="left")
+        self.pc_sound_check = ttk.Checkbutton(toggles, text="Звук окончания печати ПК", variable=self.computer_melody_on_complete_var)
+        self.pc_sound_check.pack(side="left")
         self.progress_wrap = tk.Frame(substatus, bd=0, highlightthickness=0)
         self.progress_wrap.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         self.progress_wrap.columnconfigure(0, weight=1)
@@ -889,7 +1085,8 @@ class K9ControlCenter:
         graph.columnconfigure(0, weight=1)
         graph.rowconfigure(1, weight=1)
         graph.grid_propagate(False)
-        ttk.Label(graph, text="Температура hotend").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self.temp_graph_label = ttk.Label(graph, text="Температура hotend")
+        self.temp_graph_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
         self.temp_canvas = tk.Canvas(graph, width=760, height=280, bd=0, highlightthickness=1)
         self.temp_canvas.grid(row=1, column=0, sticky="nsew")
         self.temp_canvas.bind("<Configure>", lambda _event: self._draw_temp_graph())
@@ -898,6 +1095,7 @@ class K9ControlCenter:
         self.left_split.grid(row=0, column=0, sticky="nsew")
 
         live_frame = ttk.LabelFrame(self.left_split, text="Параметры в реальном времени", padding=8)
+        self.live_frame = live_frame
         live_frame.columnconfigure(0, weight=1)
         live_frame.rowconfigure(0, weight=1)
 
@@ -906,6 +1104,7 @@ class K9ControlCenter:
         self.live_text.configure(state="disabled")
 
         sd_frame = ttk.LabelFrame(self.left_split, text="Файлы на SD принтера", padding=8)
+        self.sd_frame = sd_frame
         sd_frame.columnconfigure(0, weight=1)
         sd_frame.columnconfigure(1, weight=0)
         sd_frame.rowconfigure(6, weight=1)
@@ -916,7 +1115,8 @@ class K9ControlCenter:
         self.sd_notice_label = tk.Label(sd_frame, textvariable=self.sd_notice_var, anchor="w", justify="left", wraplength=320)
         self.sd_notice_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
-        ttk.Label(sd_frame, text="Файлы для печати").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        self.sd_printable_label = ttk.Label(sd_frame, text="Файлы для печати")
+        self.sd_printable_label.grid(row=4, column=0, sticky="w", pady=(6, 0))
         self.sd_print_listbox = tk.Listbox(sd_frame, height=4, exportselection=False)
         self.sd_print_listbox.grid(row=6, column=0, sticky="nsew", pady=(4, 0))
         self.sd_print_listbox.bind("<Double-1>", lambda _event: self.start_selected_print_with_home())
@@ -929,12 +1129,18 @@ class K9ControlCenter:
         buttons.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         for idx in range(3):
             buttons.columnconfigure(idx, weight=1)
-        ttk.Button(buttons, text="Обновить список", command=self.refresh_sd_files).grid(row=0, column=0, padx=3, pady=2, sticky="ew")
-        ttk.Button(buttons, text="Старт печати", command=self.start_selected_print_with_home).grid(row=0, column=1, padx=3, pady=2, sticky="ew")
-        ttk.Button(buttons, text="Удалить", command=self.delete_selected_file).grid(row=0, column=2, padx=3, pady=2, sticky="ew")
-        ttk.Button(buttons, text="Пауза", command=self.pause_print).grid(row=1, column=0, padx=3, pady=2, sticky="ew")
-        ttk.Button(buttons, text="Продолжить", command=self.resume_print).grid(row=1, column=1, padx=3, pady=2, sticky="ew")
-        ttk.Button(buttons, text="Стоп", command=self.stop_print).grid(row=1, column=2, padx=3, pady=2, sticky="ew")
+        self.refresh_sd_button = ttk.Button(buttons, text="Обновить список", command=self.refresh_sd_files)
+        self.refresh_sd_button.grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        self.start_print_button = ttk.Button(buttons, text="Старт печати", command=self.start_selected_print_with_home)
+        self.start_print_button.grid(row=0, column=1, padx=3, pady=2, sticky="ew")
+        self.delete_button = ttk.Button(buttons, text="Удалить", command=self.delete_selected_file)
+        self.delete_button.grid(row=0, column=2, padx=3, pady=2, sticky="ew")
+        self.pause_button = ttk.Button(buttons, text="Пауза", command=self.pause_print)
+        self.pause_button.grid(row=1, column=0, padx=3, pady=2, sticky="ew")
+        self.resume_button = ttk.Button(buttons, text="Продолжить", command=self.resume_print)
+        self.resume_button.grid(row=1, column=1, padx=3, pady=2, sticky="ew")
+        self.stop_button = ttk.Button(buttons, text="Стоп", command=self.stop_print)
+        self.stop_button.grid(row=1, column=2, padx=3, pady=2, sticky="ew")
         self.left_split.add(live_frame, stretch="always", minsize=180)
         self.left_split.add(sd_frame, stretch="always", minsize=120)
 
@@ -952,34 +1158,48 @@ class K9ControlCenter:
         controls.columnconfigure(1, weight=1)
 
         motion = ttk.LabelFrame(controls, text="Ручное управление", padding=6)
+        self.motion_frame = motion
         motion.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         for idx in range(4):
             motion.columnconfigure(idx, weight=1)
 
-        ttk.Button(motion, text="Запомнить старт", command=self.set_current_home_zero).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="К старту", command=self.go_print_home).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="Моторы выкл", command=self.motor_off).grid(row=0, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.save_start_button = ttk.Button(motion, text="Запомнить старт", command=self.set_current_home_zero)
+        self.save_start_button.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+        self.go_start_button = ttk.Button(motion, text="К старту", command=self.go_print_home)
+        self.go_start_button.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+        self.motors_off_button = ttk.Button(motion, text="Моторы выкл", command=self.motor_off)
+        self.motors_off_button.grid(row=0, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
 
-        ttk.Label(motion, text="Шаг").grid(row=1, column=0, sticky="w", pady=(2, 1))
+        self.step_label = ttk.Label(motion, text="Шаг")
+        self.step_label.grid(row=1, column=0, sticky="w", pady=(2, 1))
         step_box = ttk.Frame(motion)
         step_box.grid(row=1, column=1, columnspan=3, sticky="w", pady=(2, 1))
         for value in (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0):
             ttk.Radiobutton(step_box, text=str(value), value=value, variable=self.step_var).pack(side="left", padx=2)
 
-        ttk.Button(motion, text="Голова влево", command=lambda: self.jog_axis("X", -self.step_var.get())).grid(row=2, column=0, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="Голова вправо", command=lambda: self.jog_axis("X", self.step_var.get())).grid(row=2, column=1, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="Стол от себя", command=lambda: self.jog_axis("Y", -self.step_var.get())).grid(row=2, column=2, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="Стол к себе", command=lambda: self.jog_axis("Y", self.step_var.get())).grid(row=2, column=3, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="Голова вниз", command=lambda: self.jog_axis("Z", -self.step_var.get())).grid(row=3, column=0, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="Голова вверх", command=lambda: self.jog_axis("Z", self.step_var.get())).grid(row=3, column=1, padx=2, pady=2, sticky="ew")
-        ttk.Button(motion, text="Жёсткий стоп", command=self.hard_stop).grid(row=3, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.head_left_button = ttk.Button(motion, text="Голова влево", command=lambda: self.jog_axis("X", -self.step_var.get()))
+        self.head_left_button.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
+        self.head_right_button = ttk.Button(motion, text="Голова вправо", command=lambda: self.jog_axis("X", self.step_var.get()))
+        self.head_right_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
+        self.bed_away_button = ttk.Button(motion, text="Стол от себя", command=lambda: self.jog_axis("Y", -self.step_var.get()))
+        self.bed_away_button.grid(row=2, column=2, padx=2, pady=2, sticky="ew")
+        self.bed_toward_button = ttk.Button(motion, text="Стол к себе", command=lambda: self.jog_axis("Y", self.step_var.get()))
+        self.bed_toward_button.grid(row=2, column=3, padx=2, pady=2, sticky="ew")
+        self.head_down_button = ttk.Button(motion, text="Голова вниз", command=lambda: self.jog_axis("Z", -self.step_var.get()))
+        self.head_down_button.grid(row=3, column=0, padx=2, pady=2, sticky="ew")
+        self.head_up_button = ttk.Button(motion, text="Голова вверх", command=lambda: self.jog_axis("Z", self.step_var.get()))
+        self.head_up_button.grid(row=3, column=1, padx=2, pady=2, sticky="ew")
+        self.hard_stop_button = ttk.Button(motion, text="Жёсткий стоп", command=self.hard_stop)
+        self.hard_stop_button.grid(row=3, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
 
         level = ttk.LabelFrame(controls, text="Калибровка стола", padding=6)
+        self.level_frame = level
         level.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         for idx in range(3):
             level.columnconfigure(idx, weight=1)
 
-        ttk.Label(level, text="Точки X/Y").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+        self.level_points_label = ttk.Label(level, text="Точки X/Y")
+        self.level_points_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
         ttk.Button(level, text="ПЛ", command=lambda: self.move_level_point(5, 5)).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
         ttk.Button(level, text="Ц", command=lambda: self.move_level_point(45, 45)).grid(row=1, column=1, padx=2, pady=2, sticky="ew")
         ttk.Button(level, text="ПП", command=lambda: self.move_level_point(95, 5)).grid(row=1, column=2, padx=2, pady=2, sticky="ew")
@@ -994,8 +1214,10 @@ class K9ControlCenter:
         self.metrics_frame.rowconfigure(1, weight=1)
         metrics_buttons = ttk.Frame(self.metrics_frame)
         metrics_buttons.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        ttk.Button(metrics_buttons, text="Снять все метрики", command=self.refresh_metrics).pack(side="left")
-        ttk.Button(metrics_buttons, text="Сохранить лог", command=self.save_log_snapshot).pack(side="left", padx=(8, 0))
+        self.capture_metrics_button = ttk.Button(metrics_buttons, text="Снять все метрики", command=self.refresh_metrics)
+        self.capture_metrics_button.pack(side="left")
+        self.save_log_button = ttk.Button(metrics_buttons, text="Сохранить лог", command=self.save_log_snapshot)
+        self.save_log_button.pack(side="left", padx=(8, 0))
         self.metrics_text = ScrolledText(self.metrics_frame, wrap="word", height=18)
         self.metrics_text.grid(row=1, column=0, sticky="nsew")
         self.metrics_text.configure(state="disabled")
@@ -1009,6 +1231,64 @@ class K9ControlCenter:
         self.views.add(self.log_frame, text="Журнал")
         self.views.add(self.metrics_frame, text="USB-метрики")
         self.views.select(self.log_frame)
+
+    def _apply_language(self) -> None:
+        current_lang = self.lang_var.get().strip() or "ru"
+        display = next((label for label, code in LANG_CHOICES if code == current_lang), "RU")
+        self.lang_display_var.set(display)
+
+        self.lang_label.configure(text=self._t("language"))
+        self.find_port_button.configure(text=self._t("find"))
+        self.disconnect_port_button.configure(text=self._t("disconnect"))
+        self.files_fw_button.configure(text=self._t("files_and_firmware"))
+        self.manual_button.configure(text=self._t("manual"))
+        self.reset_usb_button.configure(text=self._t("reset_usb"))
+        self.export_cura_button.configure(text=self._t("export_cura"))
+        self.pc_sound_button.configure(text=self._t("sound_pc_short"))
+        self.pc_sound_check.configure(text=self._t("sound_pc_complete"))
+        self.temp_graph_label.configure(text=self._t("temp_graph"))
+        self.live_frame.configure(text=self._t("live_params"))
+        self.sd_frame.configure(text=self._t("sd_files"))
+        self.sd_printable_label.configure(text=self._t("printable_files"))
+        self.refresh_sd_button.configure(text=self._t("refresh_list"))
+        self.start_print_button.configure(text=self._t("start_print"))
+        self.delete_button.configure(text=self._t("delete"))
+        self.pause_button.configure(text=self._t("pause"))
+        self.resume_button.configure(text=self._t("resume"))
+        self.stop_button.configure(text=self._t("stop"))
+        self.motion_frame.configure(text=self._t("manual_controls"))
+        self.save_start_button.configure(text=self._t("save_start"))
+        self.go_start_button.configure(text=self._t("go_start"))
+        self.motors_off_button.configure(text=self._t("motors_off"))
+        self.step_label.configure(text=self._t("step"))
+        self.head_left_button.configure(text=self._t("head_left"))
+        self.head_right_button.configure(text=self._t("head_right"))
+        self.bed_away_button.configure(text=self._t("bed_away"))
+        self.bed_toward_button.configure(text=self._t("bed_toward"))
+        self.head_down_button.configure(text=self._t("head_down"))
+        self.head_up_button.configure(text=self._t("head_up"))
+        self.hard_stop_button.configure(text=self._t("hard_stop"))
+        self.level_frame.configure(text=self._t("bed_level"))
+        self.level_points_label.configure(text=self._t("level_points"))
+        self.capture_metrics_button.configure(text=self._t("capture_metrics"))
+        self.save_log_button.configure(text=self._t("save_log"))
+        self.views.tab(self.log_frame, text=self._t("journal"))
+        self.views.tab(self.metrics_frame, text=self._t("usb_metrics"))
+        if self.files_window and self.files_window.winfo_exists():
+            self.files_window.title(self._t("files_window_title"))
+        if self.files_window_content and self.files_window_content.winfo_exists():
+            self.files_window_content.configure(text=self._t("files_and_firmware"))
+            self._populate_files_firmware_container(self.files_window_content)
+        if self.manual_window and self.manual_window.winfo_exists():
+            self.manual_window.title(self._t("manual_title"))
+        if self.manual_text_widget and self.manual_text_widget.winfo_exists():
+            self.manual_text_widget.configure(state="normal")
+            self.manual_text_widget.delete("1.0", "end")
+            self.manual_text_widget.insert("1.0", MANUAL_TEXTS.get(current_lang, MANUAL_TEXT))
+            self.manual_text_widget.configure(state="disabled")
+        self._refresh_translated_strings()
+        if hasattr(self, "colors"):
+            self._draw_temp_graph()
 
     def log(self, message: str) -> None:
         cleaned_lines: list[str] = []
@@ -1128,37 +1408,37 @@ class K9ControlCenter:
 
     def _render_live_status(self) -> None:
         now = time.time()
+        lang = self.lang_var.get().strip() or "ru"
         if self.last_temp_current is None:
-            temp_line = "Hotend: нет данных"
-            age_line = "Возраст телеметрии: нет данных"
+            temp_line = {"ru": "Hotend: нет данных", "en": "Hotend: no data", "zh": "Hotend：无数据"}[lang]
+            age_line = {"ru": "Возраст телеметрии: нет данных", "en": "Telemetry age: no data", "zh": "遥测年龄：无数据"}[lang]
         else:
             stale = (now - self.last_temp_sample_ts) > 4.0
-            state = "устарели" if stale else "свежие"
+            state = {"ru": ("устарели" if stale else "свежие"), "en": ("stale" if stale else "fresh"), "zh": ("过期" if stale else "正常")}[lang]
             temp_line = f"Hotend: {self.last_temp_current:.2f} / {self.last_temp_target or 0.0:.2f} C"
-            age_line = f"Возраст телеметрии: {now - self.last_temp_sample_ts:.1f} c ({state})"
+            age_prefix = {"ru": "Возраст телеметрии", "en": "Telemetry age", "zh": "遥测年龄"}[lang]
+            age_line = f"{age_prefix}: {now - self.last_temp_sample_ts:.1f} c ({state})"
 
-        sd_age = f"{now - self.last_sd_sample_ts:.1f} c" if self.last_sd_sample_ts else "нет данных"
+        sd_age = f"{now - self.last_sd_sample_ts:.1f} c" if self.last_sd_sample_ts else {"ru": "нет данных", "en": "no data", "zh": "无数据"}[lang]
         heater_line = f"Heater PWM @: {self.last_heater_power if self.last_heater_power is not None else '?'}"
         pos_line = self.last_position_line
-        zero_line = "да" if self.session_zero_defined else "нет"
+        zero_line = {"ru": ("да" if self.session_zero_defined else "нет"), "en": ("yes" if self.session_zero_defined else "no"), "zh": ("是" if self.session_zero_defined else "否")}[lang]
         fw_line = self.last_fw_identity or "-"
         if self.current_print_start_ts:
-            start_line = f"Старт печати: {time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))}"
-            self.print_start_var.set(f"Старт: {time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))}")
+            self.print_start_var.set(self._format_label_value("start_time", time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))))
         else:
-            start_line = "Старт печати: -"
-            self.print_start_var.set("Старт: -")
+            self.print_start_var.set(self._format_label_value("start_time", "-"))
 
         lines = [
             temp_line,
             heater_line,
             f"SD: {self.last_sd_summary}",
-            f"Возраст SD-статуса: {sd_age}",
+            f"{ {'ru': 'Возраст SD-статуса', 'en': 'SD status age', 'zh': 'SD 状态年龄'}[lang] }: {sd_age}",
             self.progress_var.get(),
-            f"Файл: {self.current_print_file}",
-            f"Позиция: {pos_line}",
-            f"Старт сохранён: {zero_line}",
-            f"Прошивка: {fw_line}",
+            f"{ {'ru': 'Файл', 'en': 'File', 'zh': '文件'}[lang] }: {self.current_print_file}",
+            f"{ {'ru': 'Позиция', 'en': 'Position', 'zh': '位置'}[lang] }: {pos_line}",
+            f"{ {'ru': 'Старт сохранён', 'en': 'Start saved', 'zh': '起点已保存'}[lang] }: {zero_line}",
+            f"{ {'ru': 'Прошивка', 'en': 'Firmware', 'zh': '固件'}[lang] }: {fw_line}",
             age_line,
         ]
         rendered = "\n".join(lines)
@@ -1182,44 +1462,48 @@ class K9ControlCenter:
     def _populate_files_firmware_container(self, parent) -> None:
         for child in parent.winfo_children():
             child.destroy()
+        self.files_window_content = parent
         parent.columnconfigure(1, weight=1)
         parent.columnconfigure(2, minsize=110)
         parent.columnconfigure(3, minsize=110)
 
-        ttk.Label(parent, text="G-code").grid(row=0, column=0, sticky="w")
+        self.files_gcode_label = ttk.Label(parent, text="G-code")
+        self.files_gcode_label.grid(row=0, column=0, sticky="w")
         ttk.Entry(parent, textvariable=self.local_gcode_var).grid(row=0, column=1, columnspan=2, sticky="ew", padx=4)
-        btn = ttk.Button(parent, text="Выбрать", command=self.pick_gcode)
-        btn.grid(row=0, column=3, padx=4, sticky="ew")
-        self.action_widgets.append(btn)
+        self.pick_gcode_button = ttk.Button(parent, text="Выбрать", command=self.pick_gcode)
+        self.pick_gcode_button.grid(row=0, column=3, padx=4, sticky="ew")
+        self.action_widgets.append(self.pick_gcode_button)
 
-        ttk.Label(parent, text="Имя на SD").grid(row=1, column=0, sticky="w")
+        self.sd_name_label = ttk.Label(parent, text="Имя на SD")
+        self.sd_name_label.grid(row=1, column=0, sticky="w")
         ttk.Entry(parent, textvariable=self.dest_name_var).grid(row=1, column=1, columnspan=2, sticky="ew", padx=4)
-        btn = ttk.Button(parent, text="Залить G-code", command=self.upload_gcode)
-        btn.grid(row=1, column=3, padx=4, sticky="ew")
-        self.action_widgets.append(btn)
+        self.upload_gcode_button = ttk.Button(parent, text="Залить G-code", command=self.upload_gcode)
+        self.upload_gcode_button.grid(row=1, column=3, padx=4, sticky="ew")
+        self.action_widgets.append(self.upload_gcode_button)
 
-        btn = ttk.Button(parent, text="Залить и старт", command=self.upload_and_start_gcode)
-        btn.grid(row=2, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
-        self.action_widgets.append(btn)
+        self.upload_and_start_button = ttk.Button(parent, text="Залить и старт", command=self.upload_and_start_gcode)
+        self.upload_and_start_button.grid(row=2, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
+        self.action_widgets.append(self.upload_and_start_button)
 
         ttk.Separator(parent, orient="horizontal").grid(row=3, column=0, columnspan=4, sticky="ew", pady=8)
-        ttk.Label(parent, text="Прошивка").grid(row=4, column=0, sticky="w")
+        self.firmware_label = ttk.Label(parent, text="Прошивка")
+        self.firmware_label.grid(row=4, column=0, sticky="w")
         ttk.Entry(parent, textvariable=self.firmware_var).grid(row=4, column=1, columnspan=2, sticky="ew", padx=4)
-        btn = ttk.Button(parent, text="Выбрать", command=self.pick_firmware)
-        btn.grid(row=4, column=3, padx=4, sticky="ew")
-        self.action_widgets.append(btn)
+        self.pick_firmware_button = ttk.Button(parent, text="Выбрать", command=self.pick_firmware)
+        self.pick_firmware_button.grid(row=4, column=3, padx=4, sticky="ew")
+        self.action_widgets.append(self.pick_firmware_button)
 
-        btn = ttk.Button(parent, text="Создать EEPROM.DAT", command=self.create_eeprom_via_printer)
-        btn.grid(row=5, column=1, padx=4, pady=(4, 0), sticky="ew")
-        self.action_widgets.append(btn)
+        self.create_eeprom_button = ttk.Button(parent, text="Создать EEPROM.DAT", command=self.create_eeprom_via_printer)
+        self.create_eeprom_button.grid(row=5, column=1, padx=4, pady=(4, 0), sticky="ew")
+        self.action_widgets.append(self.create_eeprom_button)
 
-        btn = ttk.Button(parent, text="Залить прошивку", command=self.flash_firmware)
-        btn.grid(row=5, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
-        self.action_widgets.append(btn)
+        self.flash_firmware_button = ttk.Button(parent, text="Залить прошивку", command=self.flash_firmware)
+        self.flash_firmware_button.grid(row=5, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
+        self.action_widgets.append(self.flash_firmware_button)
 
-        status = tk.Label(parent, textvariable=self.files_status_var, anchor="w", justify="left", wraplength=700)
-        status.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 0))
-        status.configure(bg=self.colors["panel"], fg=self.colors["muted"], font=("DejaVu Sans", 9))
+        self.files_window_status_label = tk.Label(parent, textvariable=self.files_status_var, anchor="w", justify="left", wraplength=700)
+        self.files_window_status_label.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        self.files_window_status_label.configure(bg=self.colors["panel"], fg=self.colors["muted"], font=("DejaVu Sans", 9))
 
     def show_files_firmware_window(self) -> None:
         if self.files_window and self.files_window.winfo_exists():
@@ -1230,12 +1514,12 @@ class K9ControlCenter:
 
         win = tk.Toplevel(self.root)
         self.files_window = win
-        win.title("Little Hands — Файлы и прошивка")
+        win.title(self._t("files_window_title"))
         win.geometry("760x280")
         win.minsize(680, 240)
         win.configure(bg=self.colors["bg"])
 
-        frame = ttk.LabelFrame(win, text="Файлы и прошивка", padding=10)
+        frame = ttk.LabelFrame(win, text=self._t("files_and_firmware"), padding=10)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
         self._populate_files_firmware_container(frame)
 
@@ -1329,7 +1613,10 @@ class K9ControlCenter:
             elif kind == "sd-files":
                 self._apply_sd_files(payload)  # type: ignore[arg-type]
             elif kind == "active-sd":
-                self.active_sd_var.set(str(payload))
+                text = str(payload).strip()
+                if ":" in text:
+                    text = text.split(":", 1)[1].strip()
+                self.active_sd_var.set(self._format_label_value("active_sd", text or "-"))
             elif kind == "ports":
                 ports, detected = payload  # type: ignore[misc]
                 self._set_port_choices(list(ports), str(detected) if detected else None)
@@ -1407,8 +1694,8 @@ class K9ControlCenter:
         self.sd_print_listbox.delete(0, "end")
         if not files:
             self.sd_print_listbox.insert("end", "(empty)")
-            self.selected_sd_var.set("Выбрано на SD: -")
-            self.sd_notice_var.set("SD-карта читается, но список файлов пуст.")
+            self.selected_sd_var.set(self._format_label_value("selected_sd", "-"))
+            self.sd_notice_var.set(self._t("sd_empty"))
             return
 
         selected_print_index = None
@@ -1447,9 +1734,17 @@ class K9ControlCenter:
         has_cur = any(Path(path).name.lower() == "mkslite.cur" for path in lowered_paths)
         notes: list[str] = []
         if has_bin:
-            notes.append("На карте есть mksLite.bin: при следующем старте принтер может снова прошиться.")
+            notes.append({
+                "ru": "На карте есть mksLite.bin: при следующем старте принтер может снова прошиться.",
+                "en": "The card still contains mksLite.bin: the printer may flash again on the next boot.",
+                "zh": "卡上仍有 mksLite.bin：打印机下次启动时可能会再次刷机。",
+            }[self.lang_var.get().strip() or "ru"])
         elif has_cur:
-            notes.append("На карте есть mksLite.CUR: это след прошлой прошивки, обычно его можно удалить.")
+            notes.append({
+                "ru": "На карте есть mksLite.CUR: это след прошлой прошивки, обычно его можно удалить.",
+                "en": "The card contains mksLite.CUR: this is usually leftover from the last flash and can normally be removed.",
+                "zh": "卡上有 mksLite.CUR：这通常是上次刷机留下的文件，一般可以删除。",
+            }[self.lang_var.get().strip() or "ru"])
         self.sd_notice_var.set(" ".join(notes))
 
     def _on_sd_listbox_select(self, source: str) -> None:
@@ -1459,7 +1754,7 @@ class K9ControlCenter:
 
     def _sync_selected_sd_label(self) -> None:
         path = self._selected_sd_path()
-        self.selected_sd_var.set(f"Выбрано на SD: {path or '-'}")
+        self.selected_sd_var.set(self._format_label_value("selected_sd", path or "-"))
 
     def _selected_sd_display(self) -> str | None:
         print_sel = self.sd_print_listbox.curselection()
@@ -1499,12 +1794,13 @@ class K9ControlCenter:
         return f"{device} — {kind} — {desc}"
 
     def _set_port_choices(self, ports: list[dict[str, str]], preferred: str | None = None) -> None:
-        self.port_choices = [DISCONNECTED_PORT_LABEL] + [self._port_label(meta) for meta in ports if meta.get("device")]
+        disconnected_label = self._t("not_connected")
+        self.port_choices = [disconnected_label] + [self._port_label(meta) for meta in ports if meta.get("device")]
         self.port_combo["values"] = self.port_choices
 
         selected_device = preferred or self.port_var.get().strip()
         if not selected_device:
-            self.port_display_var.set(DISCONNECTED_PORT_LABEL)
+            self.port_display_var.set(disconnected_label)
             self.port_var.set("")
             return
         if selected_device:
@@ -1513,12 +1809,12 @@ class K9ControlCenter:
                     self.port_display_var.set(self._port_label(meta))
                     self.port_var.set(selected_device)
                     return
-        self.port_display_var.set(DISCONNECTED_PORT_LABEL)
+        self.port_display_var.set(disconnected_label)
         self.port_var.set("")
 
     def _on_port_selected(self) -> None:
         text = self.port_display_var.get().strip()
-        if text == DISCONNECTED_PORT_LABEL:
+        if text == self._t("not_connected"):
             self.disconnect_port(log_change=True)
             return
         device = text.split(" — ", 1)[0].strip() if text else ""
@@ -1528,7 +1824,7 @@ class K9ControlCenter:
 
     def disconnect_port(self, log_change: bool = False) -> None:
         self.port_var.set("")
-        self.port_display_var.set(DISCONNECTED_PORT_LABEL)
+        self.port_display_var.set(self._t("not_connected"))
         self.busy_var.set("USB: отключен")
         if log_change:
             self.log("Порт отключён. Автоопрос и команды принтера остановлены до выбора нового порта.")
@@ -1551,7 +1847,7 @@ class K9ControlCenter:
             self._tick_find_port_button()
         else:
             try:
-                self.find_port_button.configure(state="normal", text="Найти")
+                self.find_port_button.configure(state="normal", text=self._t("find"))
             except Exception:
                 pass
 
@@ -1559,7 +1855,8 @@ class K9ControlCenter:
         if not self.find_port_animating:
             return
         dots = "." * (self.find_port_anim_phase % 4)
-        label = "Ищу" + dots
+        base = {"ru": "Ищу", "en": "Finding", "zh": "查找中"}[self.lang_var.get().strip() or "ru"]
+        label = base + dots
         try:
             self.find_port_button.configure(text=label)
         except Exception:
@@ -1590,15 +1887,23 @@ class K9ControlCenter:
         return 115200
 
     def show_manual(self) -> None:
+        if self.manual_window and self.manual_window.winfo_exists():
+            self.manual_window.deiconify()
+            self.manual_window.lift()
+            self.manual_window.focus_force()
+            return
+
         win = tk.Toplevel(self.root)
-        win.title("Little Hands Manual")
+        self.manual_window = win
+        win.title(self._t("manual_title"))
         win.geometry("880x760")
         win.configure(bg=self.colors["bg"])
         frame = ttk.Frame(win, padding=10)
         frame.pack(fill="both", expand=True)
         text = ScrolledText(frame, wrap="word")
+        self.manual_text_widget = text
         text.pack(fill="both", expand=True)
-        text.insert("1.0", MANUAL_TEXT)
+        text.insert("1.0", MANUAL_TEXTS.get(self.lang_var.get().strip() or "ru", MANUAL_TEXT))
         text.configure(state="disabled")
         text.configure(
             bg=self.colors["field"],
@@ -1611,6 +1916,13 @@ class K9ControlCenter:
             relief="solid",
             borderwidth=1,
         )
+
+        def _on_close() -> None:
+            self.manual_window = None
+            self.manual_text_widget = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
 
     def export_cura_bundle(self) -> None:
         stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1804,7 +2116,11 @@ class K9ControlCenter:
         self.views.select(self.metrics_frame)
         self.metrics_text.configure(state="normal")
         self.metrics_text.delete("1.0", "end")
-        self.metrics_text.insert("1.0", "Собираю USB-метрики...\n")
+        self.metrics_text.insert("1.0", {
+            "ru": "Собираю USB-метрики...\n",
+            "en": "Collecting USB metrics...\n",
+            "zh": "正在收集 USB 指标...\n",
+        }[self.lang_var.get().strip() or "ru"])
         self.metrics_text.configure(state="disabled")
 
         def task() -> None:
