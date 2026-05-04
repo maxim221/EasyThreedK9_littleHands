@@ -1564,3 +1564,35 @@ After each test print, append:
     - remove the printed part
     - press `К старту`
     - then press `Запомнить старт` if the pose still matches the expected start pose
+
+## Windows Distribution Plan
+
+- Goal:
+  - prepare a future Windows build of `Little Hands` without starting packaging work yet
+
+- Expected packaging route:
+  - `PyInstaller` single-folder or one-file executable build
+
+- Likely already portable:
+  - `tkinter` GUI structure
+  - `pyserial`-based printer communication
+  - log saving, file dialogs, operator workflow
+
+- Platform-specific work to review before any build:
+  - serial port naming:
+    - Linux `/dev/ttyUSB*`
+    - Windows `COM*`
+  - sound notification implementation
+  - file/path handling and default save locations
+  - any Linux-only helper tooling or shell assumptions
+  - screenshot / window-inspection helpers must remain optional and non-critical
+
+- Future validation checklist for Windows:
+  - app starts on a clean Windows machine
+  - detects `CH340` / printer-like serial ports correctly
+  - does not confuse unrelated `FTDI` devices for the printer
+  - can save logs, open firmware/G-code files, and keep UI state
+  - can monitor temperatures and SD-print state over serial
+
+- Important rule:
+  - do not start Windows packaging until the current Linux K9 workflow is considered stable enough that porting effort will not duplicate churn

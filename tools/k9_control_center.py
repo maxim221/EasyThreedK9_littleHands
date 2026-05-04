@@ -171,7 +171,6 @@ class K9ControlCenter:
         self.fw_var = tk.StringVar(value="")
         self.progress_var = tk.StringVar(value="Печать: простой")
         self.print_start_var = tk.StringVar(value="Старт: -")
-        self.print_eta_var = tk.StringVar(value="ETA: -")
         self.busy_var = tk.StringVar(value="USB: idle")
         self.header_marquee_var = tk.StringVar(value="")
         self.selected_sd_var = tk.StringVar(value="Выбрано на SD: -")
@@ -215,6 +214,7 @@ class K9ControlCenter:
         self.last_position_line = "X:? Y:? Z:?"
         self.last_position_sample_ts = 0.0
         self.last_fw_query_ts = 0.0
+        self.last_poll_error_ts = 0.0
         self.header_marquee_source = ""
         self.header_marquee_offset = 0
         self.port_choices: list[str] = []
@@ -898,11 +898,10 @@ class K9ControlCenter:
         ttk.Label(sd_frame, textvariable=self.selected_sd_var).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(sd_frame, textvariable=self.active_sd_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         ttk.Label(sd_frame, textvariable=self.print_start_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
-        ttk.Label(sd_frame, textvariable=self.print_eta_var).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.sd_notice_label = tk.Label(sd_frame, textvariable=self.sd_notice_var, anchor="w", justify="left", wraplength=320)
-        self.sd_notice_label.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.sd_notice_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
-        ttk.Label(sd_frame, text="Файлы для печати").grid(row=5, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(sd_frame, text="Файлы для печати").grid(row=4, column=0, sticky="w", pady=(6, 0))
         self.sd_print_listbox = tk.Listbox(sd_frame, height=4, exportselection=False)
         self.sd_print_listbox.grid(row=6, column=0, sticky="nsew", pady=(4, 0))
         self.sd_print_listbox.bind("<Double-1>", lambda _event: self.start_selected_print_with_home())
@@ -1134,14 +1133,6 @@ class K9ControlCenter:
         else:
             start_line = "Старт печати: -"
             self.print_start_var.set("Старт: -")
-        eta_line = "Окончание: -"
-        self.print_eta_var.set("ETA: -")
-        if self.current_print_start_ts and self.current_print_progress_pct and self.current_print_progress_pct > 0.1:
-            elapsed = max(1.0, now - self.current_print_start_ts)
-            total_est = elapsed / (self.current_print_progress_pct / 100.0)
-            eta_ts = self.current_print_start_ts + total_est
-            eta_line = f"Окончание: ~{time.strftime('%H:%M:%S', time.localtime(eta_ts))}"
-            self.print_eta_var.set(f"ETA: ~{time.strftime('%H:%M:%S', time.localtime(eta_ts))}")
 
         lines = [
             temp_line,
@@ -2417,8 +2408,10 @@ class K9ControlCenter:
                             "info",
                             "Печать завершена.\n\n"
                             "1. Сними модель со стола.\n"
-                            "2. Нажми 'К старту'.\n"
-                            "3. Если поза совпала со стартовой, нажми 'Запомнить старт'.\n\n"
+                            "2. Выключи принтер по питанию на 5–10 секунд и включи снова.\n"
+                            "3. Выставь стартовую позу.\n"
+                            "4. Нажми 'К старту'.\n"
+                            "5. Если поза совпала со стартовой, нажми 'Запомнить старт'.\n\n"
                             "Так у тебя останется валидный старт для следующей печати."
                         )
                     self._append_ring_log(
@@ -2439,8 +2432,10 @@ class K9ControlCenter:
                     self.print_start_watchdog_alerted = True
                     msg = (
                         "Печать была запущена, но принтер долго не начал двигаться. "
-                        "Проверь, что EEPROM сохранён корректно, и если нужно создай его через окно "
-                        "'Файлы и прошивка'."
+                        "Если телеметрия замерла или слышны только щелчки, самый надёжный следующий шаг — "
+                        "выключить принтер по питанию на 5–10 секунд, включить снова, заново выставить стартовую "
+                        "позу и только потом повторить запуск. Также проверь, что EEPROM сохранён корректно, и если "
+                        "нужно создай его через окно 'Файлы и прошивка'."
                     )
                     self._post("log", msg)
                     self._post("info", msg)
@@ -2508,14 +2503,17 @@ class K9ControlCenter:
                     self._post("log", f"Автозавершение прошивки не удалось: {exc}")
                 finally:
                     self.flash_finalize_in_progress = False
-        except Exception:
-            pass
+        except Exception as exc:
+            now = time.time()
+            if (now - self.last_poll_error_ts) >= 5.0:
+                self.last_poll_error_ts = now
+                self._post("log", f"Опрос USB сорвался: {exc}")
         finally:
             self.serial_lock.release()
 
 
 def main() -> int:
-    root = tk.Tk()
+    root = tk.Tk(className="little-hands-control-center")
     app = K9ControlCenter(root)
     app.log("Little Hands готов. Baseline: auto-fan FAN1 45C, физический swap Y/Z, печать с SD от сохранённого старта.")
     app.log("Порт должен быть свободен от Cura и других мониторов.")
