@@ -46,7 +46,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 
 ## 当前支持的配置
 
-当前公开基线是“受保护的第二台 `K9`”。
+当前公开基线是一套经过验证的 `EasyThreeD K9` 配置：
 
 - 已验证打印机：`EasyThreeD K9`
 - 已验证主板家族：`ET4000+ / ET4000PLUS`
@@ -56,6 +56,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 - 已验证 Cura 配置：`codex - K9 warm mat cautious`
 
 不要假设任意一台 `K9` 都能直接照搬这个配置。
+不同 `K9` 机器在开发过程中已经表现出差异。
 
 ## Home 的工作方式
 
@@ -64,9 +65,9 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 Little Hands 使用的是 manual-zero 工作流：
 
 1. 把打印机移动到已知的打印起始姿态。
-2. 点击 `Запомнить старт`。
+2. 点击 `Save start`。
 3. 程序向打印机发送 `G92 X0 Y0 Z0`。
-4. `К старту` 会在当前干净会话中返回这个逻辑零点。
+4. `Go to start` 会在当前干净会话中返回这个逻辑零点。
 
 也就是说：
 
@@ -74,11 +75,11 @@ Little Hands 使用的是 manual-zero 工作流：
 - 如果打印启动失败，最稳妥的下一步通常是：
   - 打印机断电重启
   - 重新检查起始姿态
-  - 再次点击 `Запомнить старт`
+  - 再次点击 `Save start`
 
 ## 外部热床说明
 
-已验证的第二台打印机使用外部 warm mat / hotbed：
+已验证的公开基线使用外部 warm mat / hotbed：
 
 - 由独立外部供电加热
 - 不由打印机固件直接控制
@@ -104,4 +105,3 @@ python3 tools/k9_control_center.py
 ## 推荐固件
 
 - [`firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`](firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin)
-

@@ -6,13 +6,13 @@ This repository is currently documented for:
 
 - printer model: `EasyThreeD K9`
 - mainboard family: `ET4000+ / ET4000PLUS`
-- validated public baseline: the protected second `K9`
+- validated public baseline: `EasyThreeD K9` + `ET4000+ / ET4000PLUS`
 
 Important:
 
 - this is **not** a blanket claim that every `K9` is identical
 - different `K9` units already showed different behavior during development
-- the safe public baseline is the second protected printer with `LH v4`
+- the current safe public baseline uses `LH v4`
 - the safe claim here is the `ET4000+ / ET4000PLUS` board family; an exact silkscreen subrevision was not separately frozen in this public doc pack
 
 ## 2. Current Recommended Firmware
@@ -21,7 +21,7 @@ Use:
 
 - `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
 
-This build is the current public default because it matches the validated second K9:
+This build is the current public default because it matches the validated public K9 baseline:
 
 - explicit `LH` firmware label in `M115`
 - working `Little Hands` compatibility
@@ -48,7 +48,7 @@ That identity comes from the firmware itself through `M115`.
 
 ### Option A: through Little Hands
 
-1. Open `Файлы и прошивка`.
+1. Open `Files & Firmware`.
 2. Select:
    - `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
 3. Upload the firmware to the printer SD.
@@ -93,13 +93,13 @@ This project currently uses a `manual-zero` workflow, not a true endstop-based a
 That means:
 
 1. The operator moves the printer into a known physical start pose.
-2. `Запомнить старт` sets that pose as logical zero with:
+2. `Save start` sets that pose as logical zero with:
 
 ```gcode
 G92 X0 Y0 Z0
 ```
 
-3. `К старту` returns to that logical zero during a clean trusted session.
+3. `Go to start` returns to that logical zero during a clean trusted session.
 
 So:
 
@@ -109,7 +109,7 @@ So:
 
 ## 7. External Warm Bed / Hotbed
 
-The validated second printer uses an external heated bed / warm mat.
+The validated public baseline uses an external heated bed / warm mat.
 
 Important facts:
 
@@ -130,7 +130,7 @@ Safety note:
 
 ## 8. Cura Baseline
 
-For the current validated second K9:
+For the current validated public baseline:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
@@ -149,8 +149,8 @@ Re-slice when:
 4. Slice in the validated Cura machine/profile.
 5. Upload the G-code.
 6. Set the physical start pose.
-7. Press `Запомнить старт`.
-8. Press `К старту` and confirm it returns correctly.
+7. Press `Save start`.
+8. Press `Go to start` and confirm it returns correctly.
 9. Start printing from SD.
 
 ## 10. Recovery Rule
@@ -167,5 +167,5 @@ the current safest workflow is:
 1. stop the print
 2. power-cycle the printer
 3. re-check the start pose
-4. press `Запомнить старт`
+4. press `Save start`
 5. start again

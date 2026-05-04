@@ -105,8 +105,8 @@ MANUAL_TEXT = textwrap.dedent(
     - Fan: the only fan is connected to FAN1 and works as hotend auto-fan
       below 45C = off, above 45C = on
     - External hotbed / warm mat is not controlled by the printer firmware
-    - Motor routing on the validated second K9 behaves as Y/Z swapped relative
-      to stock operator naming
+    - Motor routing in the validated public K9 baseline behaves as Y/Z swapped
+      relative to stock operator naming
     - Effective motion:
       X = printhead left / right
       Y = printhead up / down
@@ -122,12 +122,12 @@ MANUAL_TEXT = textwrap.dedent(
     - Do not use plain G28 in normal print workflow
 
     Normal workflow
-    1. Slice in Cura normally. Do not use the old _k9xz remap file.
+    1. Slice in Cura on the validated machine/profile.
     2. Upload G-code to SD from this app or copy it by card.
     3. Move the printer into the fixed print-start pose.
-    4. Press "Запомнить старт" to save this pose as print zero.
-    5. Use "К старту" to return to this saved zero.
-    6. Use "Печать с SD" to return to the saved zero and then send M24.
+    4. Press "Save start" to save this pose as print zero.
+    5. Use "Go to start" to return to this saved zero.
+    6. Use "Start print" to return to the saved zero and then send M24.
 
     Bed leveling
     - Use the four corners and the center.
@@ -137,17 +137,17 @@ MANUAL_TEXT = textwrap.dedent(
 
     Diagnostics
     - This printer does not have a reliable standard Marlin endstop-based home.
-    - "Запомнить старт" stores the current physical pose as print zero for this session.
-    - "К старту" returns to that stored print zero.
-    - "Печать с SD" returns to that stored print zero and starts the selected SD file.
-    - "Сброс USB" pauses polling and reopens a clean short serial session without restarting the whole app.
-    - "Снять все метрики" dumps M115 / M503 / M114 / M105 / M27.
+    - "Save start" stores the current physical pose as print zero for this session.
+    - "Go to start" returns to that stored print zero.
+    - "Start print" returns to that stored print zero and starts the selected SD file.
+    - "Reset USB" pauses polling and reopens a clean short serial session without restarting the whole app.
+    - "Capture all metrics" dumps M115 / M503 / M114 / M105 / M27.
 
     Exports
-    - "Экспорт Cura" saves the current printer profiles and Cura settings into the project.
+    - "Export Cura" saves the current printer profiles and Cura settings into the project.
     - Runtime log folder: /home/maxim/draftCode/littleHands/monitor_logs/
     - Ring log file: /home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
-    - "Сохранить лог" saves a timestamped copy of the current runtime log into gui_exports.
+    - "Save log" saves a timestamped copy of the current runtime log into gui_exports.
     """
 ).strip()
 
@@ -192,14 +192,14 @@ MANUAL_TEXTS = {
         1. Slice in Cura on the validated machine/profile.
         2. Upload G-code to SD from this app or copy it by card.
         3. Move the printer into the fixed print-start pose.
-        4. Press "Запомнить старт" to save this pose as print zero.
-        5. Use "К старту" to return to this saved zero.
-        6. Use "Старт печати" to return to the saved zero and then send M24.
+        4. Press "Save start" to save this pose as print zero.
+        5. Use "Go to start" to return to this saved zero.
+        6. Use "Start print" to return to the saved zero and then send M24.
 
         Diagnostics
         - This printer does not have a reliable standard Marlin endstop-based home.
-        - "Запомнить старт" stores the current physical pose as print zero for this session.
-        - "К старту" returns to that stored print zero.
+        - "Save start" stores the current physical pose as print zero for this session.
+        - "Go to start" returns to that stored print zero.
         - After a failed start, the safest recovery is usually a printer power cycle.
         """
     ).strip(),
@@ -228,14 +228,14 @@ MANUAL_TEXTS = {
         1. 在已验证的 Cura 机器/配置上切片。
         2. 通过本程序上传 G-code 到 SD，或手动拷卡。
         3. 将打印机移动到固定起始姿态。
-        4. 点击“Запомнить старт”保存当前零点。
-        5. 点击“К старту”返回该零点。
-        6. 点击“Старт печати”回到零点并发送 M24。
+        4. 点击“Save start”保存当前零点。
+        5. 点击“Go to start”返回该零点。
+        6. 点击“Start print”回到零点并发送 M24。
 
         诊断说明
         - 这台打印机没有可靠的标准 Marlin 限位回零。
-        - “Запомнить старт”会把当前物理姿态设为本次会话的打印零点。
-        - “К старту”会回到这个零点。
+        - “Save start”会把当前物理姿态设为本次会话的打印零点。
+        - “Go to start”会回到这个零点。
         - 如果启动失败，最稳妥的恢复方式通常还是断电重启打印机。
         """
     ).strip(),
@@ -485,7 +485,7 @@ class K9ControlCenter:
             "language": {"ru": "Язык", "en": "Language", "zh": "语言"},
             "find": {"ru": "Найти", "en": "Find", "zh": "查找"},
             "disconnect": {"ru": "Откл.", "en": "Off", "zh": "断开"},
-            "files_and_firmware": {"ru": "Файлы и прошивка", "en": "Files && Firmware", "zh": "文件和固件"},
+            "files_and_firmware": {"ru": "Файлы и прошивка", "en": "Files & Firmware", "zh": "文件和固件"},
             "manual": {"ru": "Manual", "en": "Manual", "zh": "说明"},
             "reset_usb": {"ru": "Сброс USB", "en": "Reset USB", "zh": "重置 USB"},
             "export_cura": {"ru": "Экспорт Cura", "en": "Export Cura", "zh": "导出 Cura"},
@@ -523,7 +523,7 @@ class K9ControlCenter:
             "gcode": {"ru": "G-code", "en": "G-code", "zh": "G-code"},
             "sd_name": {"ru": "Имя на SD", "en": "Name on SD", "zh": "SD 文件名"},
             "upload_gcode": {"ru": "Залить G-code", "en": "Upload G-code", "zh": "上传 G-code"},
-            "upload_and_start": {"ru": "Залить и старт", "en": "Upload && start", "zh": "上传并开始"},
+            "upload_and_start": {"ru": "Залить и старт", "en": "Upload & start", "zh": "上传并开始"},
             "firmware": {"ru": "Прошивка", "en": "Firmware", "zh": "固件"},
             "create_eeprom": {"ru": "Создать EEPROM.DAT", "en": "Create EEPROM.DAT", "zh": "创建 EEPROM.DAT"},
             "flash_firmware": {"ru": "Залить прошивку", "en": "Flash firmware", "zh": "写入固件"},
@@ -1939,7 +1939,8 @@ class K9ControlCenter:
             messagebox.showerror("Little Hands", "Не удалось найти файлы Cura для экспорта.")
             return
         manual_path = target_root / "BASELINE_MANUAL.txt"
-        manual_path.write_text(MANUAL_TEXT + "\n", encoding="utf-8")
+        manual_text = MANUAL_TEXTS.get(self.lang_var.get().strip() or "ru", MANUAL_TEXT)
+        manual_path.write_text(manual_text + "\n", encoding="utf-8")
         self.log(f"Экспорт Cura готов: {target_root} ({copied} файлов)")
 
     def play_computer_melody_button(self) -> None:

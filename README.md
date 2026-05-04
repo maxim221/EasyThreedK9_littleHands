@@ -46,7 +46,7 @@ What is still rough:
 
 ## Current Supported Setup
 
-The current public baseline is the protected second `K9`.
+The current public baseline is a validated `EasyThreeD K9` setup with:
 
 - tested printer family: `EasyThreeD K9`
 - tested board family: `ET4000+ / ET4000PLUS`
@@ -55,13 +55,8 @@ The current public baseline is the protected second `K9`.
 - tested Cura machine: `lilHands K9 warm mat`
 - tested Cura profile: `codex - K9 warm mat cautious`
 
-Do **not** assume this will work unchanged on a random `K9`.
-The first experimental printer and the protected second printer already behaved differently during rollout.
-
-If you are onboarding a second machine safely, use:
-
-- [SECOND_K9_INTAKE.md](SECOND_K9_INTAKE.md)
-- [SECOND_K9_ROLLOUT.md](SECOND_K9_ROLLOUT.md)
+Do **not** assume this will work unchanged on every random `K9`.
+Different `K9` units already showed differences during development.
 
 If you are bringing this up on a Raspberry Pi, use:
 
@@ -74,9 +69,9 @@ This setup does **not** use a normal endstop-based Marlin `G28` workflow.
 Instead, Little Hands uses a manual-zero workflow:
 
 1. Move the printer into a known print start pose.
-2. Press `Запомнить старт`.
+2. Press `Save start`.
 3. The app tells the printer `G92 X0 Y0 Z0`.
-4. `К старту` returns to that logical zero during the current clean session.
+4. `Go to start` returns to that logical zero during the current clean session.
 
 This means:
 
@@ -84,11 +79,11 @@ This means:
 - after a failed print start, the safest next step is usually:
   - power cycle the printer
   - re-check the start pose
-  - press `Запомнить старт` again
+  - press `Save start` again
 
 ## External Warm Bed / Hotbed Note
 
-The validated second printer uses an external warm mat / hotbed.
+The validated public baseline uses an external warm mat / hotbed.
 
 - it is heated by its own external power path
 - it is **not** controlled by the printer firmware
@@ -133,10 +128,6 @@ Archive and historical firmware files are kept in `firmware/`, but they are not 
   - current recommended firmware and historical builds
 - `docs/`
   - install and printer guides
-- `SECOND_K9_INTAKE.md`
-  - safe intake checklist for a protected second printer
-- `SECOND_K9_ROLLOUT.md`
-  - careful rollout procedure for the validated second K9 baseline
 - `RASPBERRY_PI_CHECKLIST.md`
   - bring-up checklist for Raspberry Pi
 - `PROJECT_LOG.md`

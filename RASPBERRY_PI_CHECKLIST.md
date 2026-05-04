@@ -28,11 +28,6 @@ Before connecting the printer:
 - do not run `G28`
 - do not assume this printer matches another `K9` exactly
 
-For a protected second `K9`, also follow:
-
-- [SECOND_K9_INTAKE.md](/home/maxim/draftCode/littleHands/SECOND_K9_INTAKE.md)
-- [SECOND_K9_ROLLOUT.md](/home/maxim/draftCode/littleHands/SECOND_K9_ROLLOUT.md)
-
 ## 1. Copy The Project
 
 Copy the whole project folder to the Pi.
@@ -187,18 +182,18 @@ Open `Little Hands`.
 
 Do only these checks first:
 
-1. `Найти`
-2. `Проверить статус`
-3. `Обновить список`
+1. `Find`
+2. `Capture all metrics`
+3. `Refresh list`
 
 Only after that, do tiny jogs:
 
-- `Голова влево`
-- `Голова вправо`
-- `Стол от себя`
-- `Стол к себе`
-- `Голова вниз`
-- `Голова вверх`
+- `Head left`
+- `Head right`
+- `Bed away`
+- `Bed toward`
+- `Head down`
+- `Head up`
 
 If any axis moves unexpectedly:
 
@@ -216,9 +211,6 @@ Important files in this project:
   - `tools/k9_marlin_sd.py`
 - active printer notes:
   - `PROJECT_LOG.md`
-- second protected `K9` procedures:
-  - `SECOND_K9_INTAKE.md`
-  - `SECOND_K9_ROLLOUT.md`
 - active firmware folder:
   - `firmware/`
 
@@ -233,7 +225,7 @@ After any firmware flash:
 
 Do not keep old mystery firmware files on the card.
 
-## 10. Current Safe Baseline For The Protected Second K9
+## 10. Current Safe Baseline
 
 Current known-good firmware:
 
@@ -257,21 +249,21 @@ Do not:
 - run `G28`
 - upload a G-code file that contains startup `G28`
 - trust a random old G-code file just because the name looks familiar
-- use aggressive homing experiments on a protected printer
+- use aggressive homing experiments on an unverified printer
 - leave `mksLite.bin` on the SD card after a successful flash
 
 ## 12. Fast Recovery Checklist
 
 If the printer behaves strangely:
 
-1. Press `Жёсткий стоп`
+1. Press `Hard stop`
 2. If needed, power off the printer for `10` seconds
 3. Restart `Little Hands`
-4. Re-check the port with `Найти`
+4. Re-check the port with `Find`
 5. Re-check tiny jogs only
 6. Re-define the start pose with:
-   - `Запомнить старт`
-   - `К старту`
+   - `Save start`
+   - `Go to start`
 
 ## 13. When Setup Is Considered Successful
 
@@ -280,8 +272,8 @@ The Pi setup is complete when:
 - `Little Hands` launches from terminal without crashing
 - the user is in `dialout`
 - the printer is found reliably over USB
-- `Проверить статус` works
-- `Обновить список` works
+- `Capture all metrics` works
+- `Refresh list` works
 - tiny jogs are correct
 - no dangerous `G28`-based workflow is used
 

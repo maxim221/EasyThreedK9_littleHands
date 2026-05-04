@@ -96,14 +96,14 @@ Little Hands writes runtime state and logs to:
 
 The runtime log is a ring log capped at `10 MiB`.
 
-## 8. Cura Baseline For The Validated Second K9
+## 8. Cura Baseline
 
 Use:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
 
-Do not use the old reduced-area machine from the first experimental printer unless you are intentionally reproducing that older setup.
+Do not use old reduced-area machine presets from earlier experiments unless you are intentionally reproducing that older setup.
 
 ## 9. Raspberry Pi Notes
 
@@ -138,13 +138,12 @@ If the printer is not detected:
 - power-cycle the printer
 - reconnect USB directly
 - reopen `Little Hands`
-- use the `Найти` button
+- use the `Find` button
 
 If a print start fails and the printer only clicks or telemetry freezes, the current safest workflow is:
 
-1. `Жёсткий стоп`
+1. `Hard stop`
 2. printer power cycle
 3. re-check the start pose
-4. `Запомнить старт`
+4. `Save start`
 5. start again
-
