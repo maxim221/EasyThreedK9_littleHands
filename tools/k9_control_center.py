@@ -32,7 +32,7 @@ import k9_marlin_sd as sdtool
 
 PROJECT_ROOT = Path("/home/maxim/draftCode/littleHands")
 CURA_ROOT = Path.home() / ".local/share/cura/5.11"
-DEFAULT_FIRMWARE = PROJECT_ROOT / "firmware/LH-v2-AutoFan45-FAN1-z1167-mksLite.bin"
+DEFAULT_FIRMWARE = PROJECT_ROOT / "firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin"
 LOG_DIR = PROJECT_ROOT / "monitor_logs"
 GUI_EXPORT_DIR = LOG_DIR / "gui_exports"
 RUNTIME_LOG_PATH = LOG_DIR / "little_hands_runtime.log"
@@ -76,6 +76,18 @@ LH_FIRMWARE_CATALOG = {
         "marlin": "2.1.2.5",
         "m92": (606.0, 606.0, 1167.0, 1040.0),
     },
+    "LH-v3-StockPins-AutoFan45-FAN1-z600-e1040-mksLite.bin": {
+        "lh_version": "LH v3",
+        "label": "LH v3 StockPins AutoFan45 FAN1 Z600 E1040",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 600.0, 1040.0),
+    },
+    "LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin": {
+        "lh_version": "LH v4",
+        "label": "LH v4 YZSwap AutoFan45 FAN1 Z600 E1040",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 600.0, 1040.0),
+    },
     "ecf-k9-et4000plus-mksLite.bin": {
         "lh_version": "LH ECF",
         "label": "LH ECF Baseline",
@@ -89,21 +101,24 @@ MANUAL_TEXT = textwrap.dedent(
     Little Hands baseline printing mode
 
     Current working hardware setup
-    - Firmware: custom-hotend-autofan-45c-usb-mksLite.bin
+    - Firmware: LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin
     - Fan: the only fan is connected to FAN1 and works as hotend auto-fan
       below 45C = off, above 45C = on
-    - Motor wiring: Y and Z motor plugs are swapped physically on the board
+    - External hotbed / warm mat is not controlled by the printer firmware
+    - Motor routing on the validated second K9 behaves as Y/Z swapped relative
+      to stock operator naming
     - Effective motion:
       X = printhead left / right
-      Y = bed in the print plane
-      Z = printhead up / down
+      Y = printhead up / down
+      Z = bed in the print plane
 
     Fixed print home
     - X fully left
-    - Y bed fully back / away from the operator
-    - Z nozzle touching the bed
+    - Z bed fully back / away from the operator
+    - Y nozzle touching the bed
     - This pose is the print zero for the current power-on session
-    - Cura start G-code uses G92 and treats this pose as X0 Y0 Z0
+    - Cura start G-code uses G92 and treats this pose as X0 Y0 Z0 in the
+      operator-facing Little Hands convention
     - Do not use plain G28 in normal print workflow
 
     Normal workflow
@@ -2515,7 +2530,7 @@ class K9ControlCenter:
 def main() -> int:
     root = tk.Tk(className="little-hands-control-center")
     app = K9ControlCenter(root)
-    app.log("Little Hands готов. Baseline: auto-fan FAN1 45C, физический swap Y/Z, печать с SD от сохранённого старта.")
+    app.log("Little Hands готов. Baseline: LH v4, auto-fan FAN1 45C, operator-facing manual-zero workflow, печать с SD от сохранённого старта.")
     app.log("Порт должен быть свободен от Cura и других мониторов.")
     root.mainloop()
     return 0

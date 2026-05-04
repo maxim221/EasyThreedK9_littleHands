@@ -1596,3 +1596,28 @@ After each test print, append:
 
 - Important rule:
   - do not start Windows packaging until the current Linux K9 workflow is considered stable enough that porting effort will not duplicate churn
+
+## 2026-05-04 Public Repository Documentation Pack
+
+- Added a public-facing documentation layer for publishing the project:
+  - `README.md`
+  - `README.ru.md`
+  - `docs/INSTALL_LINUX.md`
+  - `docs/INSTALL_LINUX.ru.md`
+  - `docs/PRINTER_AND_FIRMWARE.md`
+  - `docs/PRINTER_AND_FIRMWARE.ru.md`
+  - `docs/screenshots/little-hands-main-window.png`
+- Added `requirements.txt` with the minimal Python dependency currently needed beyond stdlib / system packages:
+  - `pyserial`
+- Updated `Little Hands` defaults to match the protected second-K9 public baseline:
+  - default firmware file:
+    - `LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+  - firmware catalog entries for `LH v3` and `LH v4`
+  - built-in manual text now reflects:
+    - external warm bed / hotbed
+    - operator-facing `Y/Z` convention
+    - current `LH v4` baseline
+- Publishing note:
+  - local docs and repo content are now prepared for a public GitHub repository
+  - local `git remote` is still unset
+  - current `gh auth status` for account `maxim221` reports an invalid token, so actual remote push may still need re-authentication before publication

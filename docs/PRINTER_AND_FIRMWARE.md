@@ -1,0 +1,171 @@
+# Printer And Firmware Guide
+
+## 1. Supported Hardware Baseline
+
+This repository is currently documented for:
+
+- printer model: `EasyThreeD K9`
+- mainboard family: `ET4000+ / ET4000PLUS`
+- validated public baseline: the protected second `K9`
+
+Important:
+
+- this is **not** a blanket claim that every `K9` is identical
+- different `K9` units already showed different behavior during development
+- the safe public baseline is the second protected printer with `LH v4`
+- the safe claim here is the `ET4000+ / ET4000PLUS` board family; an exact silkscreen subrevision was not separately frozen in this public doc pack
+
+## 2. Current Recommended Firmware
+
+Use:
+
+- `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+
+This build is the current public default because it matches the validated second K9:
+
+- explicit `LH` firmware label in `M115`
+- working `Little Hands` compatibility
+- `FAN1` auto-fan at `45C`
+- stock-like motion values:
+  - `X606`
+  - `Y606`
+  - `Z600`
+  - `E1040`
+- validated operator motion mapping:
+  - `X` = printhead left / right
+  - `Y` = printhead up / down
+  - `Z` = bed in the print plane
+
+## 3. Firmware Identity
+
+After a successful flash, the app should recognize something like:
+
+- `LH v4 YZSwap AutoFan45 FAN1 Z600 E1040`
+
+That identity comes from the firmware itself through `M115`.
+
+## 4. Safe Flash Workflow
+
+### Option A: through Little Hands
+
+1. Open `Файлы и прошивка`.
+2. Select:
+   - `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+3. Upload the firmware to the printer SD.
+4. Let the printer reboot / complete the flash.
+5. Remove `mksLite.bin` or `mksLite.CUR` from the card afterward.
+6. Keep `EEPROM.DAT`.
+
+### Option B: through a card reader
+
+1. Put the SD card into a reader.
+2. Copy the firmware to the card as:
+   - `mksLite.bin`
+3. Insert the card into the printer.
+4. Power the printer on for `30–60` seconds.
+5. Power it off again.
+6. Remove the card.
+7. Delete `mksLite.bin` or `mksLite.CUR`.
+8. Keep `EEPROM.DAT`.
+9. Put the card back into the printer.
+
+## 5. EEPROM.DAT
+
+`EEPROM.DAT` is important.
+
+It stores printer settings such as:
+
+- motion values
+- limits
+- offsets
+- saved firmware settings
+
+Rules:
+
+- do **not** keep deleting it
+- keep it on the card after the firmware is initialized
+- after a fresh flash, initialize settings and verify the file exists
+
+## 6. How Home Works Here
+
+This project currently uses a `manual-zero` workflow, not a true endstop-based auto-home.
+
+That means:
+
+1. The operator moves the printer into a known physical start pose.
+2. `Запомнить старт` sets that pose as logical zero with:
+
+```gcode
+G92 X0 Y0 Z0
+```
+
+3. `К старту` returns to that logical zero during a clean trusted session.
+
+So:
+
+- this is practical and field-tested
+- but it is not yet a guaranteed absolute home after arbitrary external movement
+- after a failed start or suspicious state, re-establish the start pose and zero again
+
+## 7. External Warm Bed / Hotbed
+
+The validated second printer uses an external heated bed / warm mat.
+
+Important facts:
+
+- it is heated externally
+- it is not connected to the printer board as a controlled heated bed
+- the firmware should still behave like a printer without bed-heater control
+- in Cura the validated baseline kept bed temperature at `0`
+
+Validated practical setup:
+
+- external warm bed around `40–50C`
+- perforated flexible build surface on the warmed bed
+
+Safety note:
+
+- use a heat-safe surface
+- do not blindly reuse a random stock plate on a raw external heater
+
+## 8. Cura Baseline
+
+For the current validated second K9:
+
+- machine: `lilHands K9 warm mat`
+- profile: `codex - K9 warm mat cautious`
+
+Re-slice when:
+
+- firmware baseline changes
+- printer mapping changes
+- the file was generated for another machine
+
+## 9. First Safe Print Workflow
+
+1. Flash `LH v4`.
+2. Confirm tiny jog mapping.
+3. Confirm the external warm bed is preheated.
+4. Slice in the validated Cura machine/profile.
+5. Upload the G-code.
+6. Set the physical start pose.
+7. Press `Запомнить старт`.
+8. Press `К старту` and confirm it returns correctly.
+9. Start printing from SD.
+
+## 10. Recovery Rule
+
+If a print start fails and you see:
+
+- clicking
+- no motion
+- frozen telemetry
+- stale status
+
+the current safest workflow is:
+
+1. stop the print
+2. power-cycle the printer
+3. re-check the start pose
+4. press `Запомнить старт`
+5. start again
