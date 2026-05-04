@@ -65,9 +65,9 @@ Little Hands — это Linux-приложение для управления �
 - [SECOND_K9_INTAKE.md](SECOND_K9_INTAKE.md)
 - [SECOND_K9_ROLLOUT.md](SECOND_K9_ROLLOUT.md)
 
-Если нужно поднять всё это у друга на Raspberry Pi:
+Если нужно поднять всё это на Raspberry Pi:
 
-- [RASPBERRY_PI_FRIEND_CHECKLIST.md](RASPBERRY_PI_FRIEND_CHECKLIST.md)
+- [RASPBERRY_PI_CHECKLIST.md](RASPBERRY_PI_CHECKLIST.md)
 
 ## Как Здесь Работает Home
 
@@ -139,8 +139,8 @@ python3 tools/k9_control_center.py
   - безопасный чек-лист первичного осмотра второго принтера
 - `SECOND_K9_ROLLOUT.md`
   - аккуратная процедура выката baseline на защищённый второй `K9`
-- `RASPBERRY_PI_FRIEND_CHECKLIST.md`
-  - пошаговый friend checklist для Raspberry Pi
+- `RASPBERRY_PI_CHECKLIST.md`
+  - пошаговый чек-лист для Raspberry Pi
 - `PROJECT_LOG.md`
   - подробный инженерный журнал проекта
 

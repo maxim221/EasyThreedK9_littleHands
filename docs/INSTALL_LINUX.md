@@ -111,8 +111,8 @@ This app works fine on Raspberry Pi desktop setups, but:
 
 - use a powered USB hub if the Pi is marginal on USB power
 - prefer direct USB connection to the printer during firmware work
-- if you are helping another person, use:
-  - [../RASPBERRY_PI_FRIEND_CHECKLIST.md](../RASPBERRY_PI_FRIEND_CHECKLIST.md)
+- for a full Raspberry Pi bring-up checklist, use:
+  - [../RASPBERRY_PI_CHECKLIST.md](../RASPBERRY_PI_CHECKLIST.md)
 
 ## 10. If The App Does Not Start
 

@@ -48,7 +48,7 @@ This should help separate:
 
 ## Safety Rules For The Incoming Second K9
 
-The second Easythreed K9 from your friend must not be sacrificed to experiments.
+The incoming protected second Easythreed K9 must not be sacrificed to experiments.
 
 Treat it as a protected reference printer:
 

@@ -63,9 +63,9 @@ If you are onboarding a second machine safely, use:
 - [SECOND_K9_INTAKE.md](SECOND_K9_INTAKE.md)
 - [SECOND_K9_ROLLOUT.md](SECOND_K9_ROLLOUT.md)
 
-If you are helping a friend bring this up on a Raspberry Pi, use:
+If you are bringing this up on a Raspberry Pi, use:
 
-- [RASPBERRY_PI_FRIEND_CHECKLIST.md](RASPBERRY_PI_FRIEND_CHECKLIST.md)
+- [RASPBERRY_PI_CHECKLIST.md](RASPBERRY_PI_CHECKLIST.md)
 
 ## How Home Works
 
@@ -137,8 +137,8 @@ Archive and historical firmware files are kept in `firmware/`, but they are not 
   - safe intake checklist for a protected second printer
 - `SECOND_K9_ROLLOUT.md`
   - careful rollout procedure for the validated second K9 baseline
-- `RASPBERRY_PI_FRIEND_CHECKLIST.md`
-  - bring-up checklist for a friend on Raspberry Pi
+- `RASPBERRY_PI_CHECKLIST.md`
+  - bring-up checklist for Raspberry Pi
 - `PROJECT_LOG.md`
   - detailed working log and engineering history
 

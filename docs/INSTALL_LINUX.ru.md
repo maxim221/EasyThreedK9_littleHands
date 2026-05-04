@@ -111,8 +111,8 @@ Little Hands пишет runtime-состояние и логи сюда:
 
 - для капризного USB лучше powered hub
 - во время прошивки лучше прямое USB-подключение к принтеру
-- если поднимаешь всё для другого человека, используй:
-  - [../RASPBERRY_PI_FRIEND_CHECKLIST.md](../RASPBERRY_PI_FRIEND_CHECKLIST.md)
+- для полного сценария развёртывания на Raspberry Pi используй:
+  - [../RASPBERRY_PI_CHECKLIST.md](../RASPBERRY_PI_CHECKLIST.md)
 
 ## 10. Если Приложение Не Запускается
 
