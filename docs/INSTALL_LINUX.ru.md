@@ -72,6 +72,8 @@ python3 tools/k9_control_center.py
 
 Если всё в порядке, откроется окно `Little Hands`.
 
+![Главное окно Little Hands](screenshots/little-hands-main-window.png)
+
 ## 6. Необязательный Desktop-Ярлык
 
 В репозитории уже лежит:

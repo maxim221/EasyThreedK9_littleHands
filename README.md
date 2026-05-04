@@ -29,6 +29,10 @@ What is still rough:
 
 ![Little Hands main window](docs/screenshots/little-hands-main-window.png)
 
+![Files and Firmware window](docs/screenshots/little-hands-files-firmware-window.png)
+
+![Manual window](docs/screenshots/little-hands-manual-window.png)
+
 ## Language Versions
 
 - English:

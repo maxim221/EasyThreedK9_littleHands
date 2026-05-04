@@ -29,6 +29,10 @@ Little Hands — это Linux-приложение для управления �
 
 ![Главное окно Little Hands](docs/screenshots/little-hands-main-window.png)
 
+![Окно Files and Firmware](docs/screenshots/little-hands-files-firmware-window.png)
+
+![Окно Manual](docs/screenshots/little-hands-manual-window.png)
+
 ## Версии Документации
 
 - English:

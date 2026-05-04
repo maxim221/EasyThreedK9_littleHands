@@ -56,6 +56,8 @@ That identity comes from the firmware itself through `M115`.
 5. Remove `mksLite.bin` or `mksLite.CUR` from the card afterward.
 6. Keep `EEPROM.DAT`.
 
+![Files and Firmware window](screenshots/little-hands-files-firmware-window.png)
+
 ### Option B: through a card reader
 
 1. Put the SD card into a reader.
@@ -106,6 +108,8 @@ So:
 - this is practical and field-tested
 - but it is not yet a guaranteed absolute home after arbitrary external movement
 - after a failed start or suspicious state, re-establish the start pose and zero again
+
+![Manual window](screenshots/little-hands-manual-window.png)
 
 ## 7. External Warm Bed / Hotbed
 

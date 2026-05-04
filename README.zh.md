@@ -29,6 +29,10 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 
 ![Little Hands main window](docs/screenshots/little-hands-main-window.png)
 
+![Files and Firmware window](docs/screenshots/little-hands-files-firmware-window.png)
+
+![Manual window](docs/screenshots/little-hands-manual-window.png)
+
 ## 文档语言
 
 - English:

@@ -53,6 +53,8 @@
 5. 之后从卡上删除 `mksLite.bin` 或 `mksLite.CUR`
 6. 保留 `EEPROM.DAT`
 
+![Files and Firmware window](screenshots/little-hands-files-firmware-window.png)
+
 ### 方式 B：通过读卡器
 
 1. 把 SD 卡插入读卡器
@@ -103,6 +105,8 @@ G92 X0 Y0 Z0
 - 这是一种实用并且已经经过现场验证的工作流
 - 但它还不是在任意外部移动后的绝对 home
 - 如果启动失败或状态可疑，应重新建立起始姿态并重新设零
+
+![Manual window](screenshots/little-hands-manual-window.png)
 
 ## 7. 外部 warm bed / hotbed
 

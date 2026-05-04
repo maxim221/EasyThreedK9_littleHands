@@ -67,6 +67,8 @@ python3 tools/k9_control_center.py
 
 如果一切正常，你会看到 `Little Hands` 窗口。
 
+![Little Hands main window](screenshots/little-hands-main-window.png)
+
 ## 6. 可选桌面启动器
 
 仓库中已经带有：

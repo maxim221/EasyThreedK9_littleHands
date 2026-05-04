@@ -72,6 +72,8 @@ python3 tools/k9_control_center.py
 
 If everything is fine, you should see the `Little Hands` window open.
 
+![Little Hands main window](screenshots/little-hands-main-window.png)
+
 ## 6. Optional Desktop Launcher
 
 The repo already contains:

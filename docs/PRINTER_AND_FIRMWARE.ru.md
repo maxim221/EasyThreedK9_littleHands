@@ -56,6 +56,8 @@
 5. После этого удали с карты `mksLite.bin` или `mksLite.CUR`.
 6. `EEPROM.DAT` оставь.
 
+![Окно Files and Firmware](screenshots/little-hands-files-firmware-window.png)
+
 ### Вариант B: через кардридер
 
 1. Вставь SD-карту в ридер.
@@ -106,6 +108,8 @@ G92 X0 Y0 Z0
 - это практичный и уже проверенный workflow
 - но это пока не абсолютный home после произвольных внешних перемещений
 - после неудачного старта или сомнительного состояния лучше заново выставить стартовую позу и снова записать ноль
+
+![Окно Manual](screenshots/little-hands-manual-window.png)
 
 ## 7. Внешний Warm Bed / Hotbed
 
