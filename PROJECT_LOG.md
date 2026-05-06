@@ -1655,3 +1655,11 @@ After each test print, append:
   - model bounds are about `70.0 x 52.64 x 15.0 mm`
   - current STL orientation touches the bed with a narrow strip of about `260 mm2`
   - the broad opposite face is about `2850 mm2`, so this model should be laid flat on that broad face in Cura before slicing
+- Active local Cura `codex - K9 warm mat cautious` settings were tuned for this flat-cover print:
+  - `top_layers = 6`
+  - `bottom_layers = 6`
+  - `infill_sparse_density = 20`
+  - `brim_width = 8`
+  - `speed_layer_0 = 7`
+  - `initial_layer_line_width_factor = 135`
+  - support remains off
