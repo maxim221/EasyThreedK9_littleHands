@@ -139,6 +139,12 @@ For the current validated public baseline:
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
 
+Current end-G-code rule:
+
+- present the finished part with raw Marlin `G1 Y95`, which moves the bed toward the operator on the validated setup
+- do not add `M84` to Cura end-G-code; `Little Hands` explicitly enables steppers before recovery moves and before SD print start
+- if an older file ends with `G1 Y0` or `M84`, re-slice it before judging completion behavior
+
 Re-slice when:
 
 - firmware baseline changes

@@ -316,6 +316,8 @@ def start_sd_print(port: str, baud: int, path: str) -> str:
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
+        send_line(ser, "M17")
+        time.sleep(0.4)
         send_line(ser, f"M23 {target}")
         time.sleep(0.8)
         send_line(ser, "M24")
@@ -330,7 +332,7 @@ def set_current_home_zero(port: str, baud: int) -> str:
     return run_commands(
         port,
         baud,
-        ["G90", "G92 X0 Y0 Z0", "M114"],
+        ["M17", "G90", "G92 X0 Y0 Z0", "M114"],
         final_wait=0.8,
         read_seconds=1.5,
     )
@@ -377,7 +379,7 @@ def goto_print_home(port: str, baud: int) -> str:
     return run_commands(
         port,
         baud,
-        ["G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M114"],
+        ["M17", "G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M400", "M114"],
         final_wait=0.8,
         read_seconds=2.0,
     )
@@ -388,7 +390,7 @@ def start_sd_print_from_home(port: str, baud: int, path: str) -> str:
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
-        for line in ("G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600"):
+        for line in ("M17", "G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M400"):
             send_line(ser, line)
             time.sleep(0.5)
         _ = read_for(ser, 2.0)

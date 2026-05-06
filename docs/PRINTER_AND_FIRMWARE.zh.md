@@ -131,6 +131,12 @@ G92 X0 Y0 Z0
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
 
+当前 end-gcode 规则：
+
+- 使用 raw Marlin `G1 Y95` 展示完成的模型；在验证过的机器上它会把平台推向操作者
+- 不要在 Cura end-gcode 里加入 `M84`；`Little Hands` 会在恢复移动和 SD 打印开始前主动启用步进电机
+- 如果旧文件以 `G1 Y0` 或 `M84` 结尾，请先重新切片，再判断打印完成动作是否正确
+
 需要重新切片的情况：
 
 - 固件基线改变

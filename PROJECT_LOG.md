@@ -1641,3 +1641,17 @@ After each test print, append:
   - `docs/PRINTER_AND_FIRMWARE.zh.md`
 - `README.md` and `README.ru.md` now link to all three language variants.
 - Verified that `Little Hands` still launches after the localization changes.
+
+## 2026-05-06 Completion Recovery And mainFlasherTop Notes
+
+- Hardened SD print start and recovery commands:
+  - `Little Hands` now sends `M17` before direct SD print start, before `Save start`, before `Go to start`, and before `Start from saved start`
+  - `Go to start` and `Start from saved start` now include `M400` so queued recovery moves finish before the next step
+- Updated the active local Cura `5.11` machine end-gcode:
+  - finished prints should present the part with raw Marlin `G1 Y95`
+  - active end-gcode no longer adds `M84`
+  - existing old G-code files must be re-sliced to inherit this
+- `mainFlasherTop.STL` geometry check:
+  - model bounds are about `70.0 x 52.64 x 15.0 mm`
+  - current STL orientation touches the bed with a narrow strip of about `260 mm2`
+  - the broad opposite face is about `2850 mm2`, so this model should be laid flat on that broad face in Cura before slicing
