@@ -43,6 +43,8 @@ TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
 TEMP_LOG_INTERVAL_SEC = 5.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
 PRINT_START_GRACE_SEC = 5 * 60
+PRINT_ACTIVE_CONFIRM_SAMPLES = 2
+PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 
 
 TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
@@ -288,6 +290,10 @@ class K9ControlCenter:
         self.metrics_sections: dict[str, str] = {}
         self.action_widgets: list[ttk.Widget] = []
         self.print_was_active = False
+        self.print_completion_armed = False
+        self.sd_progress_sample_count = 0
+        self.first_sd_progress_ts: float | None = None
+        self.last_sd_progress_ts: float | None = None
         self.suppress_next_completion_chime = False
         self.session_zero_defined = False
         self.at_saved_start_pose = False
@@ -468,6 +474,9 @@ class K9ControlCenter:
             self.current_print_start_ts = last_start_ts or first_active_telem_ts
             self.current_print_progress_pct = last_progress_pct
             self.print_state_restored_from_log = True
+            if last_progress_pct is not None:
+                self.print_completion_armed = True
+                self.print_was_active = True
 
     def _load_ui_state(self) -> dict[str, object]:
         if not UI_STATE_PATH.is_file():
@@ -1814,8 +1823,6 @@ class K9ControlCenter:
         if selected_print_index is not None:
             self.sd_print_listbox.selection_set(selected_print_index)
             self.sd_print_listbox.see(selected_print_index)
-        elif self.sd_print_files:
-            self.sd_print_listbox.selection_set(0)
         self._sync_selected_sd_label()
         self._update_sd_notice(lowered_paths)
 
@@ -2033,6 +2040,11 @@ class K9ControlCenter:
         self.current_print_progress_pct = 0.0
         self.print_state_restored_from_log = False
         self.print_start_watchdog_alerted = False
+        self.print_was_active = False
+        self.print_completion_armed = False
+        self.sd_progress_sample_count = 0
+        self.first_sd_progress_ts = None
+        self.last_sd_progress_ts = None
         self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
         self._post("active-sd", f"Печатается: {display}")
         self._post("progress", ("Печать: старт отправлен, жду SD/прогрев", 0.0))
@@ -2920,6 +2932,10 @@ class K9ControlCenter:
         self.current_print_progress_pct = None
         self.print_state_restored_from_log = False
         self.print_was_active = False
+        self.print_completion_armed = False
+        self.sd_progress_sample_count = 0
+        self.first_sd_progress_ts = None
+        self.last_sd_progress_ts = None
         self.print_start_watchdog_alerted = False
         self.at_saved_start_pose = False
         self.post_print_pose_known = False
@@ -3231,7 +3247,19 @@ class K9ControlCenter:
                 done = int(progress_match.group(1))
                 total = max(int(progress_match.group(2)), 1)
                 pct = max(0.0, min(100.0, (done / total) * 100.0))
-                self.print_was_active = True
+                self.sd_progress_sample_count += 1
+                if self.first_sd_progress_ts is None:
+                    self.first_sd_progress_ts = now
+                self.last_sd_progress_ts = now
+                start_elapsed = (now - self.current_print_start_ts) if self.current_print_start_ts else None
+                if (
+                    self.sd_progress_sample_count >= PRINT_ACTIVE_CONFIRM_SAMPLES
+                    and (start_elapsed is None or start_elapsed >= PRINT_ACTIVE_CONFIRM_MIN_SEC)
+                    and done < total
+                    and pct < 99.5
+                ):
+                    self.print_was_active = True
+                    self.print_completion_armed = True
                 self.current_print_progress_pct = pct
                 if self.current_print_file != "-":
                     display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
@@ -3239,10 +3267,15 @@ class K9ControlCenter:
                 else:
                     self._post("active-sd", "Печатается: идёт печать (имя не восстановлено)")
                 self._post("progress", (f"Печать: {pct:.1f}% ({done}/{total})", pct))
-                if now - self.last_telemetry_log_ts >= 5.0 and current_temp is not None and target_temp is not None:
+                if now - self.last_telemetry_log_ts >= 5.0:
                     self.last_telemetry_log_ts = now
+                    temp_text = (
+                        f"{current_temp:.2f}/{target_temp:.2f}"
+                        if current_temp is not None and target_temp is not None
+                        else "?/?"
+                    )
                     self._append_ring_log(
-                        f"{time.strftime('%H:%M:%S')} TELEMETRY file={self.current_print_file} progress={pct:.1f}% temp={current_temp:.2f}/{target_temp:.2f} sd=\"{summary}\""
+                        f"{time.strftime('%H:%M:%S')} TELEMETRY file={self.current_print_file} progress={pct:.1f}% temp={temp_text} sd=\"{summary}\""
                     )
             elif "Not SD printing" in sd:
                 in_start_grace = (
@@ -3262,12 +3295,18 @@ class K9ControlCenter:
                     self.current_print_progress_pct = None
                     self.print_state_restored_from_log = False
                     self.print_start_watchdog_alerted = False
+                    self.print_was_active = False
+                    self.print_completion_armed = False
+                    self.sd_progress_sample_count = 0
+                    self.first_sd_progress_ts = None
+                    self.last_sd_progress_ts = None
                     self._post("active-sd", "Печатается: -")
                     self._post("log", "Сбросил восстановленное из лога состояние печати: на текущем принтере активной SD-печати нет.")
                     self._schedule_sd_refresh_after_port(self._port(), force=True)
                     return
-                if self.print_was_active:
+                if self.print_was_active and self.print_completion_armed:
                     self.print_was_active = False
+                    self.print_completion_armed = False
                     completion_move_result = ""
                     completion_pose_known = False
                     computer_melody_enabled = bool(self.computer_melody_on_complete_var.get())
@@ -3304,7 +3343,12 @@ class K9ControlCenter:
                     self.current_print_progress_pct = None
                     self.print_state_restored_from_log = False
                     self.print_start_watchdog_alerted = False
+                    self.sd_progress_sample_count = 0
+                    self.first_sd_progress_ts = None
+                    self.last_sd_progress_ts = None
                     self._post("active-sd", "Печатается: -")
+                elif self.print_was_active and not self.print_completion_armed:
+                    self._post("progress", ("Печать: SD ответил Not SD printing, жду подтверждения старта", 0.0))
                 elif (
                     self.current_print_file != "-"
                     and self.current_print_start_ts
