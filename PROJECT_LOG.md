@@ -1797,3 +1797,16 @@ After each test print, append:
   - print-start grace is now five minutes instead of a premature 20-second failed-start watchdog
 - Practical rule for the operator:
   - after pressing `Start print`, do not refresh the SD list until the printer has either started heating / moving or clearly failed
+
+## 2026-05-07 Safer Post-Print Start Recovery
+
+- Observed that after a completed print the app could refuse `Go to start` with "save start first".
+- Root cause:
+  - the saved-start flag is intentionally in application memory
+  - the `Status` action was too destructive and cleared that flag even though it only reads `M115/M27`
+  - the post-print dialog also had a misleading confirmation button that did not actually send `G92`
+- Fixed:
+  - `Status` no longer clears a trusted saved start
+  - the post-print dialog now tells the operator to return to the start pose manually if `Go to start` is already unavailable
+  - the dialog action is now `Save start` and runs the same save-start command as the main control
+  - missing-start errors now explain why Little Hands refuses to move automatically without a trusted zero

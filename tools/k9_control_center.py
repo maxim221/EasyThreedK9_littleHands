@@ -2178,11 +2178,11 @@ class K9ControlCenter:
             return (
                 f"{intro}\n\n"
                 "1. Remove the printed part from the bed.\n"
-                "2. Press 'Go to start' and wait until the printer physically returns to the saved start pose.\n"
-                "3. Power the printer off for 5-10 seconds, then power it on again.\n"
+                "2. Return the printer to the start pose. If 'Go to start' works, use it. If the app says the start is unknown, jog manually.\n"
+                "3. While the printer is physically in that start pose, power it off for 5-10 seconds and power it on again.\n"
                 "4. If the port is not responsive, press 'Find'. If the app sees CH340 but Marlin does not answer, repeat the power cycle.\n"
-                "5. Make sure the printer is still in the start pose and press 'Save start'.\n"
-                "6. Start the next SD print only after that.\n\n"
+                "5. Make sure the printer is still in the start pose and press 'Save start' in this window or in the main controls.\n"
+                "6. Start the next SD print only after the app confirms that the start was saved.\n\n"
                 "Why: after an SD print this K9/Marlin build can leave USB/SD in a half-alive state. Starting again before a power cycle can produce clicks, frozen telemetry, or no motion."
             )
         if lang == "zh":
@@ -2190,11 +2190,11 @@ class K9ControlCenter:
             return (
                 f"{intro}\n\n"
                 "1. 从平台上取下模型。\n"
-                "2. 点击 'Go to start'，等待打印机实际回到已保存的起始位置。\n"
-                "3. 关闭打印机电源 5-10 秒，然后重新打开。\n"
+                "2. 让打印机回到起始姿态。如果 'Go to start' 可用就使用它；如果程序提示起点未知，请手动点动回起点。\n"
+                "3. 打印机实际停在起始姿态时，关闭电源 5-10 秒，然后重新打开。\n"
                 "4. 如果端口没有响应，点击 'Find'。如果只看到 CH340 但 Marlin 不回应，请再次断电重启。\n"
-                "5. 确认打印机仍在起始位置，然后点击 'Save start'。\n"
-                "6. 之后再开始下一次 SD 打印。\n\n"
+                "5. 确认打印机仍在起始姿态，然后在此窗口或主控制区点击 'Save start'。\n"
+                "6. 等程序确认起点已保存后，再开始下一次 SD 打印。\n\n"
                 "原因：这台 K9/Marlin 在 SD 打印结束后可能让 USB/SD 留在半工作状态，直接重复启动会导致咔哒声、遥测冻结或无动作。"
             )
         intro = (
@@ -2205,19 +2205,17 @@ class K9ControlCenter:
         return (
             f"{intro}\n\n"
             "1. Сними модель со стола.\n"
-            "2. Нажми 'К старту' и дождись, пока принтер физически вернётся в сохранённую стартовую позу.\n"
-            "3. Выключи принтер по питанию на 5–10 секунд и включи снова.\n"
+            "2. Верни принтер в стартовую позу. Если 'К старту' работает, используй его. Если приложение пишет, что старт неизвестен, выставь позу ручными кнопками.\n"
+            "3. Когда принтер физически стоит в стартовой позе, выключи питание на 5–10 секунд и включи снова.\n"
             "4. Если порт не отвечает, нажми 'Найти'. Если приложение видит CH340, но Marlin молчит, повтори power cycle.\n"
-            "5. Убедись, что принтер всё ещё в стартовой позе, и нажми 'Запомнить старт'.\n"
-            "6. Только после этого запускай следующую печать с SD.\n\n"
+            "5. Убедись, что принтер всё ещё в стартовой позе, и нажми 'Запомнить старт' в этом окне или в ручном управлении.\n"
+            "6. Запускай следующую печать с SD только после подтверждения, что старт сохранён.\n\n"
             "Почему так: после SD-печати эта связка K9/Marlin иногда оставляет USB/SD в полуживом состоянии. "
             "Повторный старт без power cycle может дать щелчки, замершую телеметрию или отсутствие движения."
         )
 
-    def _confirm_post_print_recovery(self) -> None:
-        self.post_print_recovery_required = False
-        self.log("Послепечатный цикл подтверждён: следующая печать снова разрешена.")
-        self._close_post_print_window()
+    def _save_start_from_post_print_window(self) -> None:
+        self.set_current_home_zero()
 
     def _close_post_print_window(self) -> None:
         if self.post_print_window and self.post_print_window.winfo_exists():
@@ -2277,12 +2275,12 @@ class K9ControlCenter:
         buttons.columnconfigure(1, weight=1)
         close_label = {"ru": "Понятно", "en": "OK", "zh": "知道了"}.get(self.lang_var.get().strip() or "ru", "Понятно")
         confirm_label = {
-            "ru": "Цикл выполнен, старт записан",
-            "en": "Cycle done, start saved",
-            "zh": "已重启并保存起点",
-        }.get(self.lang_var.get().strip() or "ru", "Цикл выполнен, старт записан")
+            "ru": "Запомнить старт",
+            "en": "Save start",
+            "zh": "保存起点",
+        }.get(self.lang_var.get().strip() or "ru", "Запомнить старт")
         ttk.Button(buttons, text=close_label, command=self._close_post_print_window).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(buttons, text=confirm_label, command=self._confirm_post_print_recovery).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ttk.Button(buttons, text=confirm_label, command=self._save_start_from_post_print_window).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
         def _on_close() -> None:
             self._close_post_print_window()
@@ -2449,8 +2447,10 @@ class K9ControlCenter:
             self._post("sd", sd.strip() or "SD: unknown")
             self._post("metrics", ("m115", caps))
             self._post("log", caps.strip())
-            self.session_zero_defined = False
-            self._post("log", "После включения выставь стартовую позу и нажми 'Запомнить старт'. Потом работают 'К старту' и 'Печать с SD'.")
+            if self.session_zero_defined:
+                self._post("log", "Статус снят: сохранённая стартовая поза в приложении оставлена активной.")
+            else:
+                self._post("log", "Статус снят. Если был power cycle или перезапуск приложения, выставь стартовую позу и нажми 'Запомнить старт'.")
 
         self._run_task("Проверка статуса", task)
 
@@ -2770,7 +2770,7 @@ class K9ControlCenter:
             messagebox.showerror("Little Hands", "Выбери файл в секции 'Файлы для печати'.")
             return
         if not self.session_zero_defined:
-            messagebox.showerror("Little Hands", "Сначала выставь стартовую позу и нажми 'Запомнить старт'.")
+            self._show_missing_start_zero()
             return
 
         def task() -> None:
@@ -2959,9 +2959,35 @@ class K9ControlCenter:
 
         self._run_task("Запоминание стартовой позы", task)
 
+    def _missing_start_zero_text(self) -> str:
+        lang = self.lang_var.get().strip() or "ru"
+        if lang == "en":
+            return (
+                "The app does not currently have a trusted saved start pose. "
+                "For safety it will not send 'Go to start'. If the printer is already physically at the start pose, press 'Save start'. "
+                "Otherwise use manual jog first, then press 'Save start'."
+            )
+        if lang == "zh":
+            return (
+                "程序当前没有可信的已保存起点。为安全起见，不会发送 'Go to start'。"
+                "如果打印机已经实际位于起点，请点击 'Save start'；否则请先手动点动到起点，再保存。"
+            )
+        return (
+            "Сейчас у приложения нет доверенной сохранённой стартовой позы, поэтому оно безопасно не отправляет 'К старту'. "
+            "Если принтер уже физически стоит в стартовой позе, нажми 'Запомнить старт'. "
+            "Если нет — сначала выставь позу ручными кнопками, потом нажми 'Запомнить старт'."
+        )
+
+    def _show_missing_start_zero(self) -> None:
+        msg = self._missing_start_zero_text()
+        self.log(msg)
+        if self.post_print_recovery_required:
+            self._show_post_print_recovery_window("blocked-start")
+        messagebox.showerror("Little Hands", msg)
+
     def go_print_home(self) -> None:
         if not self.session_zero_defined:
-            messagebox.showerror("Little Hands", "Сначала выставь стартовую позу и нажми 'Запомнить старт'.")
+            self._show_missing_start_zero()
             return
 
         def task() -> None:
