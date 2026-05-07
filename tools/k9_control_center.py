@@ -295,6 +295,7 @@ class K9ControlCenter:
         self.current_print_progress_pct: float | None = None
         self.print_state_restored_from_log = False
         self.print_start_watchdog_alerted = False
+        self.post_print_recovery_required = False
         self.printer_halted = False
         self.last_temp_sample_ts = 0.0
         self.last_temp_log_ts = 0.0
@@ -325,6 +326,8 @@ class K9ControlCenter:
         self.files_window_status_label: tk.Label | None = None
         self.manual_window: tk.Toplevel | None = None
         self.manual_text_widget: ScrolledText | None = None
+        self.post_print_window: tk.Toplevel | None = None
+        self.post_print_text_widget: tk.Text | None = None
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         GUI_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -478,6 +481,19 @@ class K9ControlCenter:
             state["selected_view"] = "log" if str(current) == str(self.log_frame) else "metrics"
         except Exception:
             pass
+        try:
+            state["main_sash"] = int(self.main_pane.sashpos(0))
+        except Exception:
+            pass
+        try:
+            _x, y = self.left_split.sash_coord(0)
+            state["left_split_y"] = int(y)
+        except Exception:
+            pass
+        try:
+            UI_STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def _t(self, key: str) -> str:
         lang = self.lang_var.get().strip() or "ru"
@@ -579,19 +595,6 @@ class K9ControlCenter:
                 break
         self._apply_language()
         self._save_ui_state()
-        try:
-            state["main_sash"] = int(self.main_pane.sashpos(0))
-        except Exception:
-            pass
-        try:
-            _x, y = self.left_split.sash_coord(0)
-            state["left_split_y"] = int(y)
-        except Exception:
-            pass
-        try:
-            UI_STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
 
     def _on_close(self) -> None:
         self._save_ui_state()
@@ -1131,16 +1134,22 @@ class K9ControlCenter:
             buttons.columnconfigure(idx, weight=1)
         self.refresh_sd_button = ttk.Button(buttons, text="Обновить список", command=self.refresh_sd_files)
         self.refresh_sd_button.grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.refresh_sd_button)
         self.start_print_button = ttk.Button(buttons, text="Старт печати", command=self.start_selected_print_with_home)
         self.start_print_button.grid(row=0, column=1, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.start_print_button)
         self.delete_button = ttk.Button(buttons, text="Удалить", command=self.delete_selected_file)
         self.delete_button.grid(row=0, column=2, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.delete_button)
         self.pause_button = ttk.Button(buttons, text="Пауза", command=self.pause_print)
         self.pause_button.grid(row=1, column=0, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.pause_button)
         self.resume_button = ttk.Button(buttons, text="Продолжить", command=self.resume_print)
         self.resume_button.grid(row=1, column=1, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.resume_button)
         self.stop_button = ttk.Button(buttons, text="Стоп", command=self.stop_print)
         self.stop_button.grid(row=1, column=2, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.stop_button)
         self.left_split.add(live_frame, stretch="always", minsize=180)
         self.left_split.add(sd_frame, stretch="always", minsize=120)
 
@@ -1165,10 +1174,13 @@ class K9ControlCenter:
 
         self.save_start_button = ttk.Button(motion, text="Запомнить старт", command=self.set_current_home_zero)
         self.save_start_button.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.save_start_button)
         self.go_start_button = ttk.Button(motion, text="К старту", command=self.go_print_home)
         self.go_start_button.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.go_start_button)
         self.motors_off_button = ttk.Button(motion, text="Моторы выкл", command=self.motor_off)
         self.motors_off_button.grid(row=0, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.motors_off_button)
 
         self.step_label = ttk.Label(motion, text="Шаг")
         self.step_label.grid(row=1, column=0, sticky="w", pady=(2, 1))
@@ -1179,18 +1191,25 @@ class K9ControlCenter:
 
         self.head_left_button = ttk.Button(motion, text="Голова влево", command=lambda: self.jog_axis("X", -self.step_var.get()))
         self.head_left_button.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.head_left_button)
         self.head_right_button = ttk.Button(motion, text="Голова вправо", command=lambda: self.jog_axis("X", self.step_var.get()))
         self.head_right_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.head_right_button)
         self.bed_away_button = ttk.Button(motion, text="Стол от себя", command=lambda: self.jog_axis("Y", -self.step_var.get()))
         self.bed_away_button.grid(row=2, column=2, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.bed_away_button)
         self.bed_toward_button = ttk.Button(motion, text="Стол к себе", command=lambda: self.jog_axis("Y", self.step_var.get()))
         self.bed_toward_button.grid(row=2, column=3, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.bed_toward_button)
         self.head_down_button = ttk.Button(motion, text="Голова вниз", command=lambda: self.jog_axis("Z", -self.step_var.get()))
         self.head_down_button.grid(row=3, column=0, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.head_down_button)
         self.head_up_button = ttk.Button(motion, text="Голова вверх", command=lambda: self.jog_axis("Z", self.step_var.get()))
         self.head_up_button.grid(row=3, column=1, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.head_up_button)
         self.hard_stop_button = ttk.Button(motion, text="Жёсткий стоп", command=self.hard_stop)
         self.hard_stop_button.grid(row=3, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.hard_stop_button)
 
         level = ttk.LabelFrame(controls, text="Калибровка стола", padding=6)
         self.level_frame = level
@@ -1626,6 +1645,14 @@ class K9ControlCenter:
             elif kind == "find-port-ui":
                 active = bool(payload)
                 self._set_find_port_busy(active)
+            elif kind == "post-print-recovery":
+                reason = str(payload or "completion")
+                self.post_print_recovery_required = True
+                self.log(self._post_print_recovery_text(reason))
+                self._show_post_print_recovery_window(reason)
+            elif kind == "post-print-recovery-clear":
+                self.post_print_recovery_required = False
+                self._close_post_print_window()
         self.root.after(150, self._drain_events)
 
     def _render_metrics(self) -> None:
@@ -1776,6 +1803,10 @@ class K9ControlCenter:
             return "Marlin / принтер"
         if detected == "marlin-like":
             return "похож на принтер"
+        if detected == "usb-visible-no-marlin":
+            return "CH340 виден / Marlin молчит"
+        if detected == "probe-error":
+            return "USB виден / ошибка ответа"
         if vid == "1A86" and pid == "7523":
             return "CH340 / вероятный K9"
         if "ch340" in hay or "wch" in hay:
@@ -1866,6 +1897,9 @@ class K9ControlCenter:
         self.root.after(300, self._tick_find_port_button)
 
     def detect_printer_port_action(self) -> None:
+        if self.user_task_pending:
+            self.log("Поиск порта не запущен: предыдущая USB-команда ещё выполняется.")
+            return
         self._set_find_port_busy(True)
 
         def task() -> None:
@@ -1874,8 +1908,20 @@ class K9ControlCenter:
                 detected, ranked = sdtool.detect_printer_port(self._baud())
                 self.events.put(("ports", (ranked, detected)))
                 if detected:
-                    self._post("log", f"Найден вероятный принтер: {detected}")
-                    self._post("info", f"Найден вероятный принтер:\n{detected}")
+                    detected_meta = next((meta for meta in ranked if meta.get("device") == detected), {})
+                    detected_kind = str(detected_meta.get("detected") or "")
+                    if detected_kind in {"marlin", "marlin-like"}:
+                        self._post("log", f"Найден вероятный принтер: {detected}")
+                        self._post("info", f"Найден вероятный принтер:\n{detected}")
+                    else:
+                        msg = (
+                            f"USB-порт похож на принтер и выбран: {detected}\n\n"
+                            "Но Marlin сейчас не ответил на M115/M105. После завершения предыдущей печати "
+                            "это обычно означает полуживое состояние USB/SD: сделай power cycle принтера "
+                            "на 5–10 секунд, затем нажми 'Найти' ещё раз."
+                        )
+                        self._post("log", msg)
+                        self._post("info", msg)
                 else:
                     self._post("log", "Автодетект не нашёл уверенный порт принтера. Оставляю ручной выбор.")
                     self._post("info", "Автопоиск не нашёл уверенный порт принтера.\nВыбери порт вручную из списка.")
@@ -1961,6 +2007,129 @@ class K9ControlCenter:
         for delay_ms in (0, 180, 420):
             self.root.after(delay_ms, self.root.bell)
 
+    def _post_print_recovery_text(self, reason: str = "completion") -> str:
+        lang = self.lang_var.get().strip() or "ru"
+        failed = reason in {"failed-start", "blocked-start"}
+        if lang == "en":
+            intro = (
+                "The previous/repeated print did not enter a reliable printer state."
+                if failed else
+                "Print finished. Before the next print, bring the printer back to a clean start state."
+            )
+            return (
+                f"{intro}\n\n"
+                "1. Remove the printed part from the bed.\n"
+                "2. Press 'Go to start' and wait until the printer physically returns to the saved start pose.\n"
+                "3. Power the printer off for 5-10 seconds, then power it on again.\n"
+                "4. If the port is not responsive, press 'Find'. If the app sees CH340 but Marlin does not answer, repeat the power cycle.\n"
+                "5. Make sure the printer is still in the start pose and press 'Save start'.\n"
+                "6. Start the next SD print only after that.\n\n"
+                "Why: after an SD print this K9/Marlin build can leave USB/SD in a half-alive state. Starting again before a power cycle can produce clicks, frozen telemetry, or no motion."
+            )
+        if lang == "zh":
+            intro = "上一次/重复打印没有进入可靠状态。" if failed else "打印已完成。下一次打印前，请先回到干净的起始状态。"
+            return (
+                f"{intro}\n\n"
+                "1. 从平台上取下模型。\n"
+                "2. 点击 'Go to start'，等待打印机实际回到已保存的起始位置。\n"
+                "3. 关闭打印机电源 5-10 秒，然后重新打开。\n"
+                "4. 如果端口没有响应，点击 'Find'。如果只看到 CH340 但 Marlin 不回应，请再次断电重启。\n"
+                "5. 确认打印机仍在起始位置，然后点击 'Save start'。\n"
+                "6. 之后再开始下一次 SD 打印。\n\n"
+                "原因：这台 K9/Marlin 在 SD 打印结束后可能让 USB/SD 留在半工作状态，直接重复启动会导致咔哒声、遥测冻结或无动作。"
+            )
+        intro = (
+            "Предыдущий/повторный старт не перевёл принтер в надёжное состояние."
+            if failed else
+            "Печать завершена. Перед следующей печатью верни принтер в чистое стартовое состояние."
+        )
+        return (
+            f"{intro}\n\n"
+            "1. Сними модель со стола.\n"
+            "2. Нажми 'К старту' и дождись, пока принтер физически вернётся в сохранённую стартовую позу.\n"
+            "3. Выключи принтер по питанию на 5–10 секунд и включи снова.\n"
+            "4. Если порт не отвечает, нажми 'Найти'. Если приложение видит CH340, но Marlin молчит, повтори power cycle.\n"
+            "5. Убедись, что принтер всё ещё в стартовой позе, и нажми 'Запомнить старт'.\n"
+            "6. Только после этого запускай следующую печать с SD.\n\n"
+            "Почему так: после SD-печати эта связка K9/Marlin иногда оставляет USB/SD в полуживом состоянии. "
+            "Повторный старт без power cycle может дать щелчки, замершую телеметрию или отсутствие движения."
+        )
+
+    def _confirm_post_print_recovery(self) -> None:
+        self.post_print_recovery_required = False
+        self.log("Послепечатный цикл подтверждён: следующая печать снова разрешена.")
+        self._close_post_print_window()
+
+    def _close_post_print_window(self) -> None:
+        if self.post_print_window and self.post_print_window.winfo_exists():
+            self.post_print_window.destroy()
+        self.post_print_window = None
+        self.post_print_text_widget = None
+
+    def _show_post_print_recovery_window(self, reason: str = "completion") -> None:
+        text = self._post_print_recovery_text(reason)
+        title = {
+            "ru": "Перед следующей печатью",
+            "en": "Before Next Print",
+            "zh": "下一次打印前",
+        }.get(self.lang_var.get().strip() or "ru", "Перед следующей печатью")
+        if self.post_print_window and self.post_print_window.winfo_exists():
+            win = self.post_print_window
+            win.deiconify()
+            win.lift()
+            if self.post_print_text_widget and self.post_print_text_widget.winfo_exists():
+                self.post_print_text_widget.configure(state="normal")
+                self.post_print_text_widget.delete("1.0", "end")
+                self.post_print_text_widget.insert("1.0", text)
+                self.post_print_text_widget.configure(state="disabled")
+            return
+
+        win = tk.Toplevel(self.root)
+        self.post_print_window = win
+        win.title(title)
+        win.geometry("680x430")
+        win.minsize(560, 340)
+        win.configure(bg=self.colors["bg"])
+        win.transient(self.root)
+
+        frame = ttk.Frame(win, padding=14)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        text_widget = tk.Text(frame, wrap="word", height=12)
+        self.post_print_text_widget = text_widget
+        text_widget.grid(row=0, column=0, sticky="nsew")
+        text_widget.insert("1.0", text)
+        text_widget.configure(
+            state="disabled",
+            bg=self.colors["field_alt"],
+            fg=self.colors["text"],
+            insertbackground=self.colors["accent"],
+            relief="solid",
+            borderwidth=1,
+            highlightbackground=self.colors["border"],
+            highlightcolor=self.colors["accent"],
+        )
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        buttons.columnconfigure(0, weight=1)
+        buttons.columnconfigure(1, weight=1)
+        close_label = {"ru": "Понятно", "en": "OK", "zh": "知道了"}.get(self.lang_var.get().strip() or "ru", "Понятно")
+        confirm_label = {
+            "ru": "Цикл выполнен, старт записан",
+            "en": "Cycle done, start saved",
+            "zh": "已重启并保存起点",
+        }.get(self.lang_var.get().strip() or "ru", "Цикл выполнен, старт записан")
+        ttk.Button(buttons, text=close_label, command=self._close_post_print_window).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(buttons, text=confirm_label, command=self._confirm_post_print_recovery).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        def _on_close() -> None:
+            self._close_post_print_window()
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
     def _run_printer_completion_sequence(self) -> str:
         # Natural print completion: lift the head a little and present the part.
         commands = [
@@ -1983,6 +2152,9 @@ class K9ControlCenter:
         )
 
     def _run_task(self, label: str, func, *, require_port: bool = True) -> None:
+        if self.user_task_pending:
+            self.log(f"Команда '{label}' не запущена: предыдущая USB-команда ещё выполняется.")
+            return
         if require_port and not self._port():
             messagebox.showerror("Little Hands", "Сначала выбери порт принтера, нажми 'Найти' или оставь 'не подключаться'.")
             return
@@ -2274,6 +2446,8 @@ class K9ControlCenter:
         self._run_task("Заливка G-code на SD", task)
 
     def upload_and_start_gcode(self) -> None:
+        if not self._guard_post_print_recovery():
+            return
         source = Path(self.local_gcode_var.get().strip()).expanduser().resolve()
         if not source.is_file():
             messagebox.showerror("Little Hands", "Выбери существующий G-code файл.")
@@ -2307,6 +2481,11 @@ class K9ControlCenter:
             self._post("sd-files", files)
             out = sdtool.start_sd_print_from_pseudo_home(self._port(), self._baud(), dest)
             self.current_print_file = dest
+            self.current_print_start_ts = time.time()
+            self.current_print_progress_pct = 0.0
+            self.print_state_restored_from_log = False
+            self.print_start_watchdog_alerted = False
+            self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={dest}")
             self._post("active-sd", f"Печатается: {dest}")
             self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {dest}")
             self._post("progress", ("Печать: старт", 0.0))
@@ -2389,7 +2568,16 @@ class K9ControlCenter:
             return None
         return self.sd_display_to_path.get(display, display)
 
+    def _guard_post_print_recovery(self) -> bool:
+        if not self.post_print_recovery_required:
+            return True
+        self.log("Старт печати заблокирован: сначала выполни послепечатный цикл из инструкции.")
+        self._show_post_print_recovery_window("blocked-start")
+        return False
+
     def start_selected_print(self) -> None:
+        if not self._guard_post_print_recovery():
+            return
         path = self._selected_print_sd_path()
         if not path:
             messagebox.showerror("K9 Control Center", "Выбери файл в секции 'Файлы для печати'.")
@@ -2411,6 +2599,8 @@ class K9ControlCenter:
         self._run_task("Запуск SD-печати", task)
 
     def start_selected_print_with_home(self) -> None:
+        if not self._guard_post_print_recovery():
+            return
         path = self._selected_print_sd_path()
         if not path:
             messagebox.showerror("Little Hands", "Выбери файл в секции 'Файлы для печати'.")
@@ -2593,6 +2783,9 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.set_current_home_zero(self._port(), self._baud())
             self.session_zero_defined = True
+            if self.post_print_recovery_required:
+                self._post("post-print-recovery-clear", None)
+                self._post("log", "Стартовая поза записана после послепечатного цикла: следующая печать разрешена.")
             self._post("log", out.strip() or "Стартовая поза запомнена")
             self._post("log", "Теперь можно нажимать 'К старту' и 'Печать с SD'.")
 
@@ -2739,16 +2932,7 @@ class K9ControlCenter:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята, проиграна мелодия на компьютере")
                         else:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята")
-                        self._post(
-                            "info",
-                            "Печать завершена.\n\n"
-                            "1. Сними модель со стола.\n"
-                            "2. Выключи принтер по питанию на 5–10 секунд и включи снова.\n"
-                            "3. Выставь стартовую позу.\n"
-                            "4. Нажми 'К старту'.\n"
-                            "5. Если поза совпала со стартовой, нажми 'Запомнить старт'.\n\n"
-                            "Так у тебя останется валидный старт для следующей печати."
-                        )
+                        self._post("post-print-recovery", "completion")
                     self._append_ring_log(
                         f"{time.strftime('%H:%M:%S')} PRINT_END file={self.current_print_file} temp={current_temp if current_temp is not None else '?'}"
                     )
@@ -2765,15 +2949,14 @@ class K9ControlCenter:
                     and (now - self.current_print_start_ts) >= 20.0
                 ):
                     self.print_start_watchdog_alerted = True
-                    msg = (
-                        "Печать была запущена, но принтер долго не начал двигаться. "
-                        "Если телеметрия замерла или слышны только щелчки, самый надёжный следующий шаг — "
-                        "выключить принтер по питанию на 5–10 секунд, включить снова, заново выставить стартовую "
-                        "позу и только потом повторить запуск. Также проверь, что EEPROM сохранён корректно, и если "
-                        "нужно создай его через окно 'Файлы и прошивка'."
-                    )
-                    self._post("log", msg)
-                    self._post("info", msg)
+                    try:
+                        recovery_out = sdtool.stop_sd_print(self._port(), self._baud())
+                        if recovery_out.strip():
+                            self._post("log", recovery_out.strip())
+                    except Exception as exc:
+                        self._post("log", f"Автостоп после неподтверждённого старта не получил уверенный ответ: {exc}")
+                    self._clear_print_session_state("Печать: старт не подтверждён", 0.0)
+                    self._post("post-print-recovery", "failed-start")
             self._post("metrics", ("m27", sd))
             if (
                 self.pending_flash_finalize

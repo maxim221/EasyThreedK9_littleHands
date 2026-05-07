@@ -1663,3 +1663,20 @@ After each test print, append:
   - `speed_layer_0 = 7`
   - `initial_layer_line_width_factor = 135`
   - support remains off
+
+## 2026-05-07 Post-Print Recovery Guard
+
+- Fixed the post-print recovery instruction order:
+  - remove the part first
+  - press `Go to start` while the saved zero is still valid
+  - then power-cycle the printer
+  - after power-on, press `Save start`
+- Replaced the blocking completion messagebox with a non-modal instruction window so the main UI can continue repainting and resizing.
+- Added a post-print recovery guard:
+  - after natural completion or a failed repeated start, `Little Hands` blocks the next SD print start
+  - the block is cleared when the operator confirms the recovery window or saves the start pose again
+- Added duplicate-command protection so repeated clicks cannot queue multiple USB movement tasks while one command is still running.
+- Fixed UI state persistence:
+  - geometry, selected tab, main sash, and left split position are now actually written to `monitor_logs/little_hands_ui_state.json`
+- Improved port detection diagnostics:
+  - if a CH340-like port is visible but Marlin does not answer `M115/M105`, the app selects the candidate but reports that the printer likely needs a power cycle instead of pretending no USB device exists

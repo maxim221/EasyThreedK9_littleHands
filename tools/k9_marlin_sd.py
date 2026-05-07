@@ -105,10 +105,25 @@ def detect_printer_port(baud: int = 115200, probe_timeout_s: float = 2.8) -> tup
             if "T:" in caps and "ok" in caps:
                 meta["detected"] = "marlin-like"
                 return device, ranked
+            meta["detected"] = "usb-visible-no-marlin"
+            meta["probe_reply"] = caps.strip()[:160]
             if probe_timeout_s and _port_score(meta) <= 0:
                 meta["detected"] = "timeout"
-        except Exception:
+        except Exception as exc:
+            meta["detected"] = "probe-error"
+            meta["probe_error"] = str(exc)[:160]
             continue
+    fallback = next(
+        (
+            meta for meta in likely[:8]
+            if meta.get("device")
+            and (meta.get("vid", "").upper(), meta.get("pid", "").upper()) == ("1A86", "7523")
+        ),
+        None,
+    )
+    if fallback:
+        fallback["detected"] = fallback.get("detected") or "usb-visible-no-marlin"
+        return fallback.get("device"), ranked
     return None, ranked
 
 

@@ -163,7 +163,20 @@ Re-slice when:
 8. Press `Go to start` and confirm it returns correctly.
 9. Start printing from SD.
 
-## 10. Recovery Rule
+## 10. Between Prints
+
+After a successful SD print, use this order before starting the next one:
+
+1. Remove the printed part from the bed.
+2. Press `Go to start` while the saved zero is still valid.
+3. Power-cycle the printer for `5–10` seconds.
+4. Confirm the printer is still in the start pose.
+5. Press `Save start`.
+6. Start the next SD print.
+
+The app blocks repeated SD starts after completion until this recovery cycle is acknowledged.
+
+## 11. Recovery Rule
 
 If a print start fails and you see:
 
