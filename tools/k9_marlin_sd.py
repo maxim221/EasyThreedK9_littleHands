@@ -317,29 +317,45 @@ def parse_m20_listing(text: str) -> list[str]:
 
 
 def read_sd_listing(port: str, baud: int, firmware_only: bool = False) -> tuple[list[str], str, str]:
-    commands = ["M20 F"] if firmware_only else ["M20 L", "M20"]
+    commands = ["M20 F"] if firmware_only else ["M20", "M20 L", "M20 F"]
     last_out = ""
     last_status = "unavailable"
 
-    for cmd in commands:
-        for _attempt in range(2):
-            with open_serial(port, baud) as ser:
-                sync_ascii(ser)
-                ensure_sd_ready(ser)
-                send_line(ser, cmd)
-                time.sleep(1.2)
-                out = read_for(ser, 2.0)
-            last_out = out
-            if "No SD card" in out or "No media" in out:
+    for _attempt in range(2):
+        with open_serial(port, baud) as ser:
+            sync_ascii(ser)
+            sd_out = ensure_sd_ready(ser)
+            time.sleep(0.7)
+            send_line(ser, "M27")
+            time.sleep(0.4)
+            status_out = read_for(ser, 1.2)
+            base_out = sd_out + status_out
+            last_out = base_out
+            lowered_status = base_out.lower()
+            if "No SD card" in base_out or "No media" in base_out:
                 raise RuntimeError("Printer reports no SD card / no media")
-            files = parse_m20_listing(out)
-            if "Begin file list" in out or ("End file list" in out and files) or files:
-                return files, "ok", out
-            lowered = out.lower()
-            if "busy" in lowered or "processing" in lowered or "sd printing byte" in lowered:
-                return [], "busy", out
-            last_status = "unavailable"
-            time.sleep(0.3)
+            if "sd printing byte" in lowered_status:
+                return [], "busy", base_out
+
+            for cmd in commands:
+                send_line(ser, cmd)
+                time.sleep(0.8)
+                out = read_for(ser, 3.0)
+                combined = base_out + out
+                last_out = combined
+                if "No SD card" in combined or "No media" in combined:
+                    raise RuntimeError("Printer reports no SD card / no media")
+                files = parse_m20_listing(combined)
+                if "Begin file list" in combined or ("End file list" in combined and files) or files:
+                    return files, "ok", combined
+                lowered = combined.lower()
+                if "sd printing byte" in lowered:
+                    return [], "busy", combined
+                if "busy" in lowered or "processing" in lowered:
+                    last_status = "busy"
+                else:
+                    last_status = "unavailable"
+        time.sleep(0.8)
 
     if not last_out.strip():
         return [], "unavailable", last_out

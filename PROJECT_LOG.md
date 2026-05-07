@@ -1724,3 +1724,13 @@ After each test print, append:
   - if active SD printing is not confirmed, it sends `M24` once more and checks again
   - only `M27` active-print confirmation is treated as a successful start
   - if the start is still not confirmed after retry, the app raises an explicit recovery error instead of showing a misleading success
+
+## 2026-05-07 More Robust SD File Listing
+
+- Observed a post-restart failure where the printer answered temperature polling but returned no usable SD file list for `M20`.
+- Hardened SD listing:
+  - use one open serial session per listing attempt instead of reopening for each `M20` variant
+  - run `M21`, wait briefly, then check `M27` before asking for files
+  - try `M20`, `M20 L`, and `M20 F`
+  - read each listing response for longer
+  - log a short raw response excerpt, or explicitly log that all `M20` variants were empty

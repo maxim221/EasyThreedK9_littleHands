@@ -2510,7 +2510,14 @@ class K9ControlCenter:
                 self._post("log", "Во время активной SD-печати список файлов сейчас недоступен.")
             else:
                 self._post("sd", "SD: список недоступен")
-                self._post("log", raw.strip() or "Принтер не вернул список файлов SD.")
+                excerpt = " ".join(raw.strip().split())
+                if excerpt:
+                    self._post("log", f"Принтер не вернул список файлов SD. Последний ответ: {excerpt[:260]}")
+                else:
+                    self._post(
+                        "log",
+                        "Принтер не вернул список файлов SD: пустой ответ на M20/M20 L/M20 F после M21/M27.",
+                    )
 
         self._run_task("Чтение списка SD", task)
 
