@@ -1834,10 +1834,11 @@ After each test print, append:
   - current STL dimensions are about `70.0 x 52.64 x 15.0 mm`
   - original orientation has only about `260 mm2` of bottom contact
   - the broad face contact after flipping is about `2850 mm2`
-  - the rough face is therefore a slicer/orientation problem first, not just a temperature problem
+  - later correction from the operator: the printed model had already been manually placed broad-side-down in Cura
+  - the real failed surface is therefore a remaining unsupported overhang / underside, not the bed-contact orientation
 - Created local working STL:
   - `mainFlasherTop_broadFaceDown.STL`
-  - this is the same mesh rotated 180 degrees around X so the broad face lies on the bed
+  - this is still useful as a no-manual-rotation helper, but it is not by itself the fix for the rough unsupported face
 - Updated local Cura 5.11 active profile `codex - K9 warm mat cautious` for the next PLA test:
   - `layer_height = 0.16`
   - `layer_height_0 = 0.2`
@@ -1851,7 +1852,17 @@ After each test print, append:
   - `speed_infill = 18`
   - `speed_travel = 40`
   - `brim_width = 6`
-  - `support_enable = False`
+  - `support_enable = True`
+  - `support_type = buildplate`
+  - `support_angle = 45`
+  - `support_infill_rate = 12`
+  - `support_interface_enable = True`
+  - `support_roof_enable = True`
+  - `support_interface_density = 85`
+  - `support_roof_density = 85`
+  - `support_z_distance = 0.16`
+  - bridge tuning enabled: fan `100`, bridge skin/wall speed `10`, bridge flow `90`
 - Next test instruction:
-  - slice `mainFlasherTop_broadFaceDown.STL`, not the original orientation
-  - if this still leaves a bad underside, then the next branch is supports/interface, not more temperature tweaking
+  - slice broad-side-down; using `mainFlasherTop_broadFaceDown.STL` avoids having to rotate manually
+  - inspect Cura preview: the bad underside should show generated support/interface below it
+  - if supports are still missing under that face, change support placement from `Touching Buildplate` to `Everywhere` for this model
