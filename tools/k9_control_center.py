@@ -41,6 +41,8 @@ UI_STATE_PATH = LOG_DIR / "little_hands_ui_state.json"
 TEMP_GRAPH_WINDOW_SEC = 15 * 60
 TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
 TEMP_LOG_INTERVAL_SEC = 5.0
+AUTO_SD_REFRESH_DELAY_MS = 3500
+PRINT_START_GRACE_SEC = 5 * 60
 
 
 TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
@@ -441,6 +443,7 @@ class K9ControlCenter:
             ms = start_re.search(line)
             if ms:
                 last_active = ms.group(4).strip()
+                last_end = None
                 last_start_ts = stamp_for(int(ms.group(1)), int(ms.group(2)), int(ms.group(3)))
                 first_active_telem_ts = None
                 last_progress_pct = None
@@ -1979,10 +1982,17 @@ class K9ControlCenter:
         if not force and self.auto_sd_refresh_after_port == port:
             return
         self.auto_sd_refresh_after_port = port
-        self.root.after(900, lambda: self._try_auto_sd_refresh_after_port(port, 0))
+        self.root.after(AUTO_SD_REFRESH_DELAY_MS, lambda: self._try_auto_sd_refresh_after_port(port, 0))
 
     def _try_auto_sd_refresh_after_port(self, port: str, attempt: int) -> None:
         if self._port() != port or self.auto_sd_refresh_after_port != port:
+            return
+        if self.current_print_file != "-":
+            self.auto_sd_refresh_after_port = None
+            self.log(
+                "Автообновление SD пропущено: в логе есть незавершённый старт печати. "
+                "Сначала проверяю статус M27, чтобы не трогать карту во время возможной SD-печати."
+            )
             return
         if self.user_task_pending:
             if attempt < 6:
@@ -1993,6 +2003,22 @@ class K9ControlCenter:
         self.auto_sd_refresh_after_port = None
         self.log(f"Порт принтера {port} подключён: автоматически обновляю список SD.")
         self.refresh_sd_files()
+
+    def _mark_sd_start_sent(self, path: str, display: str) -> None:
+        self.current_print_file = path
+        self.current_print_display = display
+        self.current_print_start_ts = time.time()
+        self.current_print_progress_pct = 0.0
+        self.print_state_restored_from_log = False
+        self.print_start_watchdog_alerted = False
+        self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
+        self._post("active-sd", f"Печатается: {display}")
+        self._post("progress", ("Печать: старт отправлен, жду SD/прогрев", 0.0))
+        self._post(
+            "log",
+            "Старт SD отправлен. На K9 после M24 прошивка может несколько минут отвечать только busy "
+            "или молчать, особенно пока входит в прогрев. Не обновляй список SD в этот момент.",
+        )
 
     def _refresh_ports_on_startup(self) -> None:
         try:
@@ -2551,7 +2577,7 @@ class K9ControlCenter:
                 else:
                     self._post(
                         "log",
-                        "Принтер не вернул список файлов SD: пустой ответ на M20/M20 L/M20 F после M21/M27.",
+                        "Принтер не вернул список файлов SD: пустой ответ на M20 L / M20 после M21.",
                     )
 
         self._run_task("Чтение списка SD", task)
@@ -2627,16 +2653,8 @@ class K9ControlCenter:
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
             out = sdtool.start_sd_print_from_pseudo_home(self._port(), self._baud(), dest)
-            self.current_print_file = dest
-            self.current_print_display = source.name
-            self.current_print_start_ts = time.time()
-            self.current_print_progress_pct = 0.0
-            self.print_state_restored_from_log = False
-            self.print_start_watchdog_alerted = False
-            self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={dest}")
-            self._post("active-sd", f"Печатается: {source.name}")
+            self._mark_sd_start_sent(dest, source.name)
             self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {source.name}")
-            self._post("progress", ("Печать: старт", 0.0))
             self.at_saved_start_pose = False
             self.print_was_active = False
             self.suppress_next_completion_chime = False
@@ -2735,14 +2753,7 @@ class K9ControlCenter:
 
         def task() -> None:
             out = sdtool.start_sd_print(self._port(), self._baud(), path)
-            self.current_print_file = path
-            self.current_print_display = display
-            self.current_print_start_ts = time.time()
-            self.current_print_progress_pct = 0.0
-            self.print_state_restored_from_log = False
-            self.print_start_watchdog_alerted = False
-            self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
-            self._post("active-sd", f"Печатается: {display}")
+            self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"Печать запущена: {display}")
             self.at_saved_start_pose = False
             self.print_was_active = False
@@ -2769,14 +2780,7 @@ class K9ControlCenter:
             else:
                 out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
                 start_note = "Печать с SD запущена от сохранённого старта"
-            self.current_print_file = path
-            self.current_print_display = display
-            self.current_print_start_ts = time.time()
-            self.current_print_progress_pct = 0.0
-            self.print_state_restored_from_log = False
-            self.print_start_watchdog_alerted = False
-            self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
-            self._post("active-sd", f"Печатается: {display}")
+            self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"{start_note}: {display}")
             self.at_saved_start_pose = False
             self.print_was_active = False
@@ -3024,7 +3028,15 @@ class K9ControlCenter:
     def _poll_worker(self) -> None:
         try:
             now = time.time()
-            temp = sdtool.query_command(self._port(), self._baud(), "M105", wait_before_read=0.12, read_seconds=0.45)
+            temp = sdtool.query_command(
+                self._port(),
+                self._baud(),
+                "M105",
+                wait_before_read=0.12,
+                read_seconds=0.45,
+                sync=False,
+                reset_input=False,
+            )
             match = TEMP_RE.search(temp)
             current_temp = None
             target_temp = None
@@ -3041,18 +3053,42 @@ class K9ControlCenter:
                         f"{time.strftime('%H:%M:%S')} M105 T:{current_temp:.2f} /{target_temp:.2f} @:{heater_value}"
                     )
             self._post("metrics", ("m105", temp))
-            sd = sdtool.query_command(self._port(), self._baud(), "M27", wait_before_read=0.15, read_seconds=0.45)
+            sd = sdtool.query_command(
+                self._port(),
+                self._baud(),
+                "M27",
+                wait_before_read=0.15,
+                read_seconds=0.45,
+                sync=False,
+                reset_input=False,
+            )
             summary = next((line.strip() for line in sd.splitlines() if line.strip()), "SD: idle")
             self._post("sd", summary)
             if (now - self.last_position_sample_ts) >= 3.0:
-                m114 = sdtool.query_command(self._port(), self._baud(), "M114", wait_before_read=0.1, read_seconds=0.35)
+                m114 = sdtool.query_command(
+                    self._port(),
+                    self._baud(),
+                    "M114",
+                    wait_before_read=0.1,
+                    read_seconds=0.35,
+                    sync=False,
+                    reset_input=False,
+                )
                 pos_line = next((line.strip() for line in m114.splitlines() if "X:" in line and "Y:" in line and "Z:" in line), "").strip()
                 if pos_line:
                     self._post("pos", pos_line)
                 self._post("metrics", ("m114", m114))
             if not self.last_fw_line and (now - self.last_fw_query_ts) >= 15.0:
                 self.last_fw_query_ts = now
-                m115 = sdtool.query_command(self._port(), self._baud(), "M115", wait_before_read=0.1, read_seconds=0.5)
+                m115 = sdtool.query_command(
+                    self._port(),
+                    self._baud(),
+                    "M115",
+                    wait_before_read=0.1,
+                    read_seconds=0.5,
+                    sync=False,
+                    reset_input=False,
+                )
                 fw_line = next((line for line in m115.splitlines() if line.startswith("FIRMWARE_NAME:")), "")
                 if fw_line:
                     self._post("fw", self._format_fw_line(fw_line))
@@ -3076,7 +3112,16 @@ class K9ControlCenter:
                         f"{time.strftime('%H:%M:%S')} TELEMETRY file={self.current_print_file} progress={pct:.1f}% temp={current_temp:.2f}/{target_temp:.2f} sd=\"{summary}\""
                     )
             elif "Not SD printing" in sd:
-                self._post("progress", ("Печать: простой", 0.0))
+                in_start_grace = (
+                    self.current_print_file != "-"
+                    and self.current_print_start_ts
+                    and not self.print_was_active
+                    and (now - self.current_print_start_ts) < PRINT_START_GRACE_SEC
+                )
+                if in_start_grace:
+                    self._post("progress", ("Печать: старт отправлен, жду SD/прогрев", 0.0))
+                else:
+                    self._post("progress", ("Печать: простой", 0.0))
                 if self.print_state_restored_from_log and not self.print_was_active:
                     self.current_print_file = "-"
                     self.current_print_display = "-"
@@ -3086,6 +3131,7 @@ class K9ControlCenter:
                     self.print_start_watchdog_alerted = False
                     self._post("active-sd", "Печатается: -")
                     self._post("log", "Сбросил восстановленное из лога состояние печати: на текущем принтере активной SD-печати нет.")
+                    self._schedule_sd_refresh_after_port(self._port(), force=True)
                     return
                 if self.print_was_active:
                     self.print_was_active = False
@@ -3122,7 +3168,7 @@ class K9ControlCenter:
                     self.current_print_file != "-"
                     and self.current_print_start_ts
                     and not self.print_start_watchdog_alerted
-                    and (now - self.current_print_start_ts) >= 20.0
+                    and (now - self.current_print_start_ts) >= PRINT_START_GRACE_SEC
                 ):
                     self.print_start_watchdog_alerted = True
                     try:

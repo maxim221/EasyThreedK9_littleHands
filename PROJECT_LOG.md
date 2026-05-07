@@ -1781,3 +1781,19 @@ After each test print, append:
   - SD auto-refresh after reconnect
   - human-friendly SD file names
   - skip redundant pre-start move immediately after `Save start`
+
+## 2026-05-07 Reduce SD / USB Pressure Around Start
+
+- Observed another failed start pattern after automatic SD refresh:
+  - `M23/M24` returned `File opened` / `File selected`
+  - printer then stayed in `busy` / silent state and no fresh telemetry appeared
+- Reduced how much Little Hands touches SD and USB around print start:
+  - normal SD list refresh is back to the shorter `M20 L` / `M20` path
+  - `M20 F` is no longer used during normal printable-file refresh
+  - automatic SD refresh after reconnect waits longer before reading the card
+  - automatic SD refresh is skipped while the app still has an unresolved print-start state restored from the log
+  - log-based print-state restore now treats a newer `PRINT_START` for the same file as active even if an older run of that file has a `PRINT_END`
+  - telemetry polling no longer sends `M110` sync before every `M105/M27/M114/M115`
+  - print-start grace is now five minutes instead of a premature 20-second failed-start watchdog
+- Practical rule for the operator:
+  - after pressing `Start print`, do not refresh the SD list until the printer has either started heating / moving or clearly failed
