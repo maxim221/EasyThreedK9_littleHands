@@ -403,14 +403,22 @@ def _sd_printing_active(text: str) -> bool:
 
 
 def _select_sd_file_on_open_serial(ser: serial.Serial, target: str) -> str:
-    send_line(ser, f"M23 {target}")
-    out = read_until_tokens(ser, ("File selected", "open failed", "Error:", "ok"), timeout_s=7.0)
-    lowered = out.lower()
-    if "open failed" in lowered or "error:" in lowered:
-        raise RuntimeError(f"Could not select SD file {target}: {out.strip() or '<no response>'}")
-    if "file selected" not in lowered and "file opened" not in lowered and "ok" not in lowered:
-        raise RuntimeError(f"Could not confirm SD file selection for {target}: {out.strip() or '<no response>'}")
-    return out
+    transcript: list[str] = []
+    for attempt in range(3):
+        if attempt:
+            transcript.append(wait_for_motion_idle(ser, timeout_s=18.0, quiet_s=3.0))
+        send_line(ser, f"M23 {target}")
+        out = read_until_tokens(ser, ("File selected", "open failed", "Error:", "ok"), timeout_s=8.0)
+        transcript.append(out)
+        lowered = out.lower()
+        if "open failed" in lowered or "error:" in lowered:
+            raise RuntimeError(f"Could not select SD file {target}: {''.join(transcript).strip() or '<no response>'}")
+        if "file selected" in lowered or "file opened" in lowered or "ok" in lowered:
+            return "".join(transcript)
+        if "busy" in lowered or "processing" in lowered:
+            continue
+        break
+    raise RuntimeError(f"Could not confirm SD file selection for {target}: {''.join(transcript).strip() or '<no response>'}")
 
 
 def _confirm_sd_print_started_on_open_serial(ser: serial.Serial, *, attempts: int = 6) -> tuple[str | None, str]:
@@ -497,7 +505,7 @@ def _start_sd_print_from_home_once(port: str, baud: int, target: str) -> str:
         for line in ("M17", "G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M400"):
             send_line(ser, line)
             time.sleep(0.5)
-        _ = read_for(ser, 2.0)
+        _ = wait_for_motion_idle(ser, timeout_s=45.0, quiet_s=3.0)
         return _start_selected_sd_file_on_open_serial(ser, target, f"Start print from home {target}")
 
 
@@ -590,7 +598,7 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
         ):
             send_line(ser, line)
             time.sleep(0.5)
-        _ = read_for(ser, 5.0)
+        _ = wait_for_motion_idle(ser, timeout_s=55.0, quiet_s=3.0)
         return _start_selected_sd_file_on_open_serial(ser, target, f"Start print from pseudo-home {target}")
 
 
@@ -706,6 +714,24 @@ def read_until_tokens(ser: serial.Serial, stop_tokens: tuple[str, ...], timeout_
         chunks.append(text)
         if any(token in text for token in stop_tokens):
             break
+    return "".join(chunks)
+
+
+def wait_for_motion_idle(ser: serial.Serial, timeout_s: float = 35.0, quiet_s: float = 1.4) -> str:
+    """Wait until Marlin stops emitting busy lines after queued movement."""
+    chunks: list[str] = []
+    deadline = time.monotonic() + timeout_s
+    quiet_deadline = time.monotonic() + quiet_s
+    while time.monotonic() < deadline:
+        raw = ser.readline()
+        now = time.monotonic()
+        if not raw:
+            if now >= quiet_deadline:
+                break
+            continue
+        text = raw.decode("utf-8", "replace")
+        chunks.append(text)
+        quiet_deadline = now + quiet_s
     return "".join(chunks)
 
 

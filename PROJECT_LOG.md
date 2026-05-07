@@ -1743,3 +1743,16 @@ After each test print, append:
   - print/delete/start commands still use the short first token returned by Marlin
 - Selected-file and active-print labels now show the human-facing display string instead of only the short 8.3 filename.
 - Closing the GUI now explicitly stops telemetry and clears the selected port before destroying the window, so the serial port is released promptly on exit.
+
+## 2026-05-07 Wait For Motion Idle Before SD File Select
+
+- Observed a failed start where the head moved up/down, then Marlin answered only:
+  - `echo:busy: processing`
+  - no `File selected`
+- Root cause:
+  - `M23` was sent while the printer still considered the previous movement / `M400` busy
+  - Little Hands correctly refused to treat that as a selected file, but the recovery was not automatic
+- Hardened SD start:
+  - wait for a quiet period after the move-to-start sequence before sending `M23`
+  - if `M23` receives only busy/processing lines, wait for motion idle and retry file selection
+  - keep the stricter `M27` active-print confirmation before reporting start success
