@@ -1753,9 +1753,8 @@ After each test print, append:
   - `M23` was sent while the printer still considered the previous movement / `M400` busy
   - Little Hands correctly refused to treat that as a selected file, but the recovery was not automatic
 - Hardened SD start:
-  - wait for a quiet period after the move-to-start sequence before sending `M23`
-  - if `M23` receives only busy/processing lines, wait for motion idle and retry file selection
-  - keep the stricter `M27` active-print confirmation before reporting start success
+  - this strict approach was later found too aggressive for the K9 startup/heating behavior
+  - see `Restore Working SD Start Semantics` below for the corrected follow-up
 
 ## 2026-05-07 Skip Redundant Go-To-Start After Save Start
 
@@ -1765,4 +1764,20 @@ After each test print, append:
   - `Save start` marks the printer as already at saved start
   - `Go to start` marks the printer as back at saved start
   - jog / leveling / home / stop / print start clear that flag
-- When the flag is true, `Start print` skips the redundant pre-print move and starts the selected SD file directly, still requiring the strict `M27` active-print confirmation.
+- When the flag is true, `Start print` skips the redundant pre-print move and starts the selected SD file directly.
+
+## 2026-05-07 Restore Working SD Start Semantics
+
+- Compared the current start path with the known working `5f4ffaf` behavior from the successful print.
+- Regression found:
+  - the stricter immediate `M27` confirmation was wrong for this printer
+  - during SD start / heating, Marlin may answer `busy` for a while even though the old `M23` + `M24` workflow can proceed
+- Restored the working SD-start semantics:
+  - `M23` / `M24` plus `File opened`, `echo:Now fresh file`, or `ok` is treated as a sent start
+  - immediate `M27 SD printing byte ...` is no longer required for success
+  - transient USB read errors still use the existing `M27` retry confirmation path
+- Kept the later useful improvements:
+  - safer port filtering
+  - SD auto-refresh after reconnect
+  - human-friendly SD file names
+  - skip redundant pre-start move immediately after `Save start`
