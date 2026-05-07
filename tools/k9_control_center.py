@@ -291,6 +291,7 @@ class K9ControlCenter:
         self.suppress_next_completion_chime = False
         self.session_zero_defined = False
         self.at_saved_start_pose = False
+        self.post_print_pose_known = False
         self.log_file_lock = threading.Lock()
         self.temp_history: list[tuple[float, float, float]] = []
         self.last_telemetry_log_ts = 0.0
@@ -1937,12 +1938,20 @@ class K9ControlCenter:
         previous_device = self.port_var.get().strip()
         selected_device = preferred or self.port_var.get().strip()
         if not selected_device:
+            if previous_device:
+                self.session_zero_defined = False
+                self.at_saved_start_pose = False
+                self.post_print_pose_known = False
             self.port_display_var.set(disconnected_label)
             self.port_var.set("")
             return
         if selected_device:
             for meta in safe_ports:
                 if meta.get("device") == selected_device:
+                    if previous_device and selected_device != previous_device:
+                        self.session_zero_defined = False
+                        self.at_saved_start_pose = False
+                        self.post_print_pose_known = False
                     self.port_display_var.set(self._port_label(meta))
                     self.port_var.set(selected_device)
                     self.preferred_port = selected_device
@@ -1953,6 +1962,10 @@ class K9ControlCenter:
                 f"Порт {selected_device} скрыт из списка принтера: он не похож на K9/CH340. "
                 "Команды на него отправляться не будут."
             )
+        if previous_device:
+            self.session_zero_defined = False
+            self.at_saved_start_pose = False
+            self.post_print_pose_known = False
         self.port_display_var.set(disconnected_label)
         self.port_var.set("")
 
@@ -1963,16 +1976,25 @@ class K9ControlCenter:
             return
         device = text.split(" — ", 1)[0].strip() if text else ""
         if device:
+            if self.port_var.get().strip() and self.port_var.get().strip() != device:
+                self.session_zero_defined = False
+                self.at_saved_start_pose = False
+                self.post_print_pose_known = False
             self.port_var.set(device)
             self.preferred_port = device
             self.log(f"Выбран порт: {device}")
             self._schedule_sd_refresh_after_port(device, force=True)
 
     def disconnect_port(self, log_change: bool = False) -> None:
+        had_port = bool(self.port_var.get().strip())
         self.port_var.set("")
         self.port_display_var.set(self._t("not_connected"))
         self.auto_sd_refresh_after_port = None
         self.busy_var.set("USB: отключен")
+        if had_port:
+            self.session_zero_defined = False
+            self.at_saved_start_pose = False
+            self.post_print_pose_known = False
         if log_change:
             self.log("Порт отключён. Автоопрос и команды принтера остановлены до выбора нового порта.")
 
@@ -2178,7 +2200,7 @@ class K9ControlCenter:
             return (
                 f"{intro}\n\n"
                 "1. Remove the printed part from the bed.\n"
-                "2. Return the printer to the start pose. If 'Go to start' works, use it. If the app says the start is unknown, jog manually.\n"
+                "2. Only after the part is removed, return the printer to the start pose. If Little Hands observed the print finish, 'Go to start' can use that known post-print pose.\n"
                 "3. While the printer is physically in that start pose, power it off for 5-10 seconds and power it on again.\n"
                 "4. If the port is not responsive, press 'Find'. If the app sees CH340 but Marlin does not answer, repeat the power cycle.\n"
                 "5. Make sure the printer is still in the start pose and press 'Save start' in this window or in the main controls.\n"
@@ -2190,7 +2212,7 @@ class K9ControlCenter:
             return (
                 f"{intro}\n\n"
                 "1. 从平台上取下模型。\n"
-                "2. 让打印机回到起始姿态。如果 'Go to start' 可用就使用它；如果程序提示起点未知，请手动点动回起点。\n"
+                "2. 只有在取下模型之后，才让打印机回到起始姿态。如果 Little Hands 观察到了打印结束，'Go to start' 可以使用已知的打印后位置。\n"
                 "3. 打印机实际停在起始姿态时，关闭电源 5-10 秒，然后重新打开。\n"
                 "4. 如果端口没有响应，点击 'Find'。如果只看到 CH340 但 Marlin 不回应，请再次断电重启。\n"
                 "5. 确认打印机仍在起始姿态，然后在此窗口或主控制区点击 'Save start'。\n"
@@ -2205,7 +2227,7 @@ class K9ControlCenter:
         return (
             f"{intro}\n\n"
             "1. Сними модель со стола.\n"
-            "2. Верни принтер в стартовую позу. Если 'К старту' работает, используй его. Если приложение пишет, что старт неизвестен, выставь позу ручными кнопками.\n"
+            "2. Только после снятия модели верни принтер в стартовую позу. Если Little Hands видел завершение печати, 'К старту' использует известную послепечатную позу.\n"
             "3. Когда принтер физически стоит в стартовой позе, выключи питание на 5–10 секунд и включи снова.\n"
             "4. Если порт не отвечает, нажми 'Найти'. Если приложение видит CH340, но Marlin молчит, повтори power cycle.\n"
             "5. Убедись, что принтер всё ещё в стартовой позе, и нажми 'Запомнить старт' в этом окне или в ручном управлении.\n"
@@ -2216,6 +2238,32 @@ class K9ControlCenter:
 
     def _save_start_from_post_print_window(self) -> None:
         self.set_current_home_zero()
+
+    def _go_start_from_post_print_window(self) -> None:
+        lang = self.lang_var.get().strip() or "ru"
+        prompt = {
+            "en": (
+                "Has the printed part already been removed from the bed?\n\n"
+                "Return to start only after removing the part, so the head and bed cannot hit the model."
+            ),
+            "zh": (
+                "模型已经从平台上取下了吗？\n\n"
+                "只有取下模型后才能回到起点，避免喷头或平台碰到模型。"
+            ),
+            "ru": (
+                "Модель уже снята со стола?\n\n"
+                "Возврат к старту можно делать только после удаления детали, чтобы голова и стол не задели модель."
+            ),
+        }.get(lang) or (
+            "Модель уже снята со стола?\n\n"
+            "Возврат к старту можно делать только после удаления детали, чтобы голова и стол не задели модель."
+        )
+        if not messagebox.askyesno(
+            "Little Hands",
+            prompt,
+        ):
+            return
+        self.go_print_home(confirm_model_removed=True)
 
     def _close_post_print_window(self) -> None:
         if self.post_print_window and self.post_print_window.winfo_exists():
@@ -2273,14 +2321,21 @@ class K9ControlCenter:
         buttons.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
+        buttons.columnconfigure(2, weight=1)
         close_label = {"ru": "Понятно", "en": "OK", "zh": "知道了"}.get(self.lang_var.get().strip() or "ru", "Понятно")
+        go_start_label = {
+            "ru": "К старту",
+            "en": "Go to start",
+            "zh": "回到起点",
+        }.get(self.lang_var.get().strip() or "ru", "К старту")
         confirm_label = {
             "ru": "Запомнить старт",
             "en": "Save start",
             "zh": "保存起点",
         }.get(self.lang_var.get().strip() or "ru", "Запомнить старт")
-        ttk.Button(buttons, text=close_label, command=self._close_post_print_window).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(buttons, text=confirm_label, command=self._save_start_from_post_print_window).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ttk.Button(buttons, text=close_label, command=self._close_post_print_window).grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        ttk.Button(buttons, text=go_start_label, command=self._go_start_from_post_print_window).grid(row=0, column=1, sticky="ew", padx=5)
+        ttk.Button(buttons, text=confirm_label, command=self._save_start_from_post_print_window).grid(row=0, column=2, sticky="ew", padx=(5, 0))
 
         def _on_close() -> None:
             self._close_post_print_window()
@@ -2656,6 +2711,7 @@ class K9ControlCenter:
             self._mark_sd_start_sent(dest, source.name)
             self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {source.name}")
             self.at_saved_start_pose = False
+            self.post_print_pose_known = False
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2756,6 +2812,7 @@ class K9ControlCenter:
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"Печать запущена: {display}")
             self.at_saved_start_pose = False
+            self.post_print_pose_known = False
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2783,6 +2840,7 @@ class K9ControlCenter:
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"{start_note}: {display}")
             self.at_saved_start_pose = False
+            self.post_print_pose_known = False
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2864,6 +2922,7 @@ class K9ControlCenter:
         self.print_was_active = False
         self.print_start_watchdog_alerted = False
         self.at_saved_start_pose = False
+        self.post_print_pose_known = False
         self._post("active-sd", "Печатается: -")
         self._post("progress", (progress_label, progress_value))
         self._post("sd", "SD: idle")
@@ -2940,7 +2999,9 @@ class K9ControlCenter:
 
     def home_all(self) -> None:
         def task() -> None:
+            self.session_zero_defined = False
             self.at_saved_start_pose = False
+            self.post_print_pose_known = False
             out = sdtool.run_commands(self._port(), self._baud(), ["G90", "G28"], final_wait=1.2, read_seconds=2.0)
             self._post("log", out.strip() or "Home выполнен")
 
@@ -2951,6 +3012,7 @@ class K9ControlCenter:
             out = sdtool.set_current_home_zero(self._port(), self._baud())
             self.session_zero_defined = True
             self.at_saved_start_pose = True
+            self.post_print_pose_known = False
             if self.post_print_recovery_required:
                 self._post("post-print-recovery-clear", None)
                 self._post("log", "Стартовая поза записана после послепечатного цикла: следующая печать разрешена.")
@@ -2978,6 +3040,9 @@ class K9ControlCenter:
             "Если нет — сначала выставь позу ручными кнопками, потом нажми 'Запомнить старт'."
         )
 
+    def _can_return_from_known_post_print_pose(self) -> bool:
+        return bool(self.post_print_pose_known and self.post_print_recovery_required and self._port())
+
     def _show_missing_start_zero(self) -> None:
         msg = self._missing_start_zero_text()
         self.log(msg)
@@ -2985,20 +3050,60 @@ class K9ControlCenter:
             self._show_post_print_recovery_window("blocked-start")
         messagebox.showerror("Little Hands", msg)
 
-    def go_print_home(self) -> None:
-        if not self.session_zero_defined:
+    def _confirm_model_removed_before_go_start(self) -> bool:
+        lang = self.lang_var.get().strip() or "ru"
+        prompt = {
+            "en": (
+                "Is the bed clear now?\n\n"
+                "Little Hands can return to start only after the printed part, if any, has been removed."
+            ),
+            "zh": (
+                "平台现在已经清空了吗？\n\n"
+                "只有取下可能存在的模型后，Little Hands 才能回到起点。"
+            ),
+            "ru": (
+                "Стол сейчас свободен?\n\n"
+                "Little Hands может возвращать принтер к старту только после удаления детали, если она есть на столе."
+            ),
+        }.get(lang) or (
+            "Стол сейчас свободен?\n\n"
+            "Little Hands может возвращать принтер к старту только после удаления детали, если она есть на столе."
+        )
+        return bool(messagebox.askyesno("Little Hands", prompt))
+
+    def go_print_home(self, *, confirm_model_removed: bool = False) -> None:
+        if self.post_print_recovery_required and not confirm_model_removed:
+            if not self._confirm_model_removed_before_go_start():
+                return
+        use_post_print_pose = False
+        if not self.session_zero_defined and self._can_return_from_known_post_print_pose():
+            use_post_print_pose = True
+            self.log(
+                "Использую известную послепечатную позу: Little Hands видел завершение печати. "
+                "Возврат к старту допустим только после снятия модели со стола."
+            )
+        elif not self.session_zero_defined:
             self._show_missing_start_zero()
             return
 
         def task() -> None:
             out = sdtool.goto_print_home(self._port(), self._baud())
+            if use_post_print_pose:
+                self.session_zero_defined = True
             self.at_saved_start_pose = True
-            self._post("log", out.strip() or "Принтер возвращён к стартовой позе")
+            self.post_print_pose_known = False
+            if use_post_print_pose:
+                self._post("log", out.strip() or "Принтер возвращён к стартовой позе из известной послепечатной позы")
+            else:
+                self._post("log", out.strip() or "Принтер возвращён к стартовой позе")
 
         self._run_task("Переход к сохранённому 0", task)
 
     def motor_off(self) -> None:
         def task() -> None:
+            self.session_zero_defined = False
+            self.at_saved_start_pose = False
+            self.post_print_pose_known = False
             out = sdtool.query_command(self._port(), self._baud(), "M18", wait_before_read=0.4, read_seconds=1.0)
             self._post("log", out.strip() or "Моторы отключены")
 
@@ -3011,6 +3116,7 @@ class K9ControlCenter:
 
         def task() -> None:
             self.at_saved_start_pose = False
+            self.post_print_pose_known = False
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
@@ -3025,6 +3131,7 @@ class K9ControlCenter:
     def move_level_point(self, x: float, y: float) -> None:
         def task() -> None:
             self.at_saved_start_pose = False
+            self.post_print_pose_known = False
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
@@ -3162,10 +3269,12 @@ class K9ControlCenter:
                 if self.print_was_active:
                     self.print_was_active = False
                     completion_move_result = ""
+                    completion_pose_known = False
                     computer_melody_enabled = bool(self.computer_melody_on_complete_var.get())
                     if not self.suppress_next_completion_chime:
                         try:
                             completion_move_result = self._run_printer_completion_sequence().strip()
+                            completion_pose_known = True
                         except Exception as exc:
                             self._post("log", f"Пост-обработка после печати не удалась: {exc}")
                     if self.suppress_next_completion_chime:
@@ -3175,6 +3284,12 @@ class K9ControlCenter:
                             self._post("melody", None)
                         if completion_move_result:
                             self._post("log", completion_move_result)
+                        self.post_print_pose_known = completion_pose_known
+                        if completion_pose_known:
+                            self._post(
+                                "log",
+                                "Послепечатная поза известна: после снятия модели кнопка 'К старту' может вернуть принтер к сохранённому 0 до power cycle.",
+                            )
                         if computer_melody_enabled:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята, проиграна мелодия на компьютере")
                         else:

@@ -1810,3 +1810,19 @@ After each test print, append:
   - the post-print dialog now tells the operator to return to the start pose manually if `Go to start` is already unavailable
   - the dialog action is now `Save start` and runs the same save-start command as the main control
   - missing-start errors now explain why Little Hands refuses to move automatically without a trusted zero
+
+## 2026-05-07 Use Known Post-Print Pose For Return-To-Start
+
+- Refined the post-print recovery flow:
+  - the app must not return to start automatically while the printed part is still on the bed
+  - after natural print completion Little Hands already moves to a known presentation pose: head lifted and bed presented
+  - while the printer has not been power-cycled, Marlin still has the logical zero from the print start `G92`
+- Added a known-post-print-pose state:
+  - if Little Hands observed natural completion and its completion move succeeded, `Go to start` may use that known state even if the app's saved-start flag was lost
+  - the post-print dialog now has an explicit `Go to start` button with a confirmation that the model has been removed
+  - manual jogs, new print starts, stop/failed-start clearing, port changes, and port disconnects clear the known-post-print-pose state
+- Intended operator flow:
+  - remove the printed part
+  - press `Go to start`
+  - only then power-cycle the printer
+  - after power-on, press `Save start` before the next SD print
