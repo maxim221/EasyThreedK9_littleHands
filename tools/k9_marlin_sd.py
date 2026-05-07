@@ -58,7 +58,40 @@ def list_serial_ports() -> list[dict[str, str]]:
     return ports
 
 
+def is_known_non_printer_port(meta: dict[str, str]) -> bool:
+    device = meta.get("device", "")
+    hay = " ".join(str(value) for value in meta.values()).lower()
+    vid = (meta.get("vid") or "").upper()
+    pid = (meta.get("pid") or "").upper()
+    if device.startswith("/dev/ttyS"):
+        return True
+    if vid == "0403" and pid == "6001":
+        return True
+    return "ftdi" in hay or "ft232" in hay
+
+
+def is_likely_printer_port(meta: dict[str, str]) -> bool:
+    if is_known_non_printer_port(meta):
+        return False
+    device = meta.get("device", "")
+    hay = " ".join(str(value) for value in meta.values()).lower()
+    vid = (meta.get("vid") or "").upper()
+    pid = (meta.get("pid") or "").upper()
+    detected = (meta.get("detected") or "").lower()
+    is_ch340 = (vid == "1A86" and pid == "7523") or "ch340" in hay or "wch" in hay
+    is_acm = device.startswith("/dev/ttyACM")
+    if detected in {"marlin", "marlin-like"}:
+        return True
+    if detected in {"usb-visible-no-marlin", "probe-error"}:
+        return is_ch340 or is_acm
+    if is_ch340:
+        return True
+    return is_acm
+
+
 def _port_score(meta: dict[str, str]) -> int:
+    if is_known_non_printer_port(meta):
+        return -100
     hay = " ".join(meta.values()).lower()
     score = 0
     if meta.get("device", "").startswith("/dev/ttyUSB"):
@@ -86,11 +119,7 @@ def detect_printer_port(baud: int = 115200, probe_timeout_s: float = 2.8) -> tup
         return None, []
 
     ranked = sorted(candidates, key=_port_score, reverse=True)
-    likely = [
-        meta for meta in ranked
-        if meta.get("device", "").startswith(("/dev/ttyUSB", "/dev/ttyACM"))
-        or _port_score(meta) >= 6
-    ] or ranked[:6]
+    likely = [meta for meta in ranked if is_likely_printer_port(meta)]
 
     for meta in likely[:8]:
         device = meta.get("device", "")

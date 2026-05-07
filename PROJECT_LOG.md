@@ -1692,3 +1692,16 @@ After each test print, append:
   - otherwise retry the SD start once
   - if retry still cannot confirm active SD printing, show an explicit power-cycle / Find / Save start recovery message
 - Error events are now written to the journal before showing a modal error dialog, so diagnostics are not hidden while a dialog is open.
+
+## 2026-05-07 Printer Port Safety Guard
+
+- Observed a dangerous diagnostic clue in the runtime log:
+  - `Login incorrect`
+  - this means a printer command reached a non-printer serial console instead of Marlin
+- Hardened serial-port handling:
+  - the GUI no longer defaults blindly to `/dev/ttyUSB0`
+  - the last selected port is only used after the current Linux port list confirms that it still looks like the K9 printer
+  - common non-printer ports such as `FTDI` adapters and `/dev/ttyS*` are hidden from the normal printer-port dropdown
+  - manual printer commands are blocked if the selected port disappeared or no longer looks like a CH340/ACM printer port
+  - background telemetry disconnects the stale port in the UI after USB disappearance instead of continuing to poll the old `/dev/ttyUSB*` name
+- Updated Linux installation docs to explain that `Find` should be used for printer discovery and that unrelated serial devices are intentionally filtered out.

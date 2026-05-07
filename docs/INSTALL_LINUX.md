@@ -134,6 +134,9 @@ python3 -m pip install -r requirements.txt
 ## 11. If The Printer Is Not Found
 
 This project is tuned for a `K9` that usually appears as a `CH340` USB serial device.
+`Little Hands` intentionally hides common non-printer serial adapters such as `FTDI`
+and `/dev/ttyS*` from the normal printer-port list. This avoids sending Marlin
+commands to another serial console by accident.
 
 If the printer is not detected:
 

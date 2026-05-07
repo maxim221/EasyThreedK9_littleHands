@@ -255,8 +255,9 @@ class K9ControlCenter:
         self.monitor_enabled = True
         self.user_task_pending = False
 
-        self.port_var = tk.StringVar(value="/dev/ttyUSB0")
-        self.port_display_var = tk.StringVar(value="/dev/ttyUSB0")
+        self.preferred_port = str(self.ui_state.get("last_port", "")).strip()
+        self.port_var = tk.StringVar(value="")
+        self.port_display_var = tk.StringVar(value="")
         self.lang_var = tk.StringVar(value=str(self.ui_state.get("language", "ru")))
         self.lang_display_var = tk.StringVar()
         self.local_gcode_var = tk.StringVar()
@@ -490,6 +491,8 @@ class K9ControlCenter:
             state["left_split_y"] = int(y)
         except Exception:
             pass
+        if self._port():
+            state["last_port"] = self._port()
         try:
             UI_STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
@@ -586,6 +589,8 @@ class K9ControlCenter:
         if self.pending_flash_finalize:
             source_name = str(self.pending_flash_finalize.get("source_name", "mksLite.bin"))
             self.files_status_var.set(self._t("files_status_flash_pending").format(source=source_name))
+        if not self._port():
+            self.port_display_var.set(self._t("not_connected"))
 
     def _on_language_selected(self, _event=None) -> None:
         display = self.lang_display_var.get().strip()
@@ -1580,6 +1585,13 @@ class K9ControlCenter:
             elif kind == "error":
                 text = str(payload)
                 self.log(f"Ошибка: {text}")
+                if self._is_port_gone_error(text):
+                    lost_port = self._port()
+                    self.disconnect_port(log_change=False)
+                    if lost_port:
+                        self.log(
+                            f"Порт {lost_port} отключён в приложении: система больше не подтверждает этот USB-порт."
+                        )
                 if sdtool.is_transient_serial_error(text):
                     self.post_print_recovery_required = True
                     self._show_post_print_recovery_window("failed-start")
@@ -1644,6 +1656,14 @@ class K9ControlCenter:
             elif kind == "ports":
                 ports, detected = payload  # type: ignore[misc]
                 self._set_port_choices(list(ports), str(detected) if detected else None)
+            elif kind == "port-lost":
+                lost_port = str(payload or self._port()).strip()
+                self.disconnect_port(log_change=False)
+                if lost_port:
+                    self.log(
+                        f"Порт {lost_port} отключён в приложении: система больше не подтверждает этот USB-порт. "
+                        "Нажми 'Найти' после power cycle или переподключения принтера."
+                    )
             elif kind == "files-status":
                 self.files_status_var.set(str(payload))
             elif kind == "find-port-ui":
@@ -1823,6 +1843,46 @@ class K9ControlCenter:
             return "ACM / проверить"
         return "serial / проверить"
 
+    def _is_safe_printer_port_meta(self, meta: dict[str, str]) -> bool:
+        return sdtool.is_likely_printer_port(meta)
+
+    def _selected_port_meta(self) -> dict[str, str] | None:
+        device = self._port()
+        if not device:
+            return None
+        try:
+            ports = sdtool.list_serial_ports()
+        except Exception:
+            return None
+        return next((meta for meta in ports if meta.get("device") == device), None)
+
+    def _selected_port_safety_error(self) -> str | None:
+        device = self._port()
+        if not device:
+            return None
+        meta = self._selected_port_meta()
+        if meta is None:
+            return (
+                f"Выбранный порт {device} сейчас не найден системой. "
+                "Нажми 'Найти' и выбери заново подтверждённый CH340/ACM порт принтера."
+            )
+        if not self._is_safe_printer_port_meta(meta):
+            return (
+                f"Выбранный порт {device} не похож на EasyThreed K9/CH340 printer port "
+                f"({self._classify_port(meta)}). Команда заблокирована, чтобы не отправлять G-code "
+                "в чужой serial-интерфейс."
+            )
+        return None
+
+    def _is_port_gone_error(self, exc: BaseException | str) -> bool:
+        text = str(exc).lower()
+        return (
+            "no such file or directory" in text
+            or "could not open port" in text
+            or "device disconnected" in text
+            or "device reports readiness" in text
+        )
+
     def _port_label(self, meta: dict[str, str]) -> str:
         device = meta.get("device", "")
         desc = meta.get("description", "") or meta.get("product", "") or "serial"
@@ -1831,7 +1891,8 @@ class K9ControlCenter:
 
     def _set_port_choices(self, ports: list[dict[str, str]], preferred: str | None = None) -> None:
         disconnected_label = self._t("not_connected")
-        self.port_choices = [disconnected_label] + [self._port_label(meta) for meta in ports if meta.get("device")]
+        safe_ports = [meta for meta in ports if meta.get("device") and self._is_safe_printer_port_meta(meta)]
+        self.port_choices = [disconnected_label] + [self._port_label(meta) for meta in safe_ports]
         self.port_combo["values"] = self.port_choices
 
         selected_device = preferred or self.port_var.get().strip()
@@ -1840,11 +1901,17 @@ class K9ControlCenter:
             self.port_var.set("")
             return
         if selected_device:
-            for meta in ports:
+            for meta in safe_ports:
                 if meta.get("device") == selected_device:
                     self.port_display_var.set(self._port_label(meta))
                     self.port_var.set(selected_device)
+                    self.preferred_port = selected_device
                     return
+        if selected_device and any(meta.get("device") == selected_device for meta in ports):
+            self.log(
+                f"Порт {selected_device} скрыт из списка принтера: он не похож на K9/CH340. "
+                "Команды на него отправляться не будут."
+            )
         self.port_display_var.set(disconnected_label)
         self.port_var.set("")
 
@@ -1856,6 +1923,7 @@ class K9ControlCenter:
         device = text.split(" — ", 1)[0].strip() if text else ""
         if device:
             self.port_var.set(device)
+            self.preferred_port = device
             self.log(f"Выбран порт: {device}")
 
     def disconnect_port(self, log_change: bool = False) -> None:
@@ -1868,7 +1936,7 @@ class K9ControlCenter:
     def _refresh_ports_on_startup(self) -> None:
         try:
             ports = sdtool.list_serial_ports()
-            self._set_port_choices(ports)
+            self._set_port_choices(ports, self.preferred_port or None)
         except Exception:
             pass
 
@@ -2162,6 +2230,13 @@ class K9ControlCenter:
         if require_port and not self._port():
             messagebox.showerror("Little Hands", "Сначала выбери порт принтера, нажми 'Найти' или оставь 'не подключаться'.")
             return
+        if require_port:
+            safety_error = self._selected_port_safety_error()
+            if safety_error:
+                self.disconnect_port(log_change=False)
+                self.log(f"Команда '{label}' не запущена: {safety_error}")
+                messagebox.showerror("Little Hands", safety_error)
+                return
         self.user_task_pending = True
 
         def worker() -> None:
@@ -2848,6 +2923,12 @@ class K9ControlCenter:
             self.busy_var.set("USB: отключен")
             self.root.after(1000, self._poll_status)
             return
+        safety_error = self._selected_port_safety_error()
+        if safety_error:
+            self.log(f"Автоопрос остановлен: {safety_error}")
+            self.disconnect_port(log_change=False)
+            self.root.after(1000, self._poll_status)
+            return
         if self.monitor_enabled and not self.user_task_pending and self.serial_lock.acquire(blocking=False):
             threading.Thread(target=self._poll_worker, daemon=True).start()
         self.root.after(1000, self._poll_status)
@@ -3030,6 +3111,8 @@ class K9ControlCenter:
             if (now - self.last_poll_error_ts) >= 5.0:
                 self.last_poll_error_ts = now
                 self._post("log", f"Опрос USB сорвался: {exc}")
+            if self._is_port_gone_error(exc):
+                self._post("port-lost", self._port())
         finally:
             self.serial_lock.release()
 
