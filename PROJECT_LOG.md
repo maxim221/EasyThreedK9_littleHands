@@ -1756,3 +1756,13 @@ After each test print, append:
   - wait for a quiet period after the move-to-start sequence before sending `M23`
   - if `M23` receives only busy/processing lines, wait for motion idle and retry file selection
   - keep the stricter `M27` active-print confirmation before reporting start success
+
+## 2026-05-07 Skip Redundant Go-To-Start After Save Start
+
+- Observed that immediately after `Save start`, the operator is already physically at the saved start pose.
+- The extra `Go to start` movement inside `Start print` could produce a long Marlin busy state and block SD file selection.
+- Added session state:
+  - `Save start` marks the printer as already at saved start
+  - `Go to start` marks the printer as back at saved start
+  - jog / leveling / home / stop / print start clear that flag
+- When the flag is true, `Start print` skips the redundant pre-print move and starts the selected SD file directly, still requiring the strict `M27` active-print confirmation.

@@ -288,6 +288,7 @@ class K9ControlCenter:
         self.print_was_active = False
         self.suppress_next_completion_chime = False
         self.session_zero_defined = False
+        self.at_saved_start_pose = False
         self.log_file_lock = threading.Lock()
         self.temp_history: list[tuple[float, float, float]] = []
         self.last_telemetry_log_ts = 0.0
@@ -2636,6 +2637,7 @@ class K9ControlCenter:
             self._post("active-sd", f"Печатается: {source.name}")
             self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {source.name}")
             self._post("progress", ("Печать: старт", 0.0))
+            self.at_saved_start_pose = False
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2742,6 +2744,7 @@ class K9ControlCenter:
             self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
             self._post("active-sd", f"Печатается: {display}")
             self._post("log", out.strip() or f"Печать запущена: {display}")
+            self.at_saved_start_pose = False
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2760,7 +2763,12 @@ class K9ControlCenter:
             return
 
         def task() -> None:
-            out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
+            if self.at_saved_start_pose:
+                out = sdtool.start_sd_print(self._port(), self._baud(), path)
+                start_note = "Печать с SD запущена из уже сохранённой стартовой позы"
+            else:
+                out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
+                start_note = "Печать с SD запущена от сохранённого старта"
             self.current_print_file = path
             self.current_print_display = display
             self.current_print_start_ts = time.time()
@@ -2769,7 +2777,8 @@ class K9ControlCenter:
             self.print_start_watchdog_alerted = False
             self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
             self._post("active-sd", f"Печатается: {display}")
-            self._post("log", out.strip() or f"Печать с SD запущена от сохранённого старта: {display}")
+            self._post("log", out.strip() or f"{start_note}: {display}")
+            self.at_saved_start_pose = False
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2850,6 +2859,7 @@ class K9ControlCenter:
         self.print_state_restored_from_log = False
         self.print_was_active = False
         self.print_start_watchdog_alerted = False
+        self.at_saved_start_pose = False
         self._post("active-sd", "Печатается: -")
         self._post("progress", (progress_label, progress_value))
         self._post("sd", "SD: idle")
@@ -2926,6 +2936,7 @@ class K9ControlCenter:
 
     def home_all(self) -> None:
         def task() -> None:
+            self.at_saved_start_pose = False
             out = sdtool.run_commands(self._port(), self._baud(), ["G90", "G28"], final_wait=1.2, read_seconds=2.0)
             self._post("log", out.strip() or "Home выполнен")
 
@@ -2935,6 +2946,7 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.set_current_home_zero(self._port(), self._baud())
             self.session_zero_defined = True
+            self.at_saved_start_pose = True
             if self.post_print_recovery_required:
                 self._post("post-print-recovery-clear", None)
                 self._post("log", "Стартовая поза записана после послепечатного цикла: следующая печать разрешена.")
@@ -2950,6 +2962,7 @@ class K9ControlCenter:
 
         def task() -> None:
             out = sdtool.goto_print_home(self._port(), self._baud())
+            self.at_saved_start_pose = True
             self._post("log", out.strip() or "Принтер возвращён к стартовой позе")
 
         self._run_task("Переход к сохранённому 0", task)
@@ -2967,6 +2980,7 @@ class K9ControlCenter:
         display_hint = self._operator_axis_hint(axis)
 
         def task() -> None:
+            self.at_saved_start_pose = False
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
@@ -2980,6 +2994,7 @@ class K9ControlCenter:
 
     def move_level_point(self, x: float, y: float) -> None:
         def task() -> None:
+            self.at_saved_start_pose = False
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
