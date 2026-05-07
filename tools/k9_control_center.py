@@ -1578,8 +1578,12 @@ class K9ControlCenter:
             if kind == "log":
                 self.log(str(payload))
             elif kind == "error":
-                messagebox.showerror("K9 Control Center", str(payload))
-                self.log(f"Ошибка: {payload}")
+                text = str(payload)
+                self.log(f"Ошибка: {text}")
+                if sdtool.is_transient_serial_error(text):
+                    self.post_print_recovery_required = True
+                    self._show_post_print_recovery_window("failed-start")
+                messagebox.showerror("K9 Control Center", text)
             elif kind == "info":
                 messagebox.showinfo("Little Hands", str(payload))
                 self.log(str(payload))

@@ -184,6 +184,7 @@ If a print start fails and you see:
 - no motion
 - frozen telemetry
 - stale status
+- `device reports readiness to read but returned no data`
 
 the current safest workflow is:
 

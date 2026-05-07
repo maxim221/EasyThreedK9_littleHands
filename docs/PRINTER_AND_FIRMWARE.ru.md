@@ -184,6 +184,7 @@ G92 X0 Y0 Z0
 - отсутствие движения
 - замершую телеметрию
 - застывший статус
+- `device reports readiness to read but returned no data`
 
 то текущий самый надёжный workflow такой:
 

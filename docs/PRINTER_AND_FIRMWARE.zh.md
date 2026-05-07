@@ -176,6 +176,7 @@ G92 X0 Y0 Z0
 - 没有运动
 - 遥测冻结
 - 状态过期
+- `device reports readiness to read but returned no data`
 
 目前最安全的流程是：
 

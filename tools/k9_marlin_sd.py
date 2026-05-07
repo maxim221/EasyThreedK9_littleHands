@@ -33,6 +33,13 @@ from typing import Callable
 PROJECT_ROOT = Path("/home/maxim/draftCode/littleHands")
 MBP_PATH = PROJECT_ROOT / "firmware_src/ECF-Marlin-upstream/buildroot/share/scripts/MarlinBinaryProtocol.py"
 ProgressCb = Callable[[str, float], None]
+TRANSIENT_SERIAL_ERROR_MARKERS = (
+    "device reports readiness",
+    "device disconnected",
+    "multiple access",
+    "input/output error",
+    "errno 5",
+)
 
 
 def list_serial_ports() -> list[dict[str, str]]:
@@ -168,6 +175,11 @@ def read_for(ser: serial.Serial, seconds: float) -> str:
         except Exception:
             pass
     return "".join(chunks)
+
+
+def is_transient_serial_error(exc: BaseException | str) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in TRANSIENT_SERIAL_ERROR_MARKERS)
 
 
 def sync_ascii(ser: serial.Serial) -> None:
@@ -326,8 +338,45 @@ def delete_file(port: str, baud: int, path: str) -> str:
     return out
 
 
-def start_sd_print(port: str, baud: int, path: str) -> str:
-    target = path if path.startswith("/") else f"/{path}"
+def _confirm_sd_print_started(port: str, baud: int) -> str | None:
+    try:
+        out = query_command(port, baud, "M27", wait_before_read=0.4, read_seconds=1.2)
+    except Exception as exc:
+        if is_transient_serial_error(exc):
+            return None
+        raise
+    lowered = out.lower()
+    if "sd printing byte" in lowered or ("sd printing" in lowered and "not sd printing" not in lowered):
+        return out.strip() or "M27 reports active SD print"
+    return None
+
+
+def _with_start_retry(port: str, baud: int, label: str, starter: Callable[[], str]) -> str:
+    last_exc: BaseException | None = None
+    for attempt in range(2):
+        try:
+            return starter()
+        except Exception as exc:
+            if not is_transient_serial_error(exc):
+                raise
+            last_exc = exc
+            started = _confirm_sd_print_started(port, baud)
+            if started:
+                return (
+                    f"{started}\n"
+                    "Transient USB read failure occurred during start, but M27 reports active SD printing."
+                )
+            if attempt == 0:
+                time.sleep(1.2)
+                continue
+            break
+    raise RuntimeError(
+        f"{label}: USB read failed while starting SD print and retry did not confirm active printing. "
+        f"Power-cycle the printer, press Find, then save start again. Last USB error: {last_exc}"
+    )
+
+
+def _start_sd_print_once(port: str, baud: int, target: str) -> str:
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
@@ -340,6 +389,29 @@ def start_sd_print(port: str, baud: int, path: str) -> str:
         out = read_for(ser, 2.0)
     if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
         raise RuntimeError(f"Start print may have failed for {target}: {out.strip() or '<no response>'}")
+    return out
+
+
+def start_sd_print(port: str, baud: int, path: str) -> str:
+    target = path if path.startswith("/") else f"/{path}"
+    return _with_start_retry(port, baud, f"Start print {target}", lambda: _start_sd_print_once(port, baud, target))
+
+
+def _start_sd_print_from_home_once(port: str, baud: int, target: str) -> str:
+    with open_serial(port, baud) as ser:
+        sync_ascii(ser)
+        ensure_sd_ready(ser)
+        for line in ("M17", "G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M400"):
+            send_line(ser, line)
+            time.sleep(0.5)
+        _ = read_for(ser, 2.0)
+        send_line(ser, f"M23 {target}")
+        time.sleep(0.8)
+        send_line(ser, "M24")
+        time.sleep(0.8)
+        out = read_for(ser, 2.5)
+    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
+        raise RuntimeError(f"Start print from home may have failed for {target}: {out.strip() or '<no response>'}")
     return out
 
 
@@ -402,25 +474,15 @@ def goto_print_home(port: str, baud: int) -> str:
 
 def start_sd_print_from_home(port: str, baud: int, path: str) -> str:
     target = path if path.startswith("/") else f"/{path}"
-    with open_serial(port, baud) as ser:
-        sync_ascii(ser)
-        ensure_sd_ready(ser)
-        for line in ("M17", "G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M400"):
-            send_line(ser, line)
-            time.sleep(0.5)
-        _ = read_for(ser, 2.0)
-        send_line(ser, f"M23 {target}")
-        time.sleep(0.8)
-        send_line(ser, "M24")
-        time.sleep(0.8)
-        out = read_for(ser, 2.5)
-    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
-        raise RuntimeError(f"Start print from home may have failed for {target}: {out.strip() or '<no response>'}")
-    return out
+    return _with_start_retry(
+        port,
+        baud,
+        f"Start print from home {target}",
+        lambda: _start_sd_print_from_home_once(port, baud, target),
+    )
 
 
-def start_sd_print_from_pseudo_home(port: str, baud: int, path: str) -> str:
-    target = path if path.startswith("/") else f"/{path}"
+def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> str:
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
@@ -451,6 +513,16 @@ def start_sd_print_from_pseudo_home(port: str, baud: int, path: str) -> str:
     if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
         raise RuntimeError(f"Start print from pseudo-home may have failed for {target}: {out.strip() or '<no response>'}")
     return out
+
+
+def start_sd_print_from_pseudo_home(port: str, baud: int, path: str) -> str:
+    target = path if path.startswith("/") else f"/{path}"
+    return _with_start_retry(
+        port,
+        baud,
+        f"Start print from pseudo-home {target}",
+        lambda: _start_sd_print_from_pseudo_home_once(port, baud, target),
+    )
 
 
 def pause_sd_print(port: str, baud: int) -> str:

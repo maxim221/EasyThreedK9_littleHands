@@ -1680,3 +1680,15 @@ After each test print, append:
   - geometry, selected tab, main sash, and left split position are now actually written to `monitor_logs/little_hands_ui_state.json`
 - Improved port detection diagnostics:
   - if a CH340-like port is visible but Marlin does not answer `M115/M105`, the app selects the candidate but reports that the printer likely needs a power cycle instead of pretending no USB device exists
+
+## 2026-05-07 SD Start USB Read Retry
+
+- Observed a repeated-start failure where the app selected the SD file and entered `Start print from home`, but pyserial raised:
+  - `device reports readiness to read but returned no data`
+- Added a transient USB-start retry path:
+  - classify common CH340/pyserial readiness / I/O errors as transient start errors
+  - after such an error, query `M27` to see whether SD printing actually started
+  - if `M27` confirms active SD printing, treat the start as successful and keep monitoring
+  - otherwise retry the SD start once
+  - if retry still cannot confirm active SD printing, show an explicit power-cycle / Find / Save start recovery message
+- Error events are now written to the journal before showing a modal error dialog, so diagnostics are not hidden while a dialog is open.
