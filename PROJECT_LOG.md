@@ -1711,3 +1711,16 @@ After each test print, append:
 - Added automatic SD file-list refresh after a printer port is selected or rediscovered.
 - The refresh is delayed and retried while USB discovery is still busy, so it should not collide with the `Find` command.
 - This keeps the printable-file list populated after CH340 reconnect / power cycle and reduces the chance of starting from an empty or stale SD UI state.
+
+## 2026-05-07 Confirm SD Print Start With M27
+
+- Observed a false-positive start after power cycle:
+  - Marlin replied `File selected`
+  - the GUI logged `Start print: done`
+  - telemetry then stopped and no `SD printing byte ...` confirmation appeared
+- Hardened SD print start:
+  - `M23` file selection is no longer treated as proof that printing started
+  - after `M24`, Little Hands now polls `M27` on the same open serial session
+  - if active SD printing is not confirmed, it sends `M24` once more and checks again
+  - only `M27` active-print confirmation is treated as a successful start
+  - if the start is still not confirmed after retry, the app raises an explicit recovery error instead of showing a misleading success

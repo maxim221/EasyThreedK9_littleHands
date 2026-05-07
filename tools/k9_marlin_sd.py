@@ -40,6 +40,7 @@ TRANSIENT_SERIAL_ERROR_MARKERS = (
     "input/output error",
     "errno 5",
 )
+START_NOT_CONFIRMED_MARKER = "did not confirm active SD printing"
 
 
 def list_serial_ports() -> list[dict[str, str]]:
@@ -380,28 +381,82 @@ def _confirm_sd_print_started(port: str, baud: int) -> str | None:
     return None
 
 
+def _sd_printing_active(text: str) -> bool:
+    lowered = text.lower()
+    return "sd printing byte" in lowered or ("sd printing" in lowered and "not sd printing" not in lowered)
+
+
+def _select_sd_file_on_open_serial(ser: serial.Serial, target: str) -> str:
+    send_line(ser, f"M23 {target}")
+    out = read_until_tokens(ser, ("File selected", "open failed", "Error:", "ok"), timeout_s=7.0)
+    lowered = out.lower()
+    if "open failed" in lowered or "error:" in lowered:
+        raise RuntimeError(f"Could not select SD file {target}: {out.strip() or '<no response>'}")
+    if "file selected" not in lowered and "file opened" not in lowered and "ok" not in lowered:
+        raise RuntimeError(f"Could not confirm SD file selection for {target}: {out.strip() or '<no response>'}")
+    return out
+
+
+def _confirm_sd_print_started_on_open_serial(ser: serial.Serial, *, attempts: int = 6) -> tuple[str | None, str]:
+    transcript: list[str] = []
+    for attempt in range(attempts):
+        send_line(ser, "M27")
+        time.sleep(0.35)
+        out = read_for(ser, 1.0)
+        if out.strip():
+            transcript.append(out)
+        if _sd_printing_active(out):
+            return out.strip() or "M27 reports active SD print", "".join(transcript)
+        if attempt + 1 < attempts:
+            time.sleep(0.7)
+    return None, "".join(transcript)
+
+
+def _start_selected_sd_file_on_open_serial(ser: serial.Serial, target: str, label: str) -> str:
+    selection_out = _select_sd_file_on_open_serial(ser, target)
+    transcript = [selection_out]
+    for resume_attempt in range(2):
+        send_line(ser, "M24")
+        time.sleep(0.6)
+        out = read_for(ser, 1.2)
+        if out.strip():
+            transcript.append(out)
+        started, m27_out = _confirm_sd_print_started_on_open_serial(ser)
+        if m27_out.strip():
+            transcript.append(m27_out)
+        if started:
+            transcript.append(started)
+            return "".join(transcript)
+        if resume_attempt == 0:
+            time.sleep(1.0)
+    last = "".join(transcript).strip() or "<no response>"
+    raise RuntimeError(f"{label}: M24 sent but {START_NOT_CONFIRMED_MARKER}. Last response: {last}")
+
+
 def _with_start_retry(port: str, baud: int, label: str, starter: Callable[[], str]) -> str:
     last_exc: BaseException | None = None
     for attempt in range(2):
         try:
             return starter()
         except Exception as exc:
-            if not is_transient_serial_error(exc):
+            start_not_confirmed = START_NOT_CONFIRMED_MARKER.lower() in str(exc).lower()
+            if not is_transient_serial_error(exc) and not start_not_confirmed:
                 raise
             last_exc = exc
-            started = _confirm_sd_print_started(port, baud)
-            if started:
-                return (
-                    f"{started}\n"
-                    "Transient USB read failure occurred during start, but M27 reports active SD printing."
-                )
+            if is_transient_serial_error(exc):
+                started = _confirm_sd_print_started(port, baud)
+                if started:
+                    return (
+                        f"{started}\n"
+                        "Transient USB read failure occurred during start, but M27 reports active SD printing."
+                    )
             if attempt == 0:
                 time.sleep(1.2)
                 continue
             break
     raise RuntimeError(
-        f"{label}: USB read failed while starting SD print and retry did not confirm active printing. "
-        f"Power-cycle the printer, press Find, then save start again. Last USB error: {last_exc}"
+        f"{label}: SD print start was not confirmed after retry. "
+        f"Power-cycle the printer, press Find, refresh SD, save start again, then retry. Last error: {last_exc}"
     )
 
 
@@ -411,14 +466,7 @@ def _start_sd_print_once(port: str, baud: int, target: str) -> str:
         ensure_sd_ready(ser)
         send_line(ser, "M17")
         time.sleep(0.4)
-        send_line(ser, f"M23 {target}")
-        time.sleep(0.8)
-        send_line(ser, "M24")
-        time.sleep(0.8)
-        out = read_for(ser, 2.0)
-    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
-        raise RuntimeError(f"Start print may have failed for {target}: {out.strip() or '<no response>'}")
-    return out
+        return _start_selected_sd_file_on_open_serial(ser, target, f"Start print {target}")
 
 
 def start_sd_print(port: str, baud: int, path: str) -> str:
@@ -434,14 +482,7 @@ def _start_sd_print_from_home_once(port: str, baud: int, target: str) -> str:
             send_line(ser, line)
             time.sleep(0.5)
         _ = read_for(ser, 2.0)
-        send_line(ser, f"M23 {target}")
-        time.sleep(0.8)
-        send_line(ser, "M24")
-        time.sleep(0.8)
-        out = read_for(ser, 2.5)
-    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
-        raise RuntimeError(f"Start print from home may have failed for {target}: {out.strip() or '<no response>'}")
-    return out
+        return _start_selected_sd_file_on_open_serial(ser, target, f"Start print from home {target}")
 
 
 def set_current_home_zero(port: str, baud: int) -> str:
@@ -534,14 +575,7 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
             send_line(ser, line)
             time.sleep(0.5)
         _ = read_for(ser, 5.0)
-        send_line(ser, f"M23 {target}")
-        time.sleep(0.8)
-        send_line(ser, "M24")
-        time.sleep(0.8)
-        out = read_for(ser, 2.5)
-    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
-        raise RuntimeError(f"Start print from pseudo-home may have failed for {target}: {out.strip() or '<no response>'}")
-    return out
+        return _start_selected_sd_file_on_open_serial(ser, target, f"Start print from pseudo-home {target}")
 
 
 def start_sd_print_from_pseudo_home(port: str, baud: int, path: str) -> str:
