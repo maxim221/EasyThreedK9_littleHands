@@ -129,7 +129,7 @@ python3 tools/k9_control_center.py
 ## Структура Репозитория
 
 - `tools/`
-  - GUI Little Hands и USB/SD helper-код
+  - GUI Little Hands, USB/SD helper-код и helper для slicing через Cura
 - `firmware/`
   - текущая рекомендуемая прошивка и исторические сборки
 - `docs/`

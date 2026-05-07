@@ -1868,3 +1868,15 @@ After each test print, append:
   - slice broad-side-down; using `mainFlasherTop_broadFaceDown.STL` avoids having to rotate manually
   - inspect Cura preview: the bad underside should show generated support/interface below it
   - if supports are still missing under that face, change support placement from `Touching Buildplate` to `Everywhere` for this model
+
+## 2026-05-07 Reproducible Cura 5.11 Slicing Helper
+
+- Added `tools/k9_cura_slice.py` to make the working K9 warm-mat slicing flow reproducible from the project.
+- The helper:
+  - runs the UltiMaker Cura 5.11 AppImage CuraEngine directly
+  - applies the validated Little Hands manual-zero start/end G-code
+  - uses the cautious PLA profile with supports everywhere, support interface/roof enabled, and `10 mm` brim
+  - centers binary STL models by their STL bounds before slicing
+  - validates resulting extrusion bounds against the `100 x 100 mm` K9 bed before optional SD copy
+  - refuses real `G28` commands in output G-code
+- This captures the field fix from the print where the front-left corner lifted with `6 mm` brim.

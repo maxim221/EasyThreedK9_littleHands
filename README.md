@@ -127,7 +127,7 @@ Archive and historical firmware files are kept in `firmware/`, but they are not 
 ## Repository Layout
 
 - `tools/`
-  - the Little Hands GUI and USB/SD helper code
+  - the Little Hands GUI, USB/SD helper code, and Cura slicing helper
 - `firmware/`
   - current recommended firmware and historical builds
 - `docs/`

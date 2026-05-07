@@ -9,3 +9,11 @@ CFFFP_zeroBottom_k9xz.gcode
 CFFFP_zeroBottom_usb200.gcode
 CFFFP_zeroBottom_usb215.gcode
 axis_test_sd.gcode
+exports/
+diagnostics_screenshots/
+EEPROMtest/
+card_backups/sd_*/
+mainFlasherTop*.STL
+CFFFP_mainFlasherTop*.gcode
+preheat_225.gcode
+sd_start_probe.gcode
