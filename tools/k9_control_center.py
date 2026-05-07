@@ -292,6 +292,7 @@ class K9ControlCenter:
         self.temp_history: list[tuple[float, float, float]] = []
         self.last_telemetry_log_ts = 0.0
         self.current_print_file = "-"
+        self.current_print_display = "-"
         self.current_print_start_ts: float | None = None
         self.current_print_progress_pct: float | None = None
         self.print_state_restored_from_log = False
@@ -457,6 +458,7 @@ class K9ControlCenter:
                 last_end = me.group(4).strip()
         if last_active and last_active != "-" and last_active != last_end:
             self.current_print_file = last_active
+            self.current_print_display = last_active
             self.active_sd_var.set(self._format_label_value("active_sd", last_active))
             self.current_print_start_ts = last_start_ts or first_active_telem_ts
             self.current_print_progress_pct = last_progress_pct
@@ -570,8 +572,8 @@ class K9ControlCenter:
 
     def _refresh_translated_strings(self) -> None:
         self.progress_var.set(self._t("progress_idle") if self.progress_var.get().startswith(("Печать: простой", "Print: idle", "打印：空闲")) else self.progress_var.get())
-        self.selected_sd_var.set(self._format_label_value("selected_sd", self._selected_sd_path() or "-"))
-        active_raw = self.current_print_file if self.current_print_file != "-" else "-"
+        self.selected_sd_var.set(self._format_label_value("selected_sd", self._selected_sd_display() or "-"))
+        active_raw = self.current_print_display if self.current_print_display != "-" else self.current_print_file
         if self.active_sd_var.get().endswith("(имя не восстановлено)"):
             suffix = {
                 "ru": "идёт печать (имя не восстановлено)",
@@ -603,7 +605,15 @@ class K9ControlCenter:
         self._save_ui_state()
 
     def _on_close(self) -> None:
+        self.monitor_enabled = False
+        self.auto_sd_refresh_after_port = None
         self._save_ui_state()
+        self.port_var.set("")
+        try:
+            if self.serial_lock.acquire(timeout=0.4):
+                self.serial_lock.release()
+        except Exception:
+            pass
         self.root.destroy()
 
     def _on_views_tab_changed(self, _event=None) -> None:
@@ -1460,7 +1470,7 @@ class K9ControlCenter:
             f"SD: {self.last_sd_summary}",
             f"{ {'ru': 'Возраст SD-статуса', 'en': 'SD status age', 'zh': 'SD 状态年龄'}[lang] }: {sd_age}",
             self.progress_var.get(),
-            f"{ {'ru': 'Файл', 'en': 'File', 'zh': '文件'}[lang] }: {self.current_print_file}",
+            f"{ {'ru': 'Файл', 'en': 'File', 'zh': '文件'}[lang] }: {self.current_print_display if self.current_print_display != '-' else self.current_print_file}",
             f"{ {'ru': 'Позиция', 'en': 'Position', 'zh': '位置'}[lang] }: {pos_line}",
             f"{ {'ru': 'Старт сохранён', 'en': 'Start saved', 'zh': '起点已保存'}[lang] }: {zero_line}",
             f"{ {'ru': 'Прошивка', 'en': 'Firmware', 'zh': '固件'}[lang] }: {fw_line}",
@@ -1738,6 +1748,32 @@ class K9ControlCenter:
     def _is_printable_sd_path(self, path: str) -> bool:
         return Path(path.strip().lower()).suffix in PRINTABLE_SD_EXTS
 
+    def _parse_sd_entry_for_ui(self, entry: str) -> tuple[str, str]:
+        line = entry.strip()
+        if not line:
+            return "", ""
+        tokens = line.split()
+        path = tokens[0] if tokens else line
+        display = path
+        long_name = ""
+        if len(tokens) >= 2:
+            for idx, token in enumerate(tokens[1:], start=1):
+                if token.isdigit():
+                    continue
+                candidate = " ".join(tokens[idx:])
+                if self._is_printable_sd_path(candidate) or Path(candidate.strip().lower()).name in {
+                    "eeprom.dat",
+                    "mkslite.cur",
+                    "mkslite.bin",
+                }:
+                    long_name = candidate
+                    break
+        if long_name and long_name != path:
+            display = f"{long_name} (SD: {path})"
+        elif len(tokens) >= 2 and tokens[1].isdigit():
+            display = f"{path} ({int(tokens[1]):,} B)"
+        return display, path
+
     def _apply_sd_files(self, files: list[str]) -> None:
         previous_path = self._selected_sd_path()
         self.sd_list = files
@@ -1754,11 +1790,9 @@ class K9ControlCenter:
         selected_print_index = None
         lowered_paths: list[str] = []
         for idx, entry in enumerate(files):
-            display = entry
-            path = entry
-            if " " in entry:
-                display = entry
-                path = entry.split()[0]
+            display, path = self._parse_sd_entry_for_ui(entry)
+            if not path:
+                continue
             self.sd_display_to_path[display] = path
             lowered_paths.append(path.strip().lower())
             if self._is_printable_sd_path(path):
@@ -1806,8 +1840,8 @@ class K9ControlCenter:
         self._sync_selected_sd_label()
 
     def _sync_selected_sd_label(self) -> None:
-        path = self._selected_sd_path()
-        self.selected_sd_var.set(self._format_label_value("selected_sd", path or "-"))
+        display = self._selected_sd_display()
+        self.selected_sd_var.set(self._format_label_value("selected_sd", display or "-"))
 
     def _selected_sd_display(self) -> str | None:
         print_sel = self.sd_print_listbox.curselection()
@@ -2593,13 +2627,14 @@ class K9ControlCenter:
             self._post("sd-files", files)
             out = sdtool.start_sd_print_from_pseudo_home(self._port(), self._baud(), dest)
             self.current_print_file = dest
+            self.current_print_display = source.name
             self.current_print_start_ts = time.time()
             self.current_print_progress_pct = 0.0
             self.print_state_restored_from_log = False
             self.print_start_watchdog_alerted = False
             self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={dest}")
-            self._post("active-sd", f"Печатается: {dest}")
-            self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {dest}")
+            self._post("active-sd", f"Печатается: {source.name}")
+            self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {source.name}")
             self._post("progress", ("Печать: старт", 0.0))
             self.print_was_active = False
             self.suppress_next_completion_chime = False
@@ -2691,6 +2726,7 @@ class K9ControlCenter:
         if not self._guard_post_print_recovery():
             return
         path = self._selected_print_sd_path()
+        display = self._selected_sd_display() or path or "-"
         if not path:
             messagebox.showerror("K9 Control Center", "Выбери файл в секции 'Файлы для печати'.")
             return
@@ -2698,13 +2734,14 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.start_sd_print(self._port(), self._baud(), path)
             self.current_print_file = path
+            self.current_print_display = display
             self.current_print_start_ts = time.time()
             self.current_print_progress_pct = 0.0
             self.print_state_restored_from_log = False
             self.print_start_watchdog_alerted = False
             self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
-            self._post("active-sd", f"Печатается: {path}")
-            self._post("log", out.strip() or f"Печать запущена: {path}")
+            self._post("active-sd", f"Печатается: {display}")
+            self._post("log", out.strip() or f"Печать запущена: {display}")
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2714,6 +2751,7 @@ class K9ControlCenter:
         if not self._guard_post_print_recovery():
             return
         path = self._selected_print_sd_path()
+        display = self._selected_sd_display() or path or "-"
         if not path:
             messagebox.showerror("Little Hands", "Выбери файл в секции 'Файлы для печати'.")
             return
@@ -2724,13 +2762,14 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
             self.current_print_file = path
+            self.current_print_display = display
             self.current_print_start_ts = time.time()
             self.current_print_progress_pct = 0.0
             self.print_state_restored_from_log = False
             self.print_start_watchdog_alerted = False
             self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
-            self._post("active-sd", f"Печатается: {path}")
-            self._post("log", out.strip() or f"Печать с SD запущена от сохранённого старта: {path}")
+            self._post("active-sd", f"Печатается: {display}")
+            self._post("log", out.strip() or f"Печать с SD запущена от сохранённого старта: {display}")
             self.print_was_active = False
             self.suppress_next_completion_chime = False
 
@@ -2805,6 +2844,7 @@ class K9ControlCenter:
 
     def _clear_print_session_state(self, progress_label: str, progress_value: float = 0.0) -> None:
         self.current_print_file = "-"
+        self.current_print_display = "-"
         self.current_print_start_ts = None
         self.current_print_progress_pct = None
         self.print_state_restored_from_log = False
@@ -3010,7 +3050,8 @@ class K9ControlCenter:
                 self.print_was_active = True
                 self.current_print_progress_pct = pct
                 if self.current_print_file != "-":
-                    self._post("active-sd", f"Печатается: {self.current_print_file}")
+                    display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
+                    self._post("active-sd", f"Печатается: {display}")
                 else:
                     self._post("active-sd", "Печатается: идёт печать (имя не восстановлено)")
                 self._post("progress", (f"Печать: {pct:.1f}% ({done}/{total})", pct))
@@ -3023,6 +3064,7 @@ class K9ControlCenter:
                 self._post("progress", ("Печать: простой", 0.0))
                 if self.print_state_restored_from_log and not self.print_was_active:
                     self.current_print_file = "-"
+                    self.current_print_display = "-"
                     self.current_print_start_ts = None
                     self.current_print_progress_pct = None
                     self.print_state_restored_from_log = False
@@ -3055,6 +3097,7 @@ class K9ControlCenter:
                         f"{time.strftime('%H:%M:%S')} PRINT_END file={self.current_print_file} temp={current_temp if current_temp is not None else '?'}"
                     )
                     self.current_print_file = "-"
+                    self.current_print_display = "-"
                     self.current_print_start_ts = None
                     self.current_print_progress_pct = None
                     self.print_state_restored_from_log = False

@@ -1734,3 +1734,12 @@ After each test print, append:
   - try `M20`, `M20 L`, and `M20 F`
   - read each listing response for longer
   - log a short raw response excerpt, or explicitly log that all `M20` variants were empty
+
+## 2026-05-07 Human-Friendly SD File Names
+
+- Restored `M20 L` as the preferred SD listing command so long filenames are used when Marlin provides them.
+- The UI now separates display name from command path:
+  - display can show the long filename, plus the short SD alias in parentheses
+  - print/delete/start commands still use the short first token returned by Marlin
+- Selected-file and active-print labels now show the human-facing display string instead of only the short 8.3 filename.
+- Closing the GUI now explicitly stops telemetry and clears the selected port before destroying the window, so the serial port is released promptly on exit.

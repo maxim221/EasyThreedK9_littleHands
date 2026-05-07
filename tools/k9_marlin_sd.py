@@ -317,7 +317,7 @@ def parse_m20_listing(text: str) -> list[str]:
 
 
 def read_sd_listing(port: str, baud: int, firmware_only: bool = False) -> tuple[list[str], str, str]:
-    commands = ["M20 F"] if firmware_only else ["M20", "M20 L", "M20 F"]
+    commands = ["M20 F"] if firmware_only else ["M20 L", "M20", "M20 F"]
     last_out = ""
     last_status = "unavailable"
 
