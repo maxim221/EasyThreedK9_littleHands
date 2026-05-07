@@ -471,6 +471,10 @@ class K9ControlCenter:
             if me:
                 last_end = me.group(4).strip()
         if last_active and last_active != "-" and last_active != last_end:
+            now = time.time()
+            unconfirmed_start_age = (now - last_start_ts) if last_start_ts and last_progress_pct is None else None
+            if unconfirmed_start_age is not None and unconfirmed_start_age > PRINT_START_GRACE_SEC:
+                return
             self.current_print_file = last_active
             self.current_print_display = last_active
             self.active_sd_var.set(self._format_label_value("active_sd", last_active))
@@ -480,6 +484,9 @@ class K9ControlCenter:
             if last_progress_pct is not None:
                 self.print_completion_armed = True
                 self.print_was_active = True
+            elif last_start_ts:
+                self.sd_start_usb_quiet_until = max(0.0, last_start_ts + POST_SD_START_USB_QUIET_SEC)
+                self.sd_start_usb_quiet_resume_logged = self.sd_start_usb_quiet_until <= now
 
     def _load_ui_state(self) -> dict[str, object]:
         if not UI_STATE_PATH.is_file():
