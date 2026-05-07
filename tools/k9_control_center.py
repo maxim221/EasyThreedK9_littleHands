@@ -318,6 +318,7 @@ class K9ControlCenter:
         self.port_choices: list[str] = []
         self.find_port_animating = False
         self.find_port_anim_phase = 0
+        self.auto_sd_refresh_after_port: str | None = None
         self.pending_flash_finalize = self.ui_state.get("pending_flash_finalize")
         if not isinstance(self.pending_flash_finalize, dict):
             self.pending_flash_finalize = None
@@ -1895,6 +1896,7 @@ class K9ControlCenter:
         self.port_choices = [disconnected_label] + [self._port_label(meta) for meta in safe_ports]
         self.port_combo["values"] = self.port_choices
 
+        previous_device = self.port_var.get().strip()
         selected_device = preferred or self.port_var.get().strip()
         if not selected_device:
             self.port_display_var.set(disconnected_label)
@@ -1906,6 +1908,7 @@ class K9ControlCenter:
                     self.port_display_var.set(self._port_label(meta))
                     self.port_var.set(selected_device)
                     self.preferred_port = selected_device
+                    self._schedule_sd_refresh_after_port(selected_device, force=selected_device != previous_device)
                     return
         if selected_device and any(meta.get("device") == selected_device for meta in ports):
             self.log(
@@ -1925,13 +1928,36 @@ class K9ControlCenter:
             self.port_var.set(device)
             self.preferred_port = device
             self.log(f"Выбран порт: {device}")
+            self._schedule_sd_refresh_after_port(device, force=True)
 
     def disconnect_port(self, log_change: bool = False) -> None:
         self.port_var.set("")
         self.port_display_var.set(self._t("not_connected"))
+        self.auto_sd_refresh_after_port = None
         self.busy_var.set("USB: отключен")
         if log_change:
             self.log("Порт отключён. Автоопрос и команды принтера остановлены до выбора нового порта.")
+
+    def _schedule_sd_refresh_after_port(self, port: str, *, force: bool = False) -> None:
+        if not port:
+            return
+        if not force and self.auto_sd_refresh_after_port == port:
+            return
+        self.auto_sd_refresh_after_port = port
+        self.root.after(900, lambda: self._try_auto_sd_refresh_after_port(port, 0))
+
+    def _try_auto_sd_refresh_after_port(self, port: str, attempt: int) -> None:
+        if self._port() != port or self.auto_sd_refresh_after_port != port:
+            return
+        if self.user_task_pending:
+            if attempt < 6:
+                self.root.after(700, lambda: self._try_auto_sd_refresh_after_port(port, attempt + 1))
+            else:
+                self.log("Автообновление SD после выбора порта отложено: USB всё ещё занят.")
+            return
+        self.auto_sd_refresh_after_port = None
+        self.log(f"Порт принтера {port} подключён: автоматически обновляю список SD.")
+        self.refresh_sd_files()
 
     def _refresh_ports_on_startup(self) -> None:
         try:

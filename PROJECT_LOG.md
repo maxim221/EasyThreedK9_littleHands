@@ -1705,3 +1705,9 @@ After each test print, append:
   - manual printer commands are blocked if the selected port disappeared or no longer looks like a CH340/ACM printer port
   - background telemetry disconnects the stale port in the UI after USB disappearance instead of continuing to poll the old `/dev/ttyUSB*` name
 - Updated Linux installation docs to explain that `Find` should be used for printer discovery and that unrelated serial devices are intentionally filtered out.
+
+## 2026-05-07 Auto SD Refresh After Port Reconnect
+
+- Added automatic SD file-list refresh after a printer port is selected or rediscovered.
+- The refresh is delayed and retried while USB discovery is still busy, so it should not collide with the `Find` command.
+- This keeps the printable-file list populated after CH340 reconnect / power cycle and reduces the chance of starting from an empty or stale SD UI state.
