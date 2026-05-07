@@ -1853,8 +1853,10 @@ After each test print, append:
   - `speed_travel = 40`
   - `brim_width = 6`
   - `support_enable = True`
-  - `support_type = buildplate`
-  - `support_angle = 45`
+  - `support_type = everywhere`
+  - `support_angle = 35`
+  - `support_structure = normal`
+  - corrected after Cura preview still showed no supports by forcing the same support placement in both Cura user and quality containers
   - `support_infill_rate = 12`
   - `support_interface_enable = True`
   - `support_roof_enable = True`
