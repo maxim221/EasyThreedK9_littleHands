@@ -42,10 +42,12 @@ TEMP_GRAPH_WINDOW_SEC = 15 * 60
 TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
 TEMP_LOG_INTERVAL_SEC = 5.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
+AUTO_SD_REFRESH_REQUIRE_FRESH_TEMP_SEC = 12.0
 PRINT_START_GRACE_SEC = 5 * 60
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 POST_SD_START_USB_QUIET_SEC = 180
+USB_SILENCE_LOG_INTERVAL_SEC = 30.0
 
 
 TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
@@ -314,6 +316,8 @@ class K9ControlCenter:
         self.printer_halted = False
         self.last_temp_sample_ts = 0.0
         self.last_temp_log_ts = 0.0
+        self.usb_silence_since = 0.0
+        self.last_usb_silence_log_ts = 0.0
         self.last_temp_current: float | None = None
         self.last_temp_target: float | None = None
         self.last_heater_power: int | None = None
@@ -2039,6 +2043,19 @@ class K9ControlCenter:
             else:
                 self.log("Автообновление SD после выбора порта отложено: USB всё ещё занят.")
             return
+        temp_age = time.time() - self.last_temp_sample_ts if self.last_temp_sample_ts else None
+        if temp_age is None or temp_age > AUTO_SD_REFRESH_REQUIRE_FRESH_TEMP_SEC:
+            if attempt < 10:
+                if attempt == 0:
+                    self.log("Автообновление SD ждёт свежий ответ M105, чтобы не трогать карту при молчащем принтере.")
+                self.root.after(1000, lambda: self._try_auto_sd_refresh_after_port(port, attempt + 1))
+            else:
+                self.auto_sd_refresh_after_port = None
+                self.log(
+                    "Автообновление SD пропущено: принтер не дал свежую телеметрию M105. "
+                    "Если это после завершения или неудачного старта печати, выключи принтер по питанию на 5-10 секунд."
+                )
+            return
         self.auto_sd_refresh_after_port = None
         self.log(f"Порт принтера {port} подключён: автоматически обновляю список SD.")
         self.refresh_sd_files()
@@ -2067,7 +2084,8 @@ class K9ControlCenter:
         )
         self._post(
             "log",
-            f"USB-опрос приостановлен на {POST_SD_START_USB_QUIET_SEC} с после M24, чтобы не мешать старту SD-печати.",
+            f"USB-опрос полностью приостановлен на {POST_SD_START_USB_QUIET_SEC} с после M24, "
+            "чтобы не мешать старту SD-печати на K9.",
         )
 
     def _refresh_ports_on_startup(self) -> None:
@@ -2121,7 +2139,6 @@ class K9ControlCenter:
                     detected_kind = str(detected_meta.get("detected") or "")
                     if detected_kind in {"marlin", "marlin-like"}:
                         self._post("log", f"Найден вероятный принтер: {detected}")
-                        self._post("info", f"Найден вероятный принтер:\n{detected}")
                     else:
                         msg = (
                             f"USB-порт похож на принтер и выбран: {detected}\n\n"
@@ -2456,24 +2473,56 @@ class K9ControlCenter:
     def _inspect_gcode_file(self, source: Path) -> dict[str, object]:
         info: dict[str, object] = {
             "has_g28": False,
+            "has_hotend_target": False,
+            "has_little_hands_start": False,
             "target_machine_unknown": False,
             "start_gcode_comment": "",
+            "suspicious": [],
         }
         try:
-            lines = source.read_text(encoding="utf-8", errors="replace").splitlines()[:120]
+            lines = source.read_text(encoding="utf-8", errors="replace").splitlines()[:300]
         except Exception:
             return info
+        bounds: dict[str, float] = {}
+        filament_m: float | None = None
         for line in lines:
             stripped = line.strip()
+            if stripped.startswith(";Filament used:"):
+                match = re.search(r"([-+]?\d+(?:\.\d+)?)\s*m\b", stripped, re.IGNORECASE)
+                if match:
+                    filament_m = float(match.group(1))
+            bound_match = re.match(r";(MINX|MINY|MINZ|MAXX|MAXY|MAXZ):\s*([-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)", stripped, re.IGNORECASE)
+            if bound_match:
+                try:
+                    bounds[bound_match.group(1).upper()] = float(bound_match.group(2))
+                except ValueError:
+                    pass
             if stripped.startswith(";TARGET_MACHINE.NAME:Unknown"):
                 info["target_machine_unknown"] = True
             if stripped.startswith("; Little Hands"):
                 info["start_gcode_comment"] = stripped
+                info["has_little_hands_start"] = True
             if not stripped or stripped.startswith(";"):
                 continue
             code = stripped.split(";", 1)[0].strip().upper()
             if code.startswith("G28"):
                 info["has_g28"] = True
+            if code.startswith(("M104", "M109")) and "S" in code:
+                info["has_hotend_target"] = True
+        suspicious: list[str] = []
+        if filament_m is not None and filament_m <= 0.0:
+            suspicious.append("Cura записала 'Filament used: 0m'")
+        required_bounds = {"MINX", "MINY", "MINZ", "MAXX", "MAXY", "MAXZ"}
+        if required_bounds.issubset(bounds):
+            if any(abs(value) > 1000 for value in bounds.values()):
+                suspicious.append("Cura записала невозможные границы модели")
+            for low, high in (("MINX", "MAXX"), ("MINY", "MAXY"), ("MINZ", "MAXZ")):
+                if bounds[high] < bounds[low]:
+                    suspicious.append(f"Cura записала {high} меньше {low}")
+                    break
+        info["filament_m"] = filament_m
+        info["bounds"] = bounds
+        info["suspicious"] = suspicious
         return info
 
     def _warn_if_gcode_looks_wrong(self, source: Path) -> None:
@@ -2488,6 +2537,8 @@ class K9ControlCenter:
                 "Предупреждение: G-code выглядит старым или слайсился не на машине 'lilHands K9 warm mat' "
                 "(TARGET_MACHINE.NAME:Unknown)."
             )
+        for reason in info.get("suspicious", []):
+            self.log(f"Предупреждение: G-code выглядит подозрительно: {reason}.")
 
     def _validate_gcode_for_current_k9(self, source: Path) -> tuple[bool, str]:
         info = self._inspect_gcode_file(source)
@@ -2498,7 +2549,21 @@ class K9ControlCenter:
                 "принтер уже ставится в старт через 'К старту', а обычный home потом ломает запуск. "
                 "Переслайсь модель на машине 'lilHands K9 warm mat' и профиле 'codex - K9 warm mat cautious'.",
             )
-        if info.get("target_machine_unknown"):
+        suspicious = list(info.get("suspicious", []))
+        if suspicious:
+            return (
+                False,
+                "Этот G-code выглядит битым или неполным: "
+                + "; ".join(str(reason) for reason in suspicious)
+                + ". Переслайсь модель заново в Cura и проверь Preview перед записью на карту.",
+            )
+        if not info.get("has_hotend_target"):
+            return (
+                False,
+                "В начале G-code не найдено команды нагрева хотенда M104/M109. "
+                "Такой файл может выбраться на SD, но печать не начнётся. Переслайсь модель заново в Cura.",
+            )
+        if info.get("target_machine_unknown") and not info.get("has_little_hands_start"):
             return (
                 False,
                 "Этот G-code выглядит старым или был слайсен не на 'lilHands K9 warm mat' "
@@ -2602,7 +2667,7 @@ class K9ControlCenter:
             try:
                 self._post("busy", (True, "USB: reset"))
                 self._post("log", "Сброс USB: ставлю автоопрос на паузу и жду освобождения порта...")
-                deadline = time.monotonic() + 3.0
+                deadline = time.monotonic() + 8.0
                 while time.monotonic() < deadline:
                     if self.serial_lock.acquire(blocking=False):
                         acquired = True
@@ -2612,7 +2677,8 @@ class K9ControlCenter:
                 if not acquired:
                     self._post(
                         "log",
-                        "Сброс USB: порт всё ещё занят текущей операцией. Если это не отпустит через пару секунд, перезапусти Little Hands.",
+                        "Сброс USB: порт всё ещё занят текущей операцией. Если это не отпустит через пару секунд, "
+                        "закрой Little Hands, сделай power cycle принтера и открой приложение снова.",
                     )
                     return
 
@@ -3192,6 +3258,8 @@ class K9ControlCenter:
         if self.current_print_file != "-" and now < self.sd_start_usb_quiet_until:
             remaining = max(1, int(self.sd_start_usb_quiet_until - now))
             self.busy_var.set(f"USB: quiet start {remaining}s")
+            self.sd_var.set(f"SD: quiet start ({remaining}s)")
+            self.progress_var.set("Печать: старт отправлен, не мешаю принтеру")
             self.root.after(1000, self._poll_status)
             return
         if self.sd_start_usb_quiet_until and now >= self.sd_start_usb_quiet_until:
@@ -3223,6 +3291,8 @@ class K9ControlCenter:
                 target_temp = float(match.group(2))
                 heater_match = HEATER_RE.search(temp)
                 heater = int(heater_match.group(1)) if heater_match else None
+                self.usb_silence_since = 0.0
+                self.last_usb_silence_log_ts = 0.0
                 self._post("temp", (current_temp, target_temp, heater))
                 if now - self.last_temp_log_ts >= TEMP_LOG_INTERVAL_SEC:
                     self.last_temp_log_ts = now
@@ -3231,6 +3301,33 @@ class K9ControlCenter:
                         f"{time.strftime('%H:%M:%S')} M105 T:{current_temp:.2f} /{target_temp:.2f} @:{heater_value}"
                     )
             self._post("metrics", ("m105", temp))
+            if not match:
+                if not self.usb_silence_since:
+                    self.usb_silence_since = now
+                self._post("sd", "SD: USB не отвечает")
+                if (now - self.last_usb_silence_log_ts) >= USB_SILENCE_LOG_INTERVAL_SEC:
+                    self.last_usb_silence_log_ts = now
+                    self._post(
+                        "log",
+                        "USB не отвечает на M105; откладываю SD/позиционные запросы, чтобы не забивать порт. "
+                        "Если это после старта или завершения печати, нужен power cycle принтера.",
+                    )
+                if (
+                    self.current_print_file != "-"
+                    and self.current_print_start_ts
+                    and not self.print_was_active
+                    and not self.print_start_watchdog_alerted
+                    and (now - self.current_print_start_ts) >= PRINT_START_GRACE_SEC
+                ):
+                    self.print_start_watchdog_alerted = True
+                    self._clear_print_session_state("Печать: старт не подтверждён", 0.0)
+                    self._post("post-print-recovery", "failed-start")
+                    self._post(
+                        "log",
+                        "Старт печати не подтвердился: принтер не отвечает на M105, поэтому Little Hands не трогает SD. "
+                        "Сделай power cycle принтера и обнови список SD перед новым стартом.",
+                    )
+                return
             sd = sdtool.query_command(
                 self._port(),
                 self._baud(),
@@ -3306,6 +3403,27 @@ class K9ControlCenter:
                     self._append_ring_log(
                         f"{time.strftime('%H:%M:%S')} TELEMETRY file={self.current_print_file} progress={pct:.1f}% temp={temp_text} sd=\"{summary}\""
                     )
+            elif (
+                self.current_print_file != "-"
+                and self.current_print_start_ts
+                and not self.print_was_active
+                and not self.print_start_watchdog_alerted
+                and (now - self.current_print_start_ts) >= PRINT_START_GRACE_SEC
+                and (target_temp is None or target_temp <= 0.0)
+            ):
+                self.print_start_watchdog_alerted = True
+                try:
+                    recovery_out = sdtool.stop_sd_print(self._port(), self._baud())
+                    if recovery_out.strip():
+                        self._post("log", recovery_out.strip())
+                except Exception as exc:
+                    self._post("log", f"Автостоп после неподтверждённого старта не получил уверенный ответ: {exc}")
+                self._clear_print_session_state("Печать: старт не подтверждён", 0.0)
+                self._post("post-print-recovery", "failed-start")
+                self._post(
+                    "log",
+                    "Старт печати не подтвердился: за 5 минут не было ни SD-прогресса, ни цели нагрева хотенда.",
+                )
             elif "Not SD printing" in sd:
                 in_start_grace = (
                     self.current_print_file != "-"

@@ -1880,3 +1880,32 @@ After each test print, append:
   - validates resulting extrusion bounds against the `100 x 100 mm` K9 bed before optional SD copy
   - refuses real `G28` commands in output G-code
 - This captures the field fix from the print where the front-left corner lifted with `6 mm` brim.
+
+## 2026-05-08 SD Start Reliability And G-Code Guardrails
+
+- Investigated a repeated failed SD start after power cycle and a valid manual-zero save:
+  - Little Hands selected `CFFFP_~2.GCO` and sent `M24`
+  - firmware replied `File opened`, `File selected`, and `echo:busy: processing`
+  - hotend target stayed at `0`
+  - USB stopped answering `M105`
+- Compared with the last known successful run:
+  - the successful path had a full `180 s` USB silence after `M24`
+  - the newer M105-only compromise was still too chatty for this K9 start window
+- Restored full post-`M24` USB silence:
+  - Little Hands now avoids all USB polling for `180 s` after SD start
+  - after the silence window it resumes telemetry and SD progress checks
+- Added safer handling for silent USB:
+  - automatic SD refresh waits for a fresh `M105` before touching `M20`
+  - if the printer does not answer `M105`, the app skips SD/position queries and logs a power-cycle recovery hint
+  - `Find` no longer shows a blocking success dialog for an already confident printer match
+- Added G-code upload/start validation guardrails:
+  - reject real `G28`
+  - reject G-code with impossible Cura bounds
+  - reject `Filament used: 0m`
+  - reject files with no hotend target command near the start
+  - allow older verified Little Hands start-G-code even when Cura reports `TARGET_MACHINE.NAME:Unknown`
+- Local finding:
+  - `exports/CFFFP_mainFlasherTop_brim10.gcode` was a bad export with impossible bounds and `Filament used: 0m`
+  - moved it out of normal `.gcode` selection as `exports/rejected/CFFFP_mainFlasherTop_brim10.bad.txt`
+  - the next safe recovery candidate is the known-good backup:
+    `card_backups/sd_before_brim10_20260507_223700/CFFFP_mainFlasherTop.gcode`

@@ -15,6 +15,7 @@ This project is still a little rough, but it already works for real printing.
 - manual-zero workflow works
 - logging works
 - Cura export works
+- G-code upload validation catches unsafe or obviously broken files
 - print progress and temperature monitoring work
 
 What is still rough:
