@@ -1826,3 +1826,32 @@ After each test print, append:
   - press `Go to start`
   - only then power-cycle the printer
   - after power-on, press `Save start` before the next SD print
+
+## 2026-05-07 mainFlasherTop Surface Quality Tuning
+
+- Investigated `mainFlasherTop.STL` after a print with a rough/stringy unsupported face.
+- Geometry finding:
+  - current STL dimensions are about `70.0 x 52.64 x 15.0 mm`
+  - original orientation has only about `260 mm2` of bottom contact
+  - the broad face contact after flipping is about `2850 mm2`
+  - the rough face is therefore a slicer/orientation problem first, not just a temperature problem
+- Created local working STL:
+  - `mainFlasherTop_broadFaceDown.STL`
+  - this is the same mesh rotated 180 degrees around X so the broad face lies on the bed
+- Updated local Cura 5.11 active profile `codex - K9 warm mat cautious` for the next PLA test:
+  - `layer_height = 0.16`
+  - `layer_height_0 = 0.2`
+  - `material_print_temperature = 214`
+  - `material_print_temperature_layer_0 = 218`
+  - `cool_fan_speed = 100`
+  - `cool_min_layer_time = 10`
+  - `speed_print = 16`
+  - `speed_wall = 12`
+  - `speed_topbottom = 12`
+  - `speed_infill = 18`
+  - `speed_travel = 40`
+  - `brim_width = 6`
+  - `support_enable = False`
+- Next test instruction:
+  - slice `mainFlasherTop_broadFaceDown.STL`, not the original orientation
+  - if this still leaves a bad underside, then the next branch is supports/interface, not more temperature tweaking
