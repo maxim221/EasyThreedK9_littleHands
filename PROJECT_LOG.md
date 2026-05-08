@@ -1956,3 +1956,27 @@ After each test print, append:
 - Key rule preserved:
   - use slicer settings and preview to produce correct G-code
   - do not hand-edit G-code except as a deliberate, clearly marked modified file
+
+## 2026-05-08 Saved Print-End Recovery Model
+
+- Added an explicit print-end model for SD-print recovery:
+  - on print start Little Hands records `LH_END_GCODE_V1`
+  - expected end position is calculated from the validated Cura G-code as `X95 Y95 Z(MAXZ + 10)`
+  - the model is stored in `monitor_logs/little_hands_print_state.json`
+  - the same state is mirrored best-effort to the printer SD as `LHSTATE.TXT` before the SD print starts
+- The state survives closing and reopening Little Hands:
+  - reopening the app should not invalidate the print-end model
+  - the ring log marker `PRINT_END_EXPECTED ... end_z=...` is also used as a fallback source
+- Power-cycle semantics are intentionally conservative:
+  - a power cycle still invalidates firmware RAM coordinates
+  - if the printer physically stayed in the expected final pose, Little Hands can offer an explicit recovery return using the saved print-end model
+  - the operator must confirm that the print finished, the part was removed, and the axes were not moved by hand
+  - if the saved model is incomplete or unsafe, the app offers to delete the marker and asks the operator to set the start pose manually
+- Recovery implementation:
+  - declares the current physical position as the saved print-end coordinates with `G92`
+  - returns to `X0 Y0 Z0`
+  - declares the returned position as `G92 X0 Y0 Z0`
+  - clears the active print marker and asks for the normal post-print/start confirmation workflow
+- Active-print USB silence messages were softened:
+  - once SD progress has confirmed a real print, intermittent missing `M105` is logged as partial telemetry instead of a failure
+  - repeated partial-telemetry logs are throttled to reduce scary noise during real prints

@@ -39,6 +39,7 @@ GUI_EXPORT_DIR = LOG_DIR / "gui_exports"
 RUNTIME_LOG_PATH = LOG_DIR / "little_hands_runtime.log"
 RUNTIME_LOG_MAX_BYTES = 10 * 1024 * 1024
 UI_STATE_PATH = LOG_DIR / "little_hands_ui_state.json"
+PRINT_STATE_PATH = LOG_DIR / "little_hands_print_state.json"
 TEMP_GRAPH_WINDOW_SEC = 15 * 60
 TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
 TEMP_LOG_INTERVAL_SEC = 5.0
@@ -49,6 +50,11 @@ POST_M24_USB_QUIET_SEC = 180
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
+ACTIVE_PRINT_PARTIAL_LOG_INTERVAL_SEC = 5 * 60
+PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
+PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
+PRINT_END_CONTRACT = "LH_END_GCODE_V1"
+LH_STATE_SD_FILE = "LHSTATE.TXT"
 
 
 TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
@@ -327,11 +333,23 @@ class K9ControlCenter:
         self.print_state_restored_from_log = False
         self.print_start_watchdog_alerted = False
         self.post_print_recovery_required = False
+        self.predicted_print_end_valid = False
+        self.predicted_print_end_file = "-"
+        self.predicted_print_end_display = "-"
+        self.predicted_print_end_contract = ""
+        self.predicted_print_end_start_ts: float | None = None
+        self.predicted_print_end_x = 95.0
+        self.predicted_print_end_y = 95.0
+        self.predicted_print_end_z: float | None = None
+        self.last_print_state_save_ts = 0.0
+        raw_profiles = self.ui_state.get("sd_gcode_profiles", {})
+        self.sd_gcode_profiles = raw_profiles if isinstance(raw_profiles, dict) else {}
         self.printer_halted = False
         self.last_temp_sample_ts = 0.0
         self.last_temp_log_ts = 0.0
         self.usb_silence_since = 0.0
         self.last_usb_silence_log_ts = 0.0
+        self.last_active_print_partial_log_ts = 0.0
         self.last_temp_current: float | None = None
         self.last_temp_target: float | None = None
         self.last_heater_power: int | None = None
@@ -366,6 +384,7 @@ class K9ControlCenter:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         GUI_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         self._load_recent_temp_history_from_log()
+        self._restore_persistent_print_state()
 
         self._build_ui()
         if self.pending_flash_finalize:
@@ -449,12 +468,16 @@ class K9ControlCenter:
     def _restore_last_print_state_from_log(self, lines: list[str]) -> None:
         telemetry_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) TELEMETRY file=(.+?) progress=([-\d.]+)%")
         start_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) PRINT_START file=(.+)")
+        expected_re = re.compile(
+            r"(\d{2}):(\d{2}):(\d{2}) PRINT_END_EXPECTED file=(.+?) contract=(\S+) end_x=([-\d.]+) end_y=([-\d.]+) end_z=([-\d.?]+)"
+        )
         end_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) PRINT_END file=(.+?) temp=")
         last_active: str | None = None
         last_end: str | None = None
         last_start_ts: float | None = None
         last_progress_pct: float | None = None
         first_active_telem_ts: float | None = None
+        expected_by_file: dict[str, dict[str, object]] = {}
         today = time.localtime(time.time())
 
         def stamp_for(hh: int, mm: int, ss: int) -> float:
@@ -468,6 +491,22 @@ class K9ControlCenter:
             return stamp
 
         for line in lines[-4000:]:
+            mx = expected_re.search(line)
+            if mx:
+                file_name = mx.group(4).strip()
+                end_z_text = mx.group(8).strip()
+                try:
+                    end_z = float(end_z_text)
+                except ValueError:
+                    end_z = None
+                expected_by_file[file_name] = {
+                    "ts": stamp_for(int(mx.group(1)), int(mx.group(2)), int(mx.group(3))),
+                    "contract": mx.group(5).strip(),
+                    "end_x": float(mx.group(6)),
+                    "end_y": float(mx.group(7)),
+                    "end_z": end_z,
+                }
+                continue
             ms = start_re.search(line)
             if ms:
                 last_active = ms.group(4).strip()
@@ -504,6 +543,202 @@ class K9ControlCenter:
             if last_progress_pct is not None:
                 self.print_completion_armed = True
                 self.print_was_active = True
+            expected = expected_by_file.get(last_active)
+            if expected:
+                self.predicted_print_end_valid = True
+                self.predicted_print_end_file = last_active
+                self.predicted_print_end_display = last_active
+                self.predicted_print_end_contract = str(expected.get("contract") or PRINT_END_CONTRACT)
+                self.predicted_print_end_start_ts = last_start_ts or float(expected.get("ts") or 0.0) or None
+                self.predicted_print_end_x = float(expected.get("end_x") or 95.0)
+                self.predicted_print_end_y = float(expected.get("end_y") or 95.0)
+                end_z = expected.get("end_z")
+                self.predicted_print_end_z = float(end_z) if isinstance(end_z, (int, float)) else None
+
+    def _normalize_sd_key(self, path: str) -> str:
+        return path.strip().lstrip("/").upper()
+
+    def _restore_persistent_print_state(self) -> None:
+        if not PRINT_STATE_PATH.is_file():
+            return
+        try:
+            data = json.loads(PRINT_STATE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(data, dict):
+            return
+        try:
+            updated_ts = float(data.get("updated_ts") or 0.0)
+        except (TypeError, ValueError):
+            return
+        if updated_ts and (time.time() - updated_ts) > PRINT_STATE_MAX_AGE_SEC:
+            return
+        profiles = data.get("sd_gcode_profiles")
+        if isinstance(profiles, dict):
+            self.sd_gcode_profiles.update(profiles)
+        predicted = data.get("predicted_end")
+        if not isinstance(predicted, dict) or not predicted.get("valid"):
+            return
+        file_name = str(predicted.get("file") or "-").strip()
+        if not file_name or file_name == "-":
+            return
+        self.predicted_print_end_valid = True
+        self.predicted_print_end_file = file_name
+        self.predicted_print_end_display = str(predicted.get("display") or file_name).strip()
+        self.predicted_print_end_contract = str(predicted.get("contract") or PRINT_END_CONTRACT)
+        try:
+            self.predicted_print_end_start_ts = float(predicted.get("start_ts") or 0.0) or None
+            self.predicted_print_end_x = float(predicted.get("end_x") or 95.0)
+            self.predicted_print_end_y = float(predicted.get("end_y") or 95.0)
+        except (TypeError, ValueError):
+            self.predicted_print_end_start_ts = None
+            self.predicted_print_end_x = 95.0
+            self.predicted_print_end_y = 95.0
+        end_z = predicted.get("end_z")
+        try:
+            self.predicted_print_end_z = float(end_z) if end_z is not None else None
+        except (TypeError, ValueError):
+            self.predicted_print_end_z = None
+        phase = str(data.get("phase") or "")
+        if self.current_print_file == "-" and phase in {"prepared", "printing", "print_end_expected"}:
+            self.current_print_file = file_name
+            self.current_print_display = self.predicted_print_end_display
+            self.current_print_start_ts = self.predicted_print_end_start_ts or updated_ts or None
+            progress = data.get("progress_pct")
+            try:
+                self.current_print_progress_pct = float(progress) if progress is not None else None
+            except (TypeError, ValueError):
+                self.current_print_progress_pct = None
+            self.print_state_restored_from_log = True
+            self.print_completion_armed = bool(self.current_print_progress_pct is not None)
+            self.print_was_active = bool(self.current_print_progress_pct is not None)
+            self.active_sd_var.set(self._format_label_value("active_sd", self.current_print_display))
+
+    def _print_state_payload(self, phase: str) -> dict[str, object]:
+        return {
+            "schema": 1,
+            "phase": phase,
+            "updated_ts": time.time(),
+            "current_print_file": self.current_print_file,
+            "current_print_display": self.current_print_display,
+            "current_print_start_ts": self.current_print_start_ts,
+            "progress_pct": self.current_print_progress_pct,
+            "predicted_end": {
+                "valid": self.predicted_print_end_valid,
+                "file": self.predicted_print_end_file,
+                "display": self.predicted_print_end_display,
+                "contract": self.predicted_print_end_contract,
+                "start_ts": self.predicted_print_end_start_ts,
+                "end_x": self.predicted_print_end_x,
+                "end_y": self.predicted_print_end_y,
+                "end_z": self.predicted_print_end_z,
+            },
+            "sd_gcode_profiles": self.sd_gcode_profiles,
+        }
+
+    def _save_print_state(self, phase: str = "printing", *, force: bool = False) -> None:
+        now = time.time()
+        if not force and (now - self.last_print_state_save_ts) < PRINT_STATE_SAVE_INTERVAL_SEC:
+            return
+        self.last_print_state_save_ts = now
+        try:
+            PRINT_STATE_PATH.write_text(
+                json.dumps(self._print_state_payload(phase), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            self._post("log", f"Не удалось сохранить локальное состояние печати: {exc}")
+
+    def _clear_predicted_print_end(self, *, save: bool = True) -> None:
+        self.predicted_print_end_valid = False
+        self.predicted_print_end_file = "-"
+        self.predicted_print_end_display = "-"
+        self.predicted_print_end_contract = ""
+        self.predicted_print_end_start_ts = None
+        self.predicted_print_end_x = 95.0
+        self.predicted_print_end_y = 95.0
+        self.predicted_print_end_z = None
+        if save:
+            self._save_print_state("idle", force=True)
+
+    def _remember_gcode_profile(self, sd_path: str, display: str, source: Path) -> dict[str, object]:
+        info = self._inspect_gcode_file(source)
+        bounds = info.get("bounds") if isinstance(info.get("bounds"), dict) else {}
+        max_z = bounds.get("MAXZ") if isinstance(bounds, dict) else None
+        profile: dict[str, object] = {
+            "sd_path": sd_path,
+            "display": display,
+            "source": str(source),
+            "updated_ts": time.time(),
+            "max_z": float(max_z) if isinstance(max_z, (int, float)) else None,
+            "bounds": bounds,
+        }
+        self.sd_gcode_profiles[self._normalize_sd_key(sd_path)] = profile
+        if len(self.sd_gcode_profiles) > 40:
+            items = sorted(
+                self.sd_gcode_profiles.items(),
+                key=lambda item: float(item[1].get("updated_ts") or 0.0) if isinstance(item[1], dict) else 0.0,
+                reverse=True,
+            )
+            self.sd_gcode_profiles = dict(items[:40])
+        self._save_print_state("idle", force=True)
+        return profile
+
+    def _profile_for_print(self, sd_path: str, display: str, source: Path | None = None) -> dict[str, object] | None:
+        if source and source.is_file():
+            return self._remember_gcode_profile(sd_path, display, source)
+        cached = self.sd_gcode_profiles.get(self._normalize_sd_key(sd_path))
+        return cached if isinstance(cached, dict) else None
+
+    def _prime_print_end_contract(self, sd_path: str, display: str, source: Path | None = None) -> None:
+        profile = self._profile_for_print(sd_path, display, source)
+        max_z = profile.get("max_z") if isinstance(profile, dict) else None
+        end_z = float(max_z) + 10.0 if isinstance(max_z, (int, float)) else None
+        self.predicted_print_end_valid = True
+        self.predicted_print_end_file = sd_path
+        self.predicted_print_end_display = display or sd_path
+        self.predicted_print_end_contract = PRINT_END_CONTRACT
+        self.predicted_print_end_start_ts = time.time()
+        self.predicted_print_end_x = 95.0
+        self.predicted_print_end_y = 95.0
+        self.predicted_print_end_z = end_z
+        z_text = f"{end_z:.2f}" if end_z is not None else "?"
+        self._append_ring_log(
+            f"{time.strftime('%H:%M:%S')} PRINT_END_EXPECTED file={sd_path} contract={PRINT_END_CONTRACT} end_x=95.00 end_y=95.00 end_z={z_text}"
+        )
+        self._save_print_state("prepared", force=True)
+        self._write_lh_state_to_sd("prepared")
+
+    def _write_lh_state_to_sd(self, phase: str) -> None:
+        if not self._port():
+            return
+        end_z = self.predicted_print_end_z
+        z_text = f"{end_z:.2f}" if end_z is not None else "unknown"
+        lines = [
+            "; Little Hands state marker",
+            f"; phase={phase}",
+            f"; file={self.predicted_print_end_file}",
+            f"; contract={self.predicted_print_end_contract or PRINT_END_CONTRACT}",
+            f"; end_x={self.predicted_print_end_x:.2f}",
+            f"; end_y={self.predicted_print_end_y:.2f}",
+            f"; end_z={z_text}",
+            f"; updated={time.strftime('%Y-%m-%d %H:%M:%S')}",
+            "; If recovery is unsafe, delete this file and set start manually.",
+        ]
+        try:
+            sdtool.write_text_file(self._port(), self._baud(), LH_STATE_SD_FILE, "\n".join(lines) + "\n")
+            self._post("log", f"Состояние Little Hands записано на SD: {LH_STATE_SD_FILE} ({phase}).")
+        except Exception as exc:
+            self._post("log", f"Не удалось записать {LH_STATE_SD_FILE} на SD; локальный лог всё равно сохранён: {exc}")
+
+    def _delete_lh_state_from_sd(self) -> None:
+        if not self._port():
+            return
+        try:
+            sdtool.delete_file(self._port(), self._baud(), LH_STATE_SD_FILE)
+            self._post("log", f"Служебное состояние {LH_STATE_SD_FILE} удалено с SD.")
+        except Exception as exc:
+            self._post("log", f"Не удалось удалить {LH_STATE_SD_FILE} с SD автоматически: {exc}")
 
     def _load_ui_state(self) -> dict[str, object]:
         if not UI_STATE_PATH.is_file():
@@ -519,6 +754,7 @@ class K9ControlCenter:
     def _save_ui_state(self) -> None:
         state: dict[str, object] = {"geometry": self.root.winfo_geometry()}
         state["language"] = self.lang_var.get().strip() or "ru"
+        state["sd_gcode_profiles"] = self.sd_gcode_profiles
         if self.pending_flash_finalize:
             state["pending_flash_finalize"] = self.pending_flash_finalize
         try:
@@ -2078,6 +2314,15 @@ class K9ControlCenter:
         self.current_print_display = display
         start_ts = time.time()
         self.current_print_start_ts = start_ts
+        if not self.predicted_print_end_valid or self.predicted_print_end_file != path:
+            self.predicted_print_end_valid = True
+            self.predicted_print_end_file = path
+            self.predicted_print_end_display = display or path
+            self.predicted_print_end_contract = PRINT_END_CONTRACT
+            self.predicted_print_end_x = 95.0
+            self.predicted_print_end_y = 95.0
+            self.predicted_print_end_z = None
+        self.predicted_print_end_start_ts = start_ts
         self.post_m24_usb_quiet_until = start_ts + POST_M24_USB_QUIET_SEC
         self.last_post_m24_quiet_log_ts = 0.0
         self.current_print_progress_pct = 0.0
@@ -2089,6 +2334,7 @@ class K9ControlCenter:
         self.first_sd_progress_ts = None
         self.last_sd_progress_ts = None
         self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
+        self._save_print_state("printing", force=True)
         self._post("active-sd", f"Печатается: {display}")
         self._post("progress", ("Печать: старт отправлен, жду SD/прогрев", 0.0))
         self._post(
@@ -2815,6 +3061,7 @@ class K9ControlCenter:
             self._post("progress", ("Upload (preflight): 0.0%", 0.0))
             self._post("files-status", f"Заливка G-code: preflight 0.0%")
             method = sdtool.upload_gcode_auto(self._port(), self._baud(), source, dest, progress_cb=on_progress)
+            self._remember_gcode_profile(dest, source.name, source)
             self._post("progress", ("Upload complete: 100.0%", 100.0))
             self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method})")
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
@@ -2857,7 +3104,13 @@ class K9ControlCenter:
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
-            out = sdtool.start_sd_print_from_pseudo_home(self._port(), self._baud(), dest)
+            self._prime_print_end_contract(dest, source.name, source)
+            try:
+                out = sdtool.start_sd_print_from_pseudo_home(self._port(), self._baud(), dest)
+            except Exception:
+                self._clear_predicted_print_end()
+                self._delete_lh_state_from_sd()
+                raise
             self._mark_sd_start_sent(dest, source.name)
             self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {source.name}")
             self.at_saved_start_pose = False
@@ -2958,7 +3211,19 @@ class K9ControlCenter:
             return
 
         def task() -> None:
-            out = sdtool.start_sd_print(self._port(), self._baud(), path)
+            source = Path(self.local_gcode_var.get().strip()).expanduser()
+            source_for_profile = None
+            if source.is_file():
+                source_sd_name = sdtool.make_sd_name(source.name)
+                if self._normalize_sd_key(source_sd_name) == self._normalize_sd_key(path) or source.name in display:
+                    source_for_profile = source
+            self._prime_print_end_contract(path, display, source_for_profile)
+            try:
+                out = sdtool.start_sd_print(self._port(), self._baud(), path)
+            except Exception:
+                self._clear_predicted_print_end()
+                self._delete_lh_state_from_sd()
+                raise
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"Печать запущена: {display}")
             self.at_saved_start_pose = False
@@ -2981,12 +3246,29 @@ class K9ControlCenter:
             return
 
         def task() -> None:
+            source = Path(self.local_gcode_var.get().strip()).expanduser()
+            source_for_profile = None
+            if source.is_file():
+                source_sd_name = sdtool.make_sd_name(source.name)
+                if self._normalize_sd_key(source_sd_name) == self._normalize_sd_key(path) or source.name in display:
+                    source_for_profile = source
+            self._prime_print_end_contract(path, display, source_for_profile)
             if self.at_saved_start_pose:
-                out = sdtool.start_sd_print(self._port(), self._baud(), path)
-                start_note = "Печать с SD запущена из уже сохранённой стартовой позы"
+                try:
+                    out = sdtool.start_sd_print(self._port(), self._baud(), path)
+                    start_note = "Печать с SD запущена из уже сохранённой стартовой позы"
+                except Exception:
+                    self._clear_predicted_print_end()
+                    self._delete_lh_state_from_sd()
+                    raise
             else:
-                out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
-                start_note = "Печать с SD запущена от сохранённого старта"
+                try:
+                    out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
+                    start_note = "Печать с SD запущена от сохранённого старта"
+                except Exception:
+                    self._clear_predicted_print_end()
+                    self._delete_lh_state_from_sd()
+                    raise
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"{start_note}: {display}")
             self.at_saved_start_pose = False
@@ -3079,6 +3361,8 @@ class K9ControlCenter:
         self.print_start_watchdog_alerted = False
         self.at_saved_start_pose = False
         self.post_print_pose_known = False
+        self._clear_predicted_print_end(save=False)
+        self._save_print_state("idle", force=True)
         self._post("active-sd", "Печатается: -")
         self._post("progress", (progress_label, progress_value))
         self._post("sd", "SD: idle")
@@ -3158,6 +3442,7 @@ class K9ControlCenter:
             self.session_zero_defined = False
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
+            self._clear_predicted_print_end()
             out = sdtool.run_commands(self._port(), self._baud(), ["G90", "G28"], final_wait=1.2, read_seconds=2.0)
             self._post("log", out.strip() or "Home выполнен")
 
@@ -3169,6 +3454,26 @@ class K9ControlCenter:
             self.session_zero_defined = True
             self.at_saved_start_pose = True
             self.post_print_pose_known = False
+            had_lh_state = self.predicted_print_end_valid
+            had_active_print = self.current_print_file != "-"
+            self._clear_predicted_print_end(save=False)
+            if had_active_print:
+                self.current_print_file = "-"
+                self.current_print_display = "-"
+                self.current_print_start_ts = None
+                self.current_print_progress_pct = None
+                self.print_state_restored_from_log = False
+                self.print_start_watchdog_alerted = False
+                self.print_was_active = False
+                self.print_completion_armed = False
+                self.sd_progress_sample_count = 0
+                self.first_sd_progress_ts = None
+                self.last_sd_progress_ts = None
+                self._post("active-sd", "Печатается: -")
+                self._post("progress", ("Печать: состояние закрыто после сохранения старта", 0.0))
+            self._save_print_state("idle", force=True)
+            if had_lh_state:
+                self._delete_lh_state_from_sd()
             if self.post_print_recovery_required:
                 self._post("post-print-recovery-clear", None)
                 self._post("log", "Стартовая поза записана после послепечатного цикла: следующая печать разрешена.")
@@ -3183,21 +3488,114 @@ class K9ControlCenter:
             return (
                 "The app does not currently have a trusted saved start pose. "
                 "For safety it will not send 'Go to start'. If the printer is already physically at the start pose, press 'Save start'. "
-                "Otherwise use manual jog first, then press 'Save start'."
+                "Otherwise use manual jog first, then press 'Save start'. "
+                "If a print completed while Little Hands was closed or disconnected, automatic return is only safe if the app offers the explicit saved print-end / SD marker recovery prompt."
             )
         if lang == "zh":
             return (
                 "程序当前没有可信的已保存起点。为安全起见，不会发送 'Go to start'。"
                 "如果打印机已经实际位于起点，请点击 'Save start'；否则请先手动点动到起点，再保存。"
+                "如果打印完成时 Little Hands 已关闭或 USB 断开，只有程序显示明确的已保存 print-end / SD 标记恢复确认时，自动返回才是安全的。"
             )
         return (
             "Сейчас у приложения нет доверенной сохранённой стартовой позы, поэтому оно безопасно не отправляет 'К старту'. "
             "Если принтер уже физически стоит в стартовой позе, нажми 'Запомнить старт'. "
-            "Если нет — сначала выставь позу ручными кнопками, потом нажми 'Запомнить старт'."
+            "Если нет — сначала выставь позу ручными кнопками, потом нажми 'Запомнить старт'. "
+            "Если печать завершилась, пока Little Hands был закрыт или потерял USB, автоматический возврат безопасен только через отдельное подтверждение recovery по сохранённому print-end / SD-маркеру."
         )
 
     def _can_return_from_known_post_print_pose(self) -> bool:
         return bool(self.post_print_pose_known and self.post_print_recovery_required and self._port())
+
+    def _can_return_from_predicted_print_end_pose(self) -> bool:
+        return bool(
+            self._port()
+            and not self.session_zero_defined
+            and self.predicted_print_end_valid
+            and self.predicted_print_end_file != "-"
+            and self.predicted_print_end_contract == PRINT_END_CONTRACT
+            and self.predicted_print_end_z is not None
+        )
+
+    def _has_unusable_predicted_print_end(self) -> bool:
+        return bool(
+            self._port()
+            and not self.session_zero_defined
+            and self.predicted_print_end_valid
+            and self.predicted_print_end_file != "-"
+            and self.predicted_print_end_z is None
+        )
+
+    def _confirm_predicted_print_return(self) -> str | None:
+        lang = self.lang_var.get().strip() or "ru"
+        end_z = self.predicted_print_end_z
+        z_text = f"{end_z:.1f} mm" if end_z is not None else "unknown"
+        file_text = self.predicted_print_end_display if self.predicted_print_end_display != "-" else self.predicted_print_end_file
+        prompt = {
+            "en": (
+                f"Little Hands has a saved print-end model for:\n{file_text}\n\n"
+                f"Expected final pose: X95 Y95 Z{z_text}.\n\n"
+                "Try automatic return to start only if ALL are true:\n"
+                "- the print is fully finished\n"
+                "- the printed part has been removed\n"
+                "- after the finish, the axes were not moved by hand\n"
+                "- if power was cycled, the printer physically remained in that final pose\n\n"
+                "Yes = try recovery from the saved print-end model.\n"
+                "No = delete the saved marker and set start manually.\n"
+                "Cancel = do nothing."
+            ),
+            "zh": (
+                f"Little Hands 保存了以下文件的打印结束模型：\n{file_text}\n\n"
+                f"预计结束位置：X95 Y95 Z{z_text}。\n\n"
+                "只有全部满足时才尝试自动回到起点：\n"
+                "- 打印已经完全结束\n"
+                "- 模型已经取下\n"
+                "- 结束后没有手动移动各轴\n"
+                "- 如果断电重启过，打印机实际仍停在这个结束位置\n\n"
+                "Yes = 按保存的打印结束模型恢复。\n"
+                "No = 删除保存的标记，手动设置起点。\n"
+                "Cancel = 不操作。"
+            ),
+            "ru": (
+                f"У Little Hands есть сохранённая модель print-end для файла:\n{file_text}\n\n"
+                f"Ожидаемая конечная поза: X95 Y95 Z{z_text}.\n\n"
+                "Пробовать автоматический возврат к старту можно только если ВСЁ верно:\n"
+                "- печать полностью завершилась\n"
+                "- деталь снята со стола\n"
+                "- после завершения оси не двигали руками\n"
+                "- если был power cycle, физически принтер остался в этой конечной позе\n\n"
+                "Да = попробовать recovery по сохранённому print-end.\n"
+                "Нет = удалить сохранённый маркер и выставлять старт вручную.\n"
+                "Отмена = ничего не делать."
+            ),
+        }.get(lang) or (
+            "У Little Hands есть сохранённая модель print-end.\n\n"
+            "Да = recovery, Нет = удалить маркер и вручную, Отмена = ничего не делать."
+        )
+        answer = messagebox.askyesnocancel("Little Hands", prompt)
+        if answer is None:
+            return None
+        return "recover" if answer else "manual"
+
+    def _confirm_clear_unusable_predicted_print_end(self) -> bool:
+        lang = self.lang_var.get().strip() or "ru"
+        prompt = {
+            "en": (
+                "Little Hands has a saved print-end marker, but it does not contain enough G-code height data for automatic recovery.\n\n"
+                "Delete the marker and set the start pose manually?"
+            ),
+            "zh": (
+                "Little Hands 有保存的打印结束标记，但没有足够的高度数据，不能自动恢复。\n\n"
+                "删除标记并手动设置起点吗？"
+            ),
+            "ru": (
+                "У Little Hands есть сохранённый print-end маркер, но в нём нет достаточной высоты из G-code для автоматического recovery.\n\n"
+                "Удалить маркер и выставить старт вручную?"
+            ),
+        }.get(lang) or (
+            "Сохранённый print-end неполный. Удалить маркер и выставить старт вручную?"
+        )
+        return bool(messagebox.askyesno("Little Hands", prompt))
 
     def _show_missing_start_zero(self) -> None:
         msg = self._missing_start_zero_text()
@@ -3232,24 +3630,79 @@ class K9ControlCenter:
             if not self._confirm_model_removed_before_go_start():
                 return
         use_post_print_pose = False
+        use_predicted_print_end_pose = False
         if not self.session_zero_defined and self._can_return_from_known_post_print_pose():
             use_post_print_pose = True
             self.log(
                 "Использую известную послепечатную позу: Little Hands видел завершение печати. "
                 "Возврат к старту допустим только после снятия модели со стола."
             )
+        elif not self.session_zero_defined and self._can_return_from_predicted_print_end_pose():
+            choice = self._confirm_predicted_print_return()
+            if choice is None:
+                return
+            if choice == "manual":
+                self._clear_print_session_state("Печать: сохранённый print-end удалён", 0.0)
+                self._delete_lh_state_from_sd()
+                self.log("Сохранённый print-end удалён. Выставь стартовую позу вручную и нажми 'Запомнить старт'.")
+                return
+            use_predicted_print_end_pose = True
+            self.log(
+                "Пробую recovery-возврат по сохранённой модели print-end. "
+                "Оператор подтвердил: печать закончилась, модель снята, физическая конечная поза не сбита."
+            )
+        elif not self.session_zero_defined and self._has_unusable_predicted_print_end():
+            if self._confirm_clear_unusable_predicted_print_end():
+                self._clear_print_session_state("Печать: неполный print-end удалён", 0.0)
+                self._delete_lh_state_from_sd()
+                self.log("Неполный print-end удалён. Выставь стартовую позу вручную и нажми 'Запомнить старт'.")
+            return
         elif not self.session_zero_defined:
             self._show_missing_start_zero()
             return
 
         def task() -> None:
-            out = sdtool.goto_print_home(self._port(), self._baud())
-            if use_post_print_pose:
+            if use_predicted_print_end_pose:
+                assert self.predicted_print_end_z is not None
+                out = sdtool.goto_print_home_from_predicted_end(
+                    self._port(),
+                    self._baud(),
+                    end_x=self.predicted_print_end_x,
+                    end_y=self.predicted_print_end_y,
+                    end_z=self.predicted_print_end_z,
+                )
+            else:
+                out = sdtool.goto_print_home(self._port(), self._baud())
+            if use_post_print_pose or use_predicted_print_end_pose:
                 self.session_zero_defined = True
             self.at_saved_start_pose = True
             self.post_print_pose_known = False
             if use_post_print_pose:
                 self._post("log", out.strip() or "Принтер возвращён к стартовой позе из известной послепечатной позы")
+            elif use_predicted_print_end_pose:
+                self.current_print_file = "-"
+                self.current_print_display = "-"
+                self.current_print_start_ts = None
+                self.current_print_progress_pct = None
+                self.print_state_restored_from_log = False
+                self.print_start_watchdog_alerted = False
+                self.print_was_active = False
+                self.print_completion_armed = False
+                self.sd_progress_sample_count = 0
+                self.first_sd_progress_ts = None
+                self.last_sd_progress_ts = None
+                self._clear_predicted_print_end(save=False)
+                self._save_print_state("recovered-to-start", force=True)
+                self._delete_lh_state_from_sd()
+                self._post("active-sd", "Печатается: -")
+                self._post("progress", ("Recovery print-end: возвращён к старту", 0.0))
+                self._post("log", out.strip() or "Recovery по print-end выполнен: принтер возвращён к стартовой позе")
+                self._post(
+                    "log",
+                    "Если power cycle ещё не был сделан после завершения печати, сделай его перед следующей печатью. "
+                    "Когда принтер физически стоит в старте, нажми 'Запомнить старт'.",
+                )
+                self._post("post-print-recovery", "completion")
             else:
                 self._post("log", out.strip() or "Принтер возвращён к стартовой позе")
 
@@ -3260,6 +3713,7 @@ class K9ControlCenter:
             self.session_zero_defined = False
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
+            self._clear_predicted_print_end()
             out = sdtool.query_command(self._port(), self._baud(), "M18", wait_before_read=0.4, read_seconds=1.0)
             self._post("log", out.strip() or "Моторы отключены")
 
@@ -3273,6 +3727,7 @@ class K9ControlCenter:
         def task() -> None:
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
+            self._clear_predicted_print_end()
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
@@ -3288,6 +3743,7 @@ class K9ControlCenter:
         def task() -> None:
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
+            self._clear_predicted_print_end()
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
@@ -3376,6 +3832,16 @@ class K9ControlCenter:
                     and not self.print_was_active
                     and (now - self.current_print_start_ts) < PRINT_START_GRACE_SEC
                 )
+                active_print_observed = (
+                    self.current_print_file != "-"
+                    and (
+                        self.print_was_active
+                        or self.print_completion_armed
+                        or self.sd_progress_sample_count > 0
+                        or (self.current_print_progress_pct is not None and self.current_print_progress_pct > 0.0)
+                    )
+                )
+                log_interval = USB_SILENCE_LOG_INTERVAL_SEC
                 if in_start_grace:
                     self._post("sd", "SD: старт/прогрев, USB занят")
                     self._post("progress", ("Печать: старт отправлен, жду прогрев/движение", 0.0))
@@ -3384,6 +3850,22 @@ class K9ControlCenter:
                         "Это не повод выключать питание: если хотенд или моторы начали работу, просто жди. "
                         "Little Hands пока не отправляет SD/позиционные запросы и ждёт подтверждение старта."
                     )
+                elif active_print_observed:
+                    pct = self.current_print_progress_pct
+                    progress_value = float(pct) if pct is not None else 0.0
+                    progress_text = (
+                        f"Печать: {pct:.1f}% (телеметрия частичная)"
+                        if pct is not None
+                        else "Печать: активна, телеметрия частичная"
+                    )
+                    self._post("sd", "SD: печать активна, USB частичный")
+                    self._post("progress", (progress_text, progress_value))
+                    silence_message = (
+                        "Печать уже была подтверждена SD-прогрессом; сейчас M105 временно молчит. "
+                        "Для этой K9 это бывает во время SD-печати. Little Hands не отправляет M27/M114 и ждёт восстановления USB, "
+                        "а печать нужно оценивать визуально."
+                    )
+                    log_interval = ACTIVE_PRINT_PARTIAL_LOG_INTERVAL_SEC
                 elif self.current_print_file != "-":
                     self._post("sd", "SD: печать/USB занят")
                     self._post("progress", ("Печать: нет телеметрии, проверь визуально", 0.0))
@@ -3399,7 +3881,11 @@ class K9ControlCenter:
                         "USB не отвечает на M105; Little Hands откладывает SD/позиционные запросы, чтобы не забивать порт. "
                         "Power cycle нужен только если принтер не печатает, не греется и не двигается."
                     )
-                if (now - self.last_usb_silence_log_ts) >= USB_SILENCE_LOG_INTERVAL_SEC:
+                if active_print_observed:
+                    if (now - self.last_active_print_partial_log_ts) >= log_interval:
+                        self.last_active_print_partial_log_ts = now
+                        self._post("log", silence_message)
+                elif (now - self.last_usb_silence_log_ts) >= log_interval:
                     self.last_usb_silence_log_ts = now
                     self._post("log", silence_message)
                 if (
@@ -3492,6 +3978,7 @@ class K9ControlCenter:
                     self._append_ring_log(
                         f"{time.strftime('%H:%M:%S')} TELEMETRY file={self.current_print_file} progress={pct:.1f}% temp={temp_text} sd=\"{summary}\""
                     )
+                self._save_print_state("printing")
             elif (
                 self.current_print_file != "-"
                 and self.current_print_start_ts
@@ -3536,6 +4023,8 @@ class K9ControlCenter:
                     self.sd_progress_sample_count = 0
                     self.first_sd_progress_ts = None
                     self.last_sd_progress_ts = None
+                    self._clear_predicted_print_end(save=False)
+                    self._save_print_state("idle", force=True)
                     self._post("active-sd", "Печатается: -")
                     self._post("log", "Сбросил восстановленное из лога состояние печати: на текущем принтере активной SD-печати нет.")
                     self._schedule_sd_refresh_after_port(self._port(), force=True)
@@ -3582,6 +4071,8 @@ class K9ControlCenter:
                     self.sd_progress_sample_count = 0
                     self.first_sd_progress_ts = None
                     self.last_sd_progress_ts = None
+                    self._clear_predicted_print_end(save=False)
+                    self._save_print_state("completed", force=True)
                     self._post("active-sd", "Печатается: -")
                 elif self.print_was_active and not self.print_completion_armed:
                     self._post("progress", ("Печать: SD ответил Not SD printing, жду подтверждения старта", 0.0))

@@ -369,6 +369,28 @@ def delete_file(port: str, baud: int, path: str) -> str:
     return out
 
 
+def write_text_file(port: str, baud: int, path: str, text: str) -> str:
+    target = path if path.startswith("/") else f"/{path}"
+    safe_lines = [line[:96] for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    with open_serial(port, baud) as ser:
+        sync_ascii(ser)
+        ensure_sd_ready(ser)
+        send_line(ser, f"M30 {target}")
+        time.sleep(0.6)
+        _ = read_for(ser, 1.0)
+        send_line(ser, f"M28 {target}")
+        time.sleep(0.6)
+        for line in safe_lines:
+            send_line(ser, line or ";")
+            time.sleep(0.05)
+        send_line(ser, "M29")
+        time.sleep(0.8)
+        out = read_for(ser, 2.0)
+    if "Done saving file" not in out and "ok" not in out:
+        raise RuntimeError(f"Write may have failed for {target}: {out.strip() or '<no response>'}")
+    return out
+
+
 def _confirm_sd_print_started(port: str, baud: int) -> str | None:
     try:
         out = query_command(port, baud, "M27", wait_before_read=0.4, read_seconds=1.2)
@@ -500,6 +522,40 @@ def goto_print_home(port: str, baud: int) -> str:
         ["M17", "G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M400", "M114"],
         final_wait=0.8,
         read_seconds=2.0,
+    )
+
+
+def goto_print_home_from_predicted_end(
+    port: str,
+    baud: int,
+    *,
+    end_x: float,
+    end_y: float,
+    end_z: float,
+) -> str:
+    commands = [
+        "M17",
+        "G90",
+        "M211 S0",
+        f"G92 X{end_x:.3f} Y{end_y:.3f} Z{end_z:.3f}",
+    ]
+    travel_z = min(100.0, end_z + 3.0)
+    if travel_z > end_z:
+        commands.append(f"G1 Z{travel_z:.3f} F600")
+    commands.extend([
+        "G1 X0 Y0 F1800",
+        "G1 Z0 F600",
+        "G92 X0 Y0 Z0",
+        "M400",
+        "M114",
+    ])
+    return run_commands(
+        port,
+        baud,
+        commands,
+        settle_after_each=0.2,
+        final_wait=0.8,
+        read_seconds=2.5,
     )
 
 
