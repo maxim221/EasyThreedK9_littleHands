@@ -1961,7 +1961,7 @@ After each test print, append:
 
 - Added an explicit print-end model for SD-print recovery:
   - on print start Little Hands records `LH_END_GCODE_V1`
-  - expected end position is calculated from the validated Cura G-code as `X95 Y95 Z(MAXZ + 10)`
+  - expected end position is calculated from the validated Cura G-code as `X95 Y95 Z(min(100, MAXZ + 10))`
   - the model is stored in `monitor_logs/little_hands_print_state.json`
   - the same state is mirrored best-effort to the printer SD as `LHSTATE.TXT` before the SD print starts
 - The state survives closing and reopening Little Hands:

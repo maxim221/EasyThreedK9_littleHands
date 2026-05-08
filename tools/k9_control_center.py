@@ -54,6 +54,7 @@ ACTIVE_PRINT_PARTIAL_LOG_INTERVAL_SEC = 5 * 60
 PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
 PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
 PRINT_END_CONTRACT = "LH_END_GCODE_V1"
+PRINT_END_MAX_Z = 100.0
 LH_STATE_SD_FILE = "LHSTATE.TXT"
 
 
@@ -693,7 +694,7 @@ class K9ControlCenter:
     def _prime_print_end_contract(self, sd_path: str, display: str, source: Path | None = None) -> None:
         profile = self._profile_for_print(sd_path, display, source)
         max_z = profile.get("max_z") if isinstance(profile, dict) else None
-        end_z = float(max_z) + 10.0 if isinstance(max_z, (int, float)) else None
+        end_z = min(PRINT_END_MAX_Z, float(max_z) + 10.0) if isinstance(max_z, (int, float)) else None
         self.predicted_print_end_valid = True
         self.predicted_print_end_file = sd_path
         self.predicted_print_end_display = display or sd_path
