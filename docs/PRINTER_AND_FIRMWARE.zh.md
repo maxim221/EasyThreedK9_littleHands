@@ -157,6 +157,7 @@ G92 X0 Y0 Z0
 
 在应用中，使用 `Export Cura profile` 将当前验证过的 Cura 配置包复制到 `exports/`。
 公开固定的参考副本位于 `docs/cura/`。
+如果使用其他切片器版本，请按 `docs/cura/SETTINGS.zh.md` 手动配置。
 
 ## 9. 首次安全打印流程
 

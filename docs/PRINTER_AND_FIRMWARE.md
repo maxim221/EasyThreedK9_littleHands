@@ -165,6 +165,7 @@ Re-slice when:
 
 In the app, use `Export Cura profile` to copy the currently validated Cura profile bundle into `exports/`.
 The tracked public reference copy is in `docs/cura/`.
+If a different slicer version is used, configure it from `docs/cura/SETTINGS.md`.
 
 ## 9. First Safe Print Workflow
 

@@ -104,6 +104,7 @@ Little Hands 会写入：
 - 对于 `mainFlasherTop.STL`：supports everywhere，启用 support interface / roof，support angle `35`
 
 使用应用中的 `Export Cura profile` 按钮，可把当前验证过的 Cura 配置包复制到 `exports/`。
+对于其他 Cura / 切片器版本，请使用 [cura/SETTINGS.zh.md](cura/SETTINGS.zh.md)。
 
 ## 9. 打印机找不到时
 

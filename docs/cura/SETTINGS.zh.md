@@ -1,0 +1,135 @@
+# 手动 Cura / 切片器设置
+
+如果无法导入随附的 Cura 配置，或使用其他 Cura / 切片器版本，请使用本文档手动设置。
+
+这些是当前验证过的 EasyThreeD K9 / Little Hands 基线设置。它们偏保守：慢速 PLA、外部 warm bed、manual-zero start、不使用固件控制热床。
+
+## 机器
+
+- 打印机名称：`lilHands K9 warm mat`
+- 打印区域：`100 x 100 x 100 mm`
+- Origin at center：`off`
+- 固件热床控制：`off`
+- G-code flavor：`RepRap (RepRap)`，或最接近的 Marlin / RepRap-style 模式
+- 耗材直径：`1.75 mm`
+- 喷嘴直径：使用实际安装的喷嘴；已验证配置没有覆盖 Cura 的 nozzle diameter
+
+## Start G-code
+
+使用这种 start G-code。不要添加 `G28`。
+
+```gcode
+; Little Hands manual-zero workflow for EasyThreed K9 / K9 Plus
+; Expected fixed start pose on this printer:
+; X = fully left, Y = bed fully back (away from operator), Z = nozzle touching bed
+; This pose is treated as logical 0,0,0. Do not G28 before print.
+G92 X0 Y0 Z0
+G1 Z10.0 F1800
+G92 E0
+```
+
+## End G-code
+
+这里使用的是 raw Marlin 轴，不是 UI 中面向操作者的文字说明。在已验证的 K9 上，它会抬起喷头并把平台推向操作者。
+
+```gcode
+M104 S0 ;Hotend off
+M140 S0 ;Bed off in G-code even though bed is external
+G91
+G1 E-1 F1800
+G1 Z10 F1200
+G90
+G1 X95 F3000
+G1 Y95 F3000 ;Move bed toward the operator
+```
+
+不要在结尾添加 `M84`。Little Hands 需要让步进电机保持可用，以便完成打印后的恢复流程。
+
+## 材料和温度
+
+- 材料：PLA
+- 第一层热端：`218C`
+- 后续热端：`214C`
+- G-code 中的热床温度：`0C`
+- 实际外部 warm mat / hotbed：手动预热到约 `40-50C`
+- 风扇：`100%`
+- Minimum layer time：`10 s`
+
+## 质量
+
+- Layer height：`0.16 mm`
+- Initial layer height：`0.20 mm`
+- Wall line count：`4`
+- Top layers：`6`
+- Bottom layers：`6`
+- Infill density：`20%`
+- Infill pattern：`lines`
+- Print infill before walls：`off`
+- Top / bottom pattern：`lines`
+- Initial bottom pattern：`concentric`
+
+## 速度
+
+- Print speed：`16 mm/s`
+- Wall speed：`12 mm/s`
+- Top / bottom speed：`12 mm/s`
+- Infill speed：`18 mm/s`
+- Travel speed：`40 mm/s`
+- Initial layer speed：`7 mm/s`
+
+## 平台附着
+
+- Build plate adhesion：`brim`
+- Brim width：`6 mm`
+
+不要把 `10 mm` brim 作为默认值。已验证 K9 上曾出现一个 `10 mm` brim 文件：SD 可以选中，但不能可靠进入打印启动。
+
+## 支撑
+
+对于 `mainFlasherTop.STL` 和类似有较多悬垂的模型：
+
+- Generate support：`on`
+- Support placement：`everywhere`
+- Support overhang angle：`35 deg`
+- Support structure：`normal`
+- Support pattern：`zigzag`
+- Support density：`12%`
+- Support interface：`on`
+- Support roof：`on`
+- Support interface density：`85%`
+- Support roof density：`85%`
+- Support interface height：`0.8 mm`
+- Support roof height：`0.8 mm`
+- Support Z distance：`0.16 mm`
+- Support top distance：`0.16 mm`
+- Support XY distance：`0.2 mm`
+
+如果 preview 没有在问题底面下方显示支撑，不要打印。调整 support placement / threshold，直到 preview 中确实出现所需支撑。
+
+## 回抽和桥接
+
+- Retraction：`on`
+- Retraction distance：`6.5 mm`
+- Retraction speed：`25 mm/s`
+- Prime speed：`25 mm/s`
+- Bridge settings：`on`
+- Bridge fan speed：`100%`
+- Bridge skin speed：`10 mm/s`
+- Bridge wall speed：`10 mm/s`
+- Bridge skin flow：`90%`
+- Bridge wall flow：`90%`
+- Initial layer line width：约 `135%`
+
+## 写入 SD 前检查
+
+生成的 G-code 必须满足：
+
+- 没有真正的启动 `G28`
+- 开头附近包含 `G92 X0 Y0 Z0`
+- 包含热端目标温度命令，例如 `M104` / `M109`
+- bed target 保持 `0C`
+- slicer bounds 正常，并位于 `100 x 100 mm` 平台内
+- 不出现 `Filament used: 0m`
+- preview 中在模型需要的位置显示支撑
+
+如果有任何一项不满足，请重新切片。不要手工修改 G-code，除非你有意创建一个新文件，并明确标记为 modified。

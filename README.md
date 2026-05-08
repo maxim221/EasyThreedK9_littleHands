@@ -121,6 +121,7 @@ python3 tools/k9_control_center.py
    - supports for `mainFlasherTop.STL`: everywhere, interface / roof enabled, support angle `35`
 
 The tracked public Cura baseline is in [docs/cura/](docs/cura/).
+Manual settings for other slicer versions are in [docs/cura/SETTINGS.md](docs/cura/SETTINGS.md).
 
 ## Recommended Firmware File
 

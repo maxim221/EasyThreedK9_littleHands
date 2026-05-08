@@ -111,6 +111,7 @@ python3 tools/k9_control_center.py
    - `mainFlasherTop.STL` 支撑：everywhere，启用 interface / roof，support angle `35`
 
 公开固定的 Cura 基线副本位于 [docs/cura/](docs/cura/)。
+其他切片器版本的手动设置说明：[docs/cura/SETTINGS.zh.md](docs/cura/SETTINGS.zh.md)。
 
 ## 推荐固件
 

@@ -111,6 +111,7 @@ Use:
 Do not use old reduced-area machine presets from earlier experiments unless you are intentionally reproducing that older setup.
 
 Use the app button `Export Cura profile` to copy the currently validated Cura bundle into `exports/`.
+For another Cura / slicer version, use [cura/SETTINGS.md](cura/SETTINGS.md).
 
 ## 9. Raspberry Pi Notes
 

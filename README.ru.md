@@ -123,6 +123,7 @@ python3 tools/k9_control_center.py
    - поддержки для `mainFlasherTop.STL`: everywhere, interface / roof включены, support angle `35`
 
 Публичная зафиксированная копия Cura baseline лежит в [docs/cura/](docs/cura/).
+Ручное описание настроек для других версий слайсера: [docs/cura/SETTINGS.ru.md](docs/cura/SETTINGS.ru.md).
 
 ## Какую Прошивку Использовать
 

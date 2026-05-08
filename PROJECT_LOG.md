@@ -1943,3 +1943,16 @@ After each test print, append:
 - Cura baseline:
   - active local Cura profile and the reproducible slicing helper now use `brim_width = 6`
   - `Export Cura profile` includes the current `lilHands K9 warm mat` and `codex - K9 warm mat cautious` containers, including extruder temperature / bridge settings
+
+## 2026-05-08 Manual Cura Settings For Other Slicers
+
+- Added human-readable Cura / slicer settings sheets:
+  - `docs/cura/SETTINGS.md`
+  - `docs/cura/SETTINGS.ru.md`
+  - `docs/cura/SETTINGS.zh.md`
+- Purpose:
+  - allow users on another Cura version or a different slicer to recreate the validated K9 warm-mat profile without manually editing generated G-code
+  - document machine size, start/end G-code, temperatures, speeds, supports, brim, retraction, bridge settings, and pre-SD validation rules
+- Key rule preserved:
+  - use slicer settings and preview to produce correct G-code
+  - do not hand-edit G-code except as a deliberate, clearly marked modified file
