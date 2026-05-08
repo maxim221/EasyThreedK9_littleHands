@@ -99,6 +99,11 @@ Little Hands 会写入：
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
+- 当前 brim：`6 mm`
+- 外部热床 / warm mat：Cura 热床温度保持 `0C`
+- 对于 `mainFlasherTop.STL`：supports everywhere，启用 support interface / roof，support angle `35`
+
+使用应用中的 `Export Cura profile` 按钮，可把当前验证过的 Cura 配置包复制到 `exports/`。
 
 ## 9. 打印机找不到时
 
@@ -113,10 +118,12 @@ Little Hands 会写入：
 - 重新打开 `Little Hands`
 - 点击 `Find`
 
-如果打印启动失败并且只听到点击声或遥测冻结，目前最稳妥的流程是：
+如果打印启动失败，只听到点击声、没有加热，或遥测冻结，目前最稳妥的流程是：
 
 1. `Hard stop`
 2. 打印机断电重启
 3. 重新检查起始姿态
 4. 点击 `Save start`
 5. 再次启动
+
+如果热端正在升温、打印机在运动或已经出料，不要仅仅因为 USB 遥测沉默就断电。

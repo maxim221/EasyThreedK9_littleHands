@@ -103,8 +103,8 @@ def cura_engine_prefix(mount_point: Path) -> list[str]:
 
 
 def k9_profile_settings(brim_width: float) -> tuple[dict[str, str], dict[str, str]]:
-    start_gcode = """; Little Hands manual-zero workflow for second K9
-; Expected fixed home pose on this printer:
+    start_gcode = """; Little Hands manual-zero workflow for EasyThreed K9 / K9 Plus
+; Expected fixed start pose on this printer:
 ; X = fully left, Y = bed fully back (away from operator), Z = nozzle touching bed
 ; This pose is treated as logical 0,0,0. Do not G28 before print.
 G92 X0 Y0 Z0
@@ -327,7 +327,7 @@ def main() -> int:
     parser.add_argument("stl", type=Path, help="Input STL file")
     parser.add_argument("--output", type=Path, default=None, help="Output G-code path")
     parser.add_argument("--appimage", type=Path, default=DEFAULT_APPIMAGE, help="UltiMaker Cura 5.11 AppImage")
-    parser.add_argument("--brim-width", type=float, default=10.0, help="Brim width in mm")
+    parser.add_argument("--brim-width", type=float, default=6.0, help="Brim width in mm")
     parser.add_argument("--bed-size", type=float, default=100.0, help="Validated square bed size in mm")
     parser.add_argument("--sd-mount", type=Path, default=None, help="Optional mounted SD card path to copy to")
     parser.add_argument("--sd-name", default=None, help="Optional filename to use on SD")

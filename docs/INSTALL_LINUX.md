@@ -104,8 +104,13 @@ Use:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
+- current brim: `6 mm`
+- external bed / warm mat: keep Cura bed temperature at `0C`
+- for `mainFlasherTop.STL`: supports everywhere, support interface / roof enabled, support angle `35`
 
 Do not use old reduced-area machine presets from earlier experiments unless you are intentionally reproducing that older setup.
+
+Use the app button `Export Cura profile` to copy the currently validated Cura bundle into `exports/`.
 
 ## 9. Raspberry Pi Notes
 
@@ -145,10 +150,12 @@ If the printer is not detected:
 - reopen `Little Hands`
 - use the `Find` button
 
-If a print start fails and the printer only clicks or telemetry freezes, the current safest workflow is:
+If a print start fails and the printer only clicks, does not heat, or telemetry freezes, the current safest workflow is:
 
 1. `Hard stop`
 2. printer power cycle
 3. re-check the start pose
 4. `Save start`
 5. start again
+
+If the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet.

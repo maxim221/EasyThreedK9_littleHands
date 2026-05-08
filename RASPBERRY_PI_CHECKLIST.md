@@ -235,12 +235,16 @@ Current known-good Cura setup:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
+- brim width: `6 mm`
+- bed temperature in G-code: `0C` because the bed is external
+- `mainFlasherTop.STL`: supports everywhere, support interface / roof enabled, support angle `35`
 
 Important behavior assumptions:
 
 - external heated bed, not wired into the printer
 - bed is manually preheated outside the printer electronics
 - `Little Hands` uses manual-zero workflow, not `G28`
+- after `M24`, Little Hands intentionally leaves USB quiet for `180` seconds so this K9 can enter SD printing reliably
 
 ## 11. What Not To Do
 
@@ -264,6 +268,8 @@ If the printer behaves strangely:
 6. Re-define the start pose with:
    - `Save start`
    - `Go to start`
+
+Do not power-cycle only because USB telemetry is quiet. If the hotend is heating, motors are moving, or material is printing, watch the print and let Little Hands wait for USB to recover.
 
 ## 13. When Setup Is Considered Successful
 

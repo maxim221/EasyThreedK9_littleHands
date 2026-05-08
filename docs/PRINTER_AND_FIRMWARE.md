@@ -138,6 +138,18 @@ For the current validated public baseline:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
+- brim width: `6 mm`
+- PLA temperature: `218C` first layer, `214C` after that
+- bed temperature in G-code: `0C` because the warm bed is external
+- support mode for `mainFlasherTop.STL`: supports everywhere, normal supports, interface / roof enabled, support angle `35`
+
+Important G-code rules:
+
+- do not use startup `G28`
+- the start G-code must use the Little Hands manual-zero `G92 X0 Y0 Z0` workflow
+- the generated file must contain a hotend target command such as `M104` / `M109`
+- reject or re-slice files with `Filament used: 0m`, impossible Cura bounds, or missing hotend target
+- `10 mm` brim caused a selected-but-not-starting SD file on the validated K9; `6 mm` is the current safe default unless you intentionally test a wider brim and inspect the preview
 
 Current end-G-code rule:
 
@@ -151,6 +163,9 @@ Re-slice when:
 - printer mapping changes
 - the file was generated for another machine
 
+In the app, use `Export Cura profile` to copy the currently validated Cura profile bundle into `exports/`.
+The tracked public reference copy is in `docs/cura/`.
+
 ## 9. First Safe Print Workflow
 
 1. Flash `LH v4`.
@@ -162,6 +177,7 @@ Re-slice when:
 7. Press `Save start`.
 8. Press `Go to start` and confirm it returns correctly.
 9. Start printing from SD.
+10. After `M24`, Little Hands keeps USB fully quiet for `180` seconds. This is expected and helps this K9 enter SD printing reliably.
 
 ## 10. Between Prints
 
@@ -193,3 +209,5 @@ the current safest workflow is:
 3. re-check the start pose
 4. press `Save start`
 5. start again
+
+Important nuance: silent USB telemetry alone is not enough to decide that the print failed. If the hotend is heating, the printer is moving, or material is printing, do not power-cycle it; visually monitor the print and let Little Hands wait for USB to recover.

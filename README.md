@@ -22,9 +22,9 @@ What is still rough:
 
 - this is not a generic `K9` package for every board variant
 - there is no true endstop-based auto-home yet
-- after a failed print start, the safest recovery is still a printer power cycle
+- after a real failed print start with no heating / no motion, the safest recovery is still a printer power cycle
 - Windows packaging is only planned, not shipped
-- the app UI is still primarily Russian even though the docs are now bilingual
+- the app UI has RU / EN / ZH switching, but some rough edges are still being tested
 
 ## Screenshot
 
@@ -85,6 +85,7 @@ This means:
   - power cycle the printer
   - re-check the start pose
   - press `Save start` again
+- if the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet
 
 ## External Warm Bed / Hotbed Note
 
@@ -116,6 +117,10 @@ python3 tools/k9_control_center.py
 4. In Cura choose:
    - machine: `lilHands K9 warm mat`
    - profile: `codex - K9 warm mat cautious`
+   - brim: `6 mm`
+   - supports for `mainFlasherTop.STL`: everywhere, interface / roof enabled, support angle `35`
+
+The tracked public Cura baseline is in [docs/cura/](docs/cura/).
 
 ## Recommended Firmware File
 

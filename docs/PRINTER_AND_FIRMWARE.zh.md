@@ -130,6 +130,18 @@ G92 X0 Y0 Z0
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
+- brim width: `6 mm`
+- PLA 温度：第一层 `218C`，之后 `214C`
+- G-code 中的热床温度：`0C`，因为热床是外部供电
+- `mainFlasherTop.STL` 的支撑：supports everywhere、normal supports、启用 interface / roof、support angle `35`
+
+重要 G-code 规则：
+
+- 不要使用启动 `G28`
+- start G-code 必须使用 Little Hands 的 manual-zero `G92 X0 Y0 Z0` 流程
+- 生成的文件必须包含热端目标温度命令，例如 `M104` / `M109`
+- 如果文件出现 `Filament used: 0m`、不可能的 Cura bounds，或缺少热端目标温度，请重新切片
+- `10 mm` brim 在已验证的 K9 上曾生成一个可以选中但不能正常启动的 SD 文件；当前安全默认值是 `6 mm`
 
 当前 end-gcode 规则：
 
@@ -143,6 +155,9 @@ G92 X0 Y0 Z0
 - 轴映射改变
 - 文件是为另一台机器生成的
 
+在应用中，使用 `Export Cura profile` 将当前验证过的 Cura 配置包复制到 `exports/`。
+公开固定的参考副本位于 `docs/cura/`。
+
 ## 9. 首次安全打印流程
 
 1. 刷写 `LH v4`
@@ -154,6 +169,7 @@ G92 X0 Y0 Z0
 7. 点击 `Save start`
 8. 点击 `Go to start` 并确认它确实返回正确位置
 9. 从 SD 启动打印
+10. 发送 `M24` 后，Little Hands 会让 USB 完全安静 `180` 秒。这是预期行为，有助于这台 K9 稳定进入 SD 打印。
 
 ## 10. 两次打印之间
 
@@ -185,3 +201,5 @@ G92 X0 Y0 Z0
 3. 重新确认起始位置
 4. 点击 `Save start`
 5. 再次启动
+
+重要细节：USB 遥测沉默本身不足以证明打印失败。如果热端正在升温、打印机在运动或已经出料，不要断电；请目视观察打印，并让 Little Hands 等待 USB 恢复。

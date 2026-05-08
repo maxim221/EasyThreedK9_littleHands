@@ -1,0 +1,15 @@
+# Cura Baseline Bundle
+
+This directory contains the current tracked Cura baseline for the validated EasyThreeD K9 / Little Hands setup.
+
+- Cura version used during testing: `5.11`
+- Machine: `lilHands K9 warm mat`
+- Profile: `codex - K9 warm mat cautious`
+- Brim: `6 mm`
+- PLA temperature: `218C` first layer, `214C` after that
+- Bed temperature in G-code: `0C`, because the warm bed is external
+- Supports for `mainFlasherTop.STL`: everywhere, support interface / roof enabled, support angle `35`
+
+The app button `Export Cura profile` exports the live local Cura containers to `exports/`, which is intentionally ignored by git. This checked-in copy is the public reference baseline.
+
+Do not use startup `G28` with this printer. The start G-code uses the Little Hands manual-zero `G92 X0 Y0 Z0` workflow.

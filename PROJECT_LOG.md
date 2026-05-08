@@ -1328,7 +1328,7 @@ After each test print, append:
   - physical `Y/Z` motor plug swap
 - Added GUI actions:
   - `Manual` window with the current Little Hands operating procedure
-  - `Экспорт Cura` to copy the printer profiles and Cura settings into the project
+  - `Экспорт профиля Cura` to copy the printer profiles and Cura settings into the project
   - `Подготовить` for ordinary Cura G-code (no `_k9xz` remap in baseline mode)
   - `Залить и старт` for upload + start from the fixed print home
   - `Запомнить Home` (`G92 X0 Y0 Z0`)
@@ -1875,11 +1875,11 @@ After each test print, append:
 - The helper:
   - runs the UltiMaker Cura 5.11 AppImage CuraEngine directly
   - applies the validated Little Hands manual-zero start/end G-code
-  - uses the cautious PLA profile with supports everywhere, support interface/roof enabled, and `10 mm` brim
+  - uses the cautious PLA profile with supports everywhere, support interface/roof enabled, and `6 mm` brim
   - centers binary STL models by their STL bounds before slicing
   - validates resulting extrusion bounds against the `100 x 100 mm` K9 bed before optional SD copy
   - refuses real `G28` commands in output G-code
-- This captures the field fix from the print where the front-left corner lifted with `6 mm` brim.
+- `10 mm` brim is no longer the default because one generated SD file selected successfully but did not enter a reliable print start on the validated K9.
 
 ## 2026-05-08 SD Start Reliability And G-Code Guardrails
 
@@ -1921,3 +1921,25 @@ After each test print, append:
   - after SD start, Little Hands immediately resumes normal polling
   - if the printer stops answering `M105`, the app still avoids piling on SD/position queries and logs a power-cycle recovery hint
   - G-code validation remains in place to block obviously broken Cura exports before upload/start
+
+## 2026-05-08 Restore Visible SD Start USB Quiet Window
+
+- Field result after removing the quiet window:
+  - the known-good `CFFFP_~2.GCO` file of size `1703396` opened and selected correctly
+  - Little Hands immediately resumed USB polling
+  - the printer then stopped answering `M105`
+  - the operator observed only the fan noise and no real print start
+- Conclusion:
+  - the file itself was not the only factor
+  - immediate post-`M24` polling can still wedge this K9 while it is entering SD print
+- Fixed:
+  - restored a full `180 s` post-`M24` USB quiet window
+  - made the wait explicit in the UI and log instead of hiding it
+  - during this window Little Hands does not send `M105`, `M27`, `M114`, or SD-list commands
+  - after the window, it resumes cautious telemetry / SD progress polling
+- Also refined user-facing warnings:
+  - USB silence during an actual heating / moving / printing start is not by itself a reason to power-cycle
+  - the failed-start recovery window now says to use power-cycle only when the printer is physically not heating, not moving, and not printing
+- Cura baseline:
+  - active local Cura profile and the reproducible slicing helper now use `brim_width = 6`
+  - `Export Cura profile` includes the current `lilHands K9 warm mat` and `codex - K9 warm mat cautious` containers, including extruder temperature / bridge settings

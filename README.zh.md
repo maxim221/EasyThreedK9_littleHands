@@ -22,9 +22,9 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 
 - 这不是适用于所有 `K9` 变种的通用包
 - 还没有真正基于限位开关的自动回零
-- 如果打印启动失败，目前最稳妥的恢复方式仍然是打印机断电重启
+- 如果确实启动失败，并且没有加热 / 没有运动，目前最稳妥的恢复方式仍然是打印机断电重启
 - Windows 打包还只是计划
-- 程序界面现在主要仍然偏俄语，但文档已经提供三种语言
+- 程序界面支持 RU / EN / ZH 切换，但仍有一些界面细节在测试中
 
 ## 截图
 
@@ -81,6 +81,7 @@ Little Hands 使用的是 manual-zero 工作流：
   - 打印机断电重启
   - 重新检查起始姿态
   - 再次点击 `Save start`
+- 如果热端正在升温、打印机在运动或已经出料，不要仅仅因为 USB 遥测沉默就断电
 
 ## 外部热床说明
 
@@ -106,6 +107,10 @@ python3 tools/k9_control_center.py
 4. 在 Cura 中选择：
    - machine: `lilHands K9 warm mat`
    - profile: `codex - K9 warm mat cautious`
+   - brim: `6 mm`
+   - `mainFlasherTop.STL` 支撑：everywhere，启用 interface / roof，support angle `35`
+
+公开固定的 Cura 基线副本位于 [docs/cura/](docs/cura/)。
 
 ## 推荐固件
 

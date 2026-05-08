@@ -20,6 +20,7 @@ import threading
 import time
 import subprocess
 import json
+import math
 from pathlib import Path
 import textwrap
 import tkinter as tk
@@ -44,6 +45,7 @@ TEMP_LOG_INTERVAL_SEC = 5.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
 AUTO_SD_REFRESH_REQUIRE_FRESH_TEMP_SEC = 12.0
 PRINT_START_GRACE_SEC = 5 * 60
+POST_M24_USB_QUIET_SEC = 180
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
@@ -134,6 +136,7 @@ MANUAL_TEXT = textwrap.dedent(
     4. Press "Save start" to save this pose as print zero.
     5. Use "Go to start" to return to this saved zero.
     6. Use "Start print" to return to the saved zero and then send M24.
+    7. After M24 the app keeps USB fully quiet for 180 seconds so this K9 can enter SD printing reliably.
 
     Bed leveling
     - Use the four corners and the center.
@@ -148,9 +151,12 @@ MANUAL_TEXT = textwrap.dedent(
     - "Start print" returns to that stored print zero and starts the selected SD file.
     - "Reset USB" pauses polling and reopens a clean short serial session without restarting the whole app.
     - "Capture all metrics" dumps M115 / M503 / M114 / M105 / M27.
+    - If USB telemetry is silent during a real SD start but the printer is heating,
+      moving, or printing, do not power-cycle it; visually monitor the print and let
+      Little Hands wait for USB to recover.
 
     Exports
-    - "Export Cura" saves the current printer profiles and Cura settings into the project.
+    - "Export Cura profile" saves the current validated printer profile and Cura settings into the project.
     - Runtime log folder: /home/maxim/draftCode/littleHands/monitor_logs/
     - Ring log file: /home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
     - "Save log" saves a timestamped copy of the current runtime log into gui_exports.
@@ -159,10 +165,14 @@ MANUAL_TEXT = textwrap.dedent(
 
 CURA_EXPORT_PATTERNS = [
     "machine_instances/lilHands.global.cfg",
+    "machine_instances/lilHands_k9_warmmat.global.cfg",
     "definition_changes/lilHands_settings.inst.cfg",
+    "definition_changes/lilHands_k9_warmmat_settings.inst.cfg",
     "definition_changes/custom_extruder_*settings.inst.cfg",
     "user/lilHands_user.inst.cfg",
+    "user/codex_k9_warmmat*.cfg",
     "user/codex*.cfg",
+    "quality_changes/codex_k9_warmmat*.cfg",
     "quality_changes/codex*.cfg",
     "extruders/*.extruder.cfg",
 ]
@@ -201,12 +211,15 @@ MANUAL_TEXTS = {
         4. Press "Save start" to save this pose as print zero.
         5. Use "Go to start" to return to this saved zero.
         6. Use "Start print" to return to the saved zero and then send M24.
+        7. After M24 the app keeps USB fully quiet for 180 seconds so this K9 can enter SD printing reliably.
 
         Diagnostics
         - This printer does not have a reliable standard Marlin endstop-based home.
         - "Save start" stores the current physical pose as print zero for this session.
         - "Go to start" returns to that stored print zero.
-        - After a failed start, the safest recovery is usually a printer power cycle.
+        - If USB telemetry is silent during a real SD start but the printer is heating,
+          moving, or printing, do not power-cycle it; visually monitor the print and let
+          Little Hands wait for USB to recover.
         """
     ).strip(),
     "zh": textwrap.dedent(
@@ -237,12 +250,14 @@ MANUAL_TEXTS = {
         4. 点击“Save start”保存当前零点。
         5. 点击“Go to start”返回该零点。
         6. 点击“Start print”回到零点并发送 M24。
+        7. 发送 M24 后，程序会让 USB 完全安静 180 秒，以便这台 K9 稳定进入 SD 打印。
 
         诊断说明
         - 这台打印机没有可靠的标准 Marlin 限位回零。
         - “Save start”会把当前物理姿态设为本次会话的打印零点。
         - “Go to start”会回到这个零点。
-        - 如果启动失败，最稳妥的恢复方式通常还是断电重启打印机。
+        - 如果 SD 启动时 USB 遥测暂时沉默，但打印机正在加热、运动或打印，
+          不要断电；目视观察打印，让 Little Hands 等待 USB 恢复。
         """
     ).strip(),
 }
@@ -306,6 +321,8 @@ class K9ControlCenter:
         self.current_print_file = "-"
         self.current_print_display = "-"
         self.current_print_start_ts: float | None = None
+        self.post_m24_usb_quiet_until = 0.0
+        self.last_post_m24_quiet_log_ts = 0.0
         self.current_print_progress_pct: float | None = None
         self.print_state_restored_from_log = False
         self.print_start_watchdog_alerted = False
@@ -480,6 +497,8 @@ class K9ControlCenter:
             self.current_print_display = last_active
             self.active_sd_var.set(self._format_label_value("active_sd", last_active))
             self.current_print_start_ts = last_start_ts or first_active_telem_ts
+            if last_progress_pct is None and last_start_ts:
+                self.post_m24_usb_quiet_until = max(0.0, last_start_ts + POST_M24_USB_QUIET_SEC)
             self.current_print_progress_pct = last_progress_pct
             self.print_state_restored_from_log = True
             if last_progress_pct is not None:
@@ -532,7 +551,7 @@ class K9ControlCenter:
             "files_and_firmware": {"ru": "Файлы и прошивка", "en": "Files & Firmware", "zh": "文件和固件"},
             "manual": {"ru": "Manual", "en": "Manual", "zh": "说明"},
             "reset_usb": {"ru": "Сброс USB", "en": "Reset USB", "zh": "重置 USB"},
-            "export_cura": {"ru": "Экспорт Cura", "en": "Export Cura", "zh": "导出 Cura"},
+            "export_cura": {"ru": "Экспорт профиля Cura", "en": "Export Cura profile", "zh": "导出 Cura 配置"},
             "sound_pc_short": {"ru": "Звук ПК", "en": "PC sound", "zh": "电脑提示音"},
             "sound_pc_complete": {"ru": "Звук окончания печати ПК", "en": "PC completion sound", "zh": "打印完成电脑提示音"},
             "temp_graph": {"ru": "Температура hotend", "en": "Hotend temperature", "zh": "热端温度"},
@@ -1084,7 +1103,7 @@ class K9ControlCenter:
         self.reset_usb_button = ttk.Button(actions, text="Сброс USB", command=self.reset_usb_session)
         self.reset_usb_button.grid(row=0, column=2, padx=3, sticky="ew")
         self.action_widgets.append(self.reset_usb_button)
-        self.export_cura_button = ttk.Button(actions, text="Экспорт Cura", command=self.export_cura_bundle)
+        self.export_cura_button = ttk.Button(actions, text="Экспорт профиля Cura", command=self.export_cura_bundle)
         self.export_cura_button.grid(row=0, column=3, padx=3, sticky="ew")
         self.action_widgets.append(self.export_cura_button)
         self.pc_sound_button = ttk.Button(actions, text="Звук ПК", command=self.play_computer_melody_button)
@@ -2057,7 +2076,10 @@ class K9ControlCenter:
     def _mark_sd_start_sent(self, path: str, display: str) -> None:
         self.current_print_file = path
         self.current_print_display = display
-        self.current_print_start_ts = time.time()
+        start_ts = time.time()
+        self.current_print_start_ts = start_ts
+        self.post_m24_usb_quiet_until = start_ts + POST_M24_USB_QUIET_SEC
+        self.last_post_m24_quiet_log_ts = 0.0
         self.current_print_progress_pct = 0.0
         self.print_state_restored_from_log = False
         self.print_start_watchdog_alerted = False
@@ -2076,7 +2098,9 @@ class K9ControlCenter:
         )
         self._post(
             "log",
-            "USB-опрос после M24 остаётся включённым: Little Hands сразу следит за температурой и SD-статусом.",
+            f"Первые {POST_M24_USB_QUIET_SEC} с после M24 Little Hands не трогает USB вообще. "
+            "Это нужно этой K9-прошивке, чтобы спокойно войти в SD-печать. "
+            "Если хотенд греется или вентилятор/моторы ожили — не выключай питание, просто наблюдай.",
         )
 
     def _refresh_ports_on_startup(self) -> None:
@@ -2205,7 +2229,7 @@ class K9ControlCenter:
         manual_path = target_root / "BASELINE_MANUAL.txt"
         manual_text = MANUAL_TEXTS.get(self.lang_var.get().strip() or "ru", MANUAL_TEXT)
         manual_path.write_text(manual_text + "\n", encoding="utf-8")
-        self.log(f"Экспорт Cura готов: {target_root} ({copied} файлов)")
+        self.log(f"Экспорт профиля Cura готов: {target_root} ({copied} файлов)")
 
     def play_computer_melody_button(self) -> None:
         self._play_completion_melody()
@@ -2228,9 +2252,20 @@ class K9ControlCenter:
         lang = self.lang_var.get().strip() or "ru"
         failed = reason in {"failed-start", "blocked-start"}
         if lang == "en":
+            if failed:
+                return (
+                    "The print start was not confirmed reliably.\n\n"
+                    "Use this recovery only if the printer is physically NOT printing, NOT heating, and NOT moving. "
+                    "If the printer is actually working, close this window, do not power-cycle it, and monitor the print visually.\n\n"
+                    "1. If the printer is stuck with clicks or a silent hotend, press 'Hard stop'.\n"
+                    "2. Power the printer off for 5-10 seconds and power it on again.\n"
+                    "3. Press 'Find' if the port is not responsive.\n"
+                    "4. Check the start pose manually.\n"
+                    "5. Press 'Save start'.\n"
+                    "6. Before retrying, verify that the G-code was sliced with the validated Cura profile and was not edited by hand.\n\n"
+                    "Why: this K9 can leave USB/SD half-alive after a bad start, but a silent USB reply alone is not proof that a real print has failed."
+                )
             intro = (
-                "The previous/repeated print did not enter a reliable printer state."
-                if failed else
                 "Print finished. Before the next print, bring the printer back to a clean start state."
             )
             return (
@@ -2244,7 +2279,20 @@ class K9ControlCenter:
                 "Why: after an SD print this K9/Marlin build can leave USB/SD in a half-alive state. Starting again before a power cycle can produce clicks, frozen telemetry, or no motion."
             )
         if lang == "zh":
-            intro = "上一次/重复打印没有进入可靠状态。" if failed else "打印已完成。下一次打印前，请先回到干净的起始状态。"
+            if failed:
+                return (
+                    "打印启动没有被可靠确认。\n\n"
+                    "只有在打印机实际没有打印、没有加热、也没有运动时，才按这个恢复流程操作。"
+                    "如果打印机确实已经在工作，请关闭此窗口，不要断电，并目视观察打印。\n\n"
+                    "1. 如果打印机卡住、发出咔哒声或热端不加热，点击 'Hard stop'。\n"
+                    "2. 关闭打印机电源 5-10 秒，然后重新打开。\n"
+                    "3. 如果端口没有响应，点击 'Find'。\n"
+                    "4. 手动检查起始姿态。\n"
+                    "5. 点击 'Save start'。\n"
+                    "6. 再次启动前，确认 G-code 来自已验证的 Cura 配置，并且没有手工改坏。\n\n"
+                    "原因：这台 K9 在异常启动后可能让 USB/SD 处于半工作状态，但 USB 暂时沉默本身并不能证明真实打印失败。"
+                )
+            intro = "打印已完成。下一次打印前，请先回到干净的起始状态。"
             return (
                 f"{intro}\n\n"
                 "1. 从平台上取下模型。\n"
@@ -2255,11 +2303,21 @@ class K9ControlCenter:
                 "6. 等程序确认起点已保存后，再开始下一次 SD 打印。\n\n"
                 "原因：这台 K9/Marlin 在 SD 打印结束后可能让 USB/SD 留在半工作状态，直接重复启动会导致咔哒声、遥测冻结或无动作。"
             )
-        intro = (
-            "Предыдущий/повторный старт не перевёл принтер в надёжное состояние."
-            if failed else
-            "Печать завершена. Перед следующей печатью верни принтер в чистое стартовое состояние."
-        )
+        if failed:
+            return (
+                "Старт печати не подтвердился надёжно.\n\n"
+                "Используй это восстановление только если принтер физически НЕ печатает, НЕ греется и НЕ двигается. "
+                "Если принтер реально работает, закрой это окно, не выключай питание и наблюдай за печатью визуально.\n\n"
+                "1. Если принтер застрял со щелчками или молчащим хотендом, нажми 'Жёсткий стоп'.\n"
+                "2. Выключи питание принтера на 5–10 секунд и включи снова.\n"
+                "3. Если порт не отвечает, нажми 'Найти'.\n"
+                "4. Вручную проверь стартовую позу.\n"
+                "5. Нажми 'Запомнить старт'.\n"
+                "6. Перед повтором проверь, что G-code сделан проверенным профилем Cura и не был испорчен ручной правкой.\n\n"
+                "Почему так: этот K9 после плохого старта может оставлять USB/SD в полуживом состоянии, "
+                "но одно только молчание USB ещё не доказывает, что реальная печать сорвалась."
+            )
+        intro = "Печать завершена. Перед следующей печатью верни принтер в чистое стартовое состояние."
         return (
             f"{intro}\n\n"
             "1. Сними модель со стола.\n"
@@ -2309,11 +2367,18 @@ class K9ControlCenter:
 
     def _show_post_print_recovery_window(self, reason: str = "completion") -> None:
         text = self._post_print_recovery_text(reason)
-        title = {
-            "ru": "Перед следующей печатью",
-            "en": "Before Next Print",
-            "zh": "下一次打印前",
-        }.get(self.lang_var.get().strip() or "ru", "Перед следующей печатью")
+        if reason in {"failed-start", "blocked-start"}:
+            title = {
+                "ru": "Проверка старта печати",
+                "en": "Print Start Check",
+                "zh": "打印启动检查",
+            }.get(self.lang_var.get().strip() or "ru", "Проверка старта печати")
+        else:
+            title = {
+                "ru": "Перед следующей печатью",
+                "en": "Before Next Print",
+                "zh": "下一次打印前",
+            }.get(self.lang_var.get().strip() or "ru", "Перед следующей печатью")
         if self.post_print_window and self.post_print_window.winfo_exists():
             win = self.post_print_window
             win.deiconify()
@@ -3002,6 +3067,8 @@ class K9ControlCenter:
         self.current_print_file = "-"
         self.current_print_display = "-"
         self.current_print_start_ts = None
+        self.post_m24_usb_quiet_until = 0.0
+        self.last_post_m24_quiet_log_ts = 0.0
         self.current_print_progress_pct = None
         self.print_state_restored_from_log = False
         self.print_was_active = False
@@ -3250,6 +3317,29 @@ class K9ControlCenter:
     def _poll_worker(self) -> None:
         try:
             now = time.time()
+            quiet_remaining = self.post_m24_usb_quiet_until - now
+            if self.current_print_file != "-" and quiet_remaining > 0:
+                remaining = max(1, int(math.ceil(quiet_remaining)))
+                self._post("busy", (False, "USB: стартовая пауза"))
+                self._post("sd", f"SD: старт, USB пауза {remaining} c")
+                self._post("progress", (f"Старт SD: не трогаю USB {remaining} c", 0.0))
+                if (
+                    not self.last_post_m24_quiet_log_ts
+                    or (now - self.last_post_m24_quiet_log_ts) >= USB_SILENCE_LOG_INTERVAL_SEC
+                    or remaining <= 5
+                ):
+                    self.last_post_m24_quiet_log_ts = now
+                    self._post(
+                        "log",
+                        f"Стартовая USB-пауза после M24: осталось примерно {remaining} c. "
+                        "Это нормальное ожидание; power cycle нужен только если принтер физически не греется, не двигается и не начинает печать.",
+                    )
+                return
+            if self.post_m24_usb_quiet_until and self.current_print_file != "-":
+                self.post_m24_usb_quiet_until = 0.0
+                self.last_post_m24_quiet_log_ts = 0.0
+                self._post("busy", (False, "USB: idle"))
+                self._post("log", "Стартовая USB-пауза после M24 завершена: начинаю аккуратный опрос M105/M27.")
             temp = sdtool.query_command(
                 self._port(),
                 self._baud(),
@@ -3280,14 +3370,38 @@ class K9ControlCenter:
             if not match:
                 if not self.usb_silence_since:
                     self.usb_silence_since = now
-                self._post("sd", "SD: USB не отвечает")
+                in_start_grace = (
+                    self.current_print_file != "-"
+                    and self.current_print_start_ts
+                    and not self.print_was_active
+                    and (now - self.current_print_start_ts) < PRINT_START_GRACE_SEC
+                )
+                if in_start_grace:
+                    self._post("sd", "SD: старт/прогрев, USB занят")
+                    self._post("progress", ("Печать: старт отправлен, жду прогрев/движение", 0.0))
+                    silence_message = (
+                        "Во время старта SD-печати принтер временно не отвечает на M105. "
+                        "Это не повод выключать питание: если хотенд или моторы начали работу, просто жди. "
+                        "Little Hands пока не отправляет SD/позиционные запросы и ждёт подтверждение старта."
+                    )
+                elif self.current_print_file != "-":
+                    self._post("sd", "SD: печать/USB занят")
+                    self._post("progress", ("Печать: нет телеметрии, проверь визуально", 0.0))
+                    silence_message = (
+                        "Little Hands не может подтвердить состояние печати по USB: M105 временно молчит. "
+                        "Если принтер греется, двигается или уже печатает, не выключай питание; приложение ждёт восстановления связи "
+                        "и не отправляет SD/позиционные запросы. Если принтер физически не греется и не двигается несколько минут, "
+                        "тогда это похоже на неподтверждённый старт."
+                    )
+                else:
+                    self._post("sd", "SD: USB не отвечает")
+                    silence_message = (
+                        "USB не отвечает на M105; Little Hands откладывает SD/позиционные запросы, чтобы не забивать порт. "
+                        "Power cycle нужен только если принтер не печатает, не греется и не двигается."
+                    )
                 if (now - self.last_usb_silence_log_ts) >= USB_SILENCE_LOG_INTERVAL_SEC:
                     self.last_usb_silence_log_ts = now
-                    self._post(
-                        "log",
-                        "USB не отвечает на M105; откладываю SD/позиционные запросы, чтобы не забивать порт. "
-                        "Если это после старта или завершения печати, нужен power cycle принтера.",
-                    )
+                    self._post("log", silence_message)
                 if (
                     self.current_print_file != "-"
                     and self.current_print_start_ts
@@ -3296,12 +3410,11 @@ class K9ControlCenter:
                     and (now - self.current_print_start_ts) >= PRINT_START_GRACE_SEC
                 ):
                     self.print_start_watchdog_alerted = True
-                    self._clear_print_session_state("Печать: старт не подтверждён", 0.0)
-                    self._post("post-print-recovery", "failed-start")
                     self._post(
                         "log",
-                        "Старт печати не подтвердился: принтер не отвечает на M105, поэтому Little Hands не трогает SD. "
-                        "Сделай power cycle принтера и обнови список SD перед новым стартом.",
+                        "Старт печати пока не подтверждён по USB, но это не доказательство сбоя: "
+                        "если принтер физически греется или печатает, ничего не выключай. "
+                        "Если движения и нагрева нет несколько минут, останови попытку и сделай power cycle перед новым стартом.",
                     )
                 return
             sd = sdtool.query_command(
