@@ -1909,3 +1909,15 @@ After each test print, append:
   - moved it out of normal `.gcode` selection as `exports/rejected/CFFFP_mainFlasherTop_brim10.bad.txt`
   - the next safe recovery candidate is the known-good backup:
     `card_backups/sd_before_brim10_20260507_223700/CFFFP_mainFlasherTop.gcode`
+
+## 2026-05-08 Remove SD Start Quiet Pause
+
+- Removed the explicit `180 s` post-`M24` USB quiet window from Little Hands.
+- Reason:
+  - the timer was opaque in the UI
+  - earlier successful starts did not require the operator to understand or wait through a hidden countdown
+  - the more likely root cause of the latest repeated failed start is bad or incompatible G-code, not normal telemetry polling
+- Current behavior:
+  - after SD start, Little Hands immediately resumes normal polling
+  - if the printer stops answering `M105`, the app still avoids piling on SD/position queries and logs a power-cycle recovery hint
+  - G-code validation remains in place to block obviously broken Cura exports before upload/start

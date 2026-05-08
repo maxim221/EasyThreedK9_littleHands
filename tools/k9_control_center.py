@@ -46,7 +46,6 @@ AUTO_SD_REFRESH_REQUIRE_FRESH_TEMP_SEC = 12.0
 PRINT_START_GRACE_SEC = 5 * 60
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
-POST_SD_START_USB_QUIET_SEC = 180
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
 
 
@@ -310,8 +309,6 @@ class K9ControlCenter:
         self.current_print_progress_pct: float | None = None
         self.print_state_restored_from_log = False
         self.print_start_watchdog_alerted = False
-        self.sd_start_usb_quiet_until = 0.0
-        self.sd_start_usb_quiet_resume_logged = False
         self.post_print_recovery_required = False
         self.printer_halted = False
         self.last_temp_sample_ts = 0.0
@@ -488,9 +485,6 @@ class K9ControlCenter:
             if last_progress_pct is not None:
                 self.print_completion_armed = True
                 self.print_was_active = True
-            elif last_start_ts:
-                self.sd_start_usb_quiet_until = max(0.0, last_start_ts + POST_SD_START_USB_QUIET_SEC)
-                self.sd_start_usb_quiet_resume_logged = self.sd_start_usb_quiet_until <= now
 
     def _load_ui_state(self) -> dict[str, object]:
         if not UI_STATE_PATH.is_file():
@@ -2072,8 +2066,6 @@ class K9ControlCenter:
         self.sd_progress_sample_count = 0
         self.first_sd_progress_ts = None
         self.last_sd_progress_ts = None
-        self.sd_start_usb_quiet_until = time.time() + POST_SD_START_USB_QUIET_SEC
-        self.sd_start_usb_quiet_resume_logged = False
         self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
         self._post("active-sd", f"Печатается: {display}")
         self._post("progress", ("Печать: старт отправлен, жду SD/прогрев", 0.0))
@@ -2084,8 +2076,7 @@ class K9ControlCenter:
         )
         self._post(
             "log",
-            f"USB-опрос полностью приостановлен на {POST_SD_START_USB_QUIET_SEC} с после M24, "
-            "чтобы не мешать старту SD-печати на K9.",
+            "USB-опрос после M24 остаётся включённым: Little Hands сразу следит за температурой и SD-статусом.",
         )
 
     def _refresh_ports_on_startup(self) -> None:
@@ -3018,8 +3009,6 @@ class K9ControlCenter:
         self.sd_progress_sample_count = 0
         self.first_sd_progress_ts = None
         self.last_sd_progress_ts = None
-        self.sd_start_usb_quiet_until = 0.0
-        self.sd_start_usb_quiet_resume_logged = False
         self.print_start_watchdog_alerted = False
         self.at_saved_start_pose = False
         self.post_print_pose_known = False
@@ -3254,19 +3243,6 @@ class K9ControlCenter:
             self.disconnect_port(log_change=False)
             self.root.after(1000, self._poll_status)
             return
-        now = time.time()
-        if self.current_print_file != "-" and now < self.sd_start_usb_quiet_until:
-            remaining = max(1, int(self.sd_start_usb_quiet_until - now))
-            self.busy_var.set(f"USB: quiet start {remaining}s")
-            self.sd_var.set(f"SD: quiet start ({remaining}s)")
-            self.progress_var.set("Печать: старт отправлен, не мешаю принтеру")
-            self.root.after(1000, self._poll_status)
-            return
-        if self.sd_start_usb_quiet_until and now >= self.sd_start_usb_quiet_until:
-            self.sd_start_usb_quiet_until = 0.0
-            if not self.sd_start_usb_quiet_resume_logged:
-                self.sd_start_usb_quiet_resume_logged = True
-                self.log("USB-опрос после стартовой паузы возобновлён.")
         if self.monitor_enabled and not self.user_task_pending and self.serial_lock.acquire(blocking=False):
             threading.Thread(target=self._poll_worker, daemon=True).start()
         self.root.after(1000, self._poll_status)
