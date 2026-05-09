@@ -1978,17 +1978,21 @@ After each test print, append:
   - declares the returned position as `G92 X0 Y0 Z0`
   - clears the active print marker and asks for the normal post-print/start confirmation workflow
 - Active-print USB silence messages were softened:
-  - once SD progress has confirmed a real print, intermittent missing `M105` is logged as partial telemetry instead of a failure
-  - repeated partial-telemetry logs are throttled to reduce scary noise during real prints
+  - once SD progress has confirmed a real print, intermittent missing `M105` is shown in status/progress fields instead of the journal
+  - Little Hands still avoids extra `M27/M114` queries while `M105` is temporarily silent
 
-## 2026-05-09 Quieter Print Logging
+## 2026-05-09 Suppress Confirmed-Print USB Chatter
 
-- Reduced routine log noise while keeping recovery data:
-  - raw `M105` temperature samples are written to the ring log every `15 s` during active print and every `60 s` while idle
-  - SD progress `TELEMETRY` records are written every `30 s` instead of every `5 s`
-  - the visible post-`M24` quiet-window reminder is throttled to about once per minute
-- Important events still go to the visible journal immediately:
-  - start / stop / hard stop
-  - failed start recovery
-  - lost USB / partial telemetry
-  - print completion and post-print recovery prompts
+- Field correction:
+  - telemetry cadence was not the problem
+  - the noisy line was the visible journal message:
+    `Печать уже была подтверждена SD-прогрессом; сейчас M105 временно молчит...`
+- Final behavior:
+  - raw `M105` and `TELEMETRY` logging cadences stay at the previous detailed rates
+  - if an active SD print was already confirmed and a single `M105` poll is silent, the UI updates status/progress only
+  - the journal no longer records that expected active-print partial-USB condition
+- Warnings remain visible for:
+  - unconfirmed starts
+  - idle USB silence
+  - real command errors
+  - failed-start recovery

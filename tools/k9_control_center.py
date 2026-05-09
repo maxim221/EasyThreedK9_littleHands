@@ -42,18 +42,14 @@ UI_STATE_PATH = LOG_DIR / "little_hands_ui_state.json"
 PRINT_STATE_PATH = LOG_DIR / "little_hands_print_state.json"
 TEMP_GRAPH_WINDOW_SEC = 15 * 60
 TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
-TEMP_LOG_PRINT_INTERVAL_SEC = 15.0
-TEMP_LOG_IDLE_INTERVAL_SEC = 60.0
-TELEMETRY_LOG_INTERVAL_SEC = 30.0
+TEMP_LOG_INTERVAL_SEC = 5.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
 AUTO_SD_REFRESH_REQUIRE_FRESH_TEMP_SEC = 12.0
 PRINT_START_GRACE_SEC = 5 * 60
 POST_M24_USB_QUIET_SEC = 180
-POST_M24_QUIET_UI_LOG_INTERVAL_SEC = 60.0
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
-ACTIVE_PRINT_PARTIAL_LOG_INTERVAL_SEC = 5 * 60
 PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
 PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
 PRINT_END_CONTRACT = "LH_END_GCODE_V1"
@@ -353,7 +349,6 @@ class K9ControlCenter:
         self.last_temp_log_ts = 0.0
         self.usb_silence_since = 0.0
         self.last_usb_silence_log_ts = 0.0
-        self.last_active_print_partial_log_ts = 0.0
         self.last_temp_current: float | None = None
         self.last_temp_target: float | None = None
         self.last_heater_power: int | None = None
@@ -3785,7 +3780,7 @@ class K9ControlCenter:
                 self._post("progress", (f"Старт SD: не трогаю USB {remaining} c", 0.0))
                 if (
                     not self.last_post_m24_quiet_log_ts
-                    or (now - self.last_post_m24_quiet_log_ts) >= POST_M24_QUIET_UI_LOG_INTERVAL_SEC
+                    or (now - self.last_post_m24_quiet_log_ts) >= USB_SILENCE_LOG_INTERVAL_SEC
                     or remaining <= 5
                 ):
                     self.last_post_m24_quiet_log_ts = now
@@ -3820,10 +3815,7 @@ class K9ControlCenter:
                 self.usb_silence_since = 0.0
                 self.last_usb_silence_log_ts = 0.0
                 self._post("temp", (current_temp, target_temp, heater))
-                temp_log_interval = (
-                    TEMP_LOG_PRINT_INTERVAL_SEC if self.current_print_file != "-" else TEMP_LOG_IDLE_INTERVAL_SEC
-                )
-                if now - self.last_temp_log_ts >= temp_log_interval:
+                if now - self.last_temp_log_ts >= TEMP_LOG_INTERVAL_SEC:
                     self.last_temp_log_ts = now
                     heater_value = heater if heater is not None else "?"
                     self._append_ring_log(
@@ -3848,7 +3840,6 @@ class K9ControlCenter:
                         or (self.current_print_progress_pct is not None and self.current_print_progress_pct > 0.0)
                     )
                 )
-                log_interval = USB_SILENCE_LOG_INTERVAL_SEC
                 if in_start_grace:
                     self._post("sd", "SD: старт/прогрев, USB занят")
                     self._post("progress", ("Печать: старт отправлен, жду прогрев/движение", 0.0))
@@ -3867,12 +3858,7 @@ class K9ControlCenter:
                     )
                     self._post("sd", "SD: печать активна, USB частичный")
                     self._post("progress", (progress_text, progress_value))
-                    silence_message = (
-                        "Печать уже была подтверждена SD-прогрессом; сейчас M105 временно молчит. "
-                        "Для этой K9 это бывает во время SD-печати. Little Hands не отправляет M27/M114 и ждёт восстановления USB, "
-                        "а печать нужно оценивать визуально."
-                    )
-                    log_interval = ACTIVE_PRINT_PARTIAL_LOG_INTERVAL_SEC
+                    return
                 elif self.current_print_file != "-":
                     self._post("sd", "SD: печать/USB занят")
                     self._post("progress", ("Печать: нет телеметрии, проверь визуально", 0.0))
@@ -3888,11 +3874,7 @@ class K9ControlCenter:
                         "USB не отвечает на M105; Little Hands откладывает SD/позиционные запросы, чтобы не забивать порт. "
                         "Power cycle нужен только если принтер не печатает, не греется и не двигается."
                     )
-                if active_print_observed:
-                    if (now - self.last_active_print_partial_log_ts) >= log_interval:
-                        self.last_active_print_partial_log_ts = now
-                        self._post("log", silence_message)
-                elif (now - self.last_usb_silence_log_ts) >= log_interval:
+                if (now - self.last_usb_silence_log_ts) >= USB_SILENCE_LOG_INTERVAL_SEC:
                     self.last_usb_silence_log_ts = now
                     self._post("log", silence_message)
                 if (
@@ -3975,7 +3957,7 @@ class K9ControlCenter:
                 else:
                     self._post("active-sd", "Печатается: идёт печать (имя не восстановлено)")
                 self._post("progress", (f"Печать: {pct:.1f}% ({done}/{total})", pct))
-                if now - self.last_telemetry_log_ts >= TELEMETRY_LOG_INTERVAL_SEC:
+                if now - self.last_telemetry_log_ts >= 5.0:
                     self.last_telemetry_log_ts = now
                     temp_text = (
                         f"{current_temp:.2f}/{target_temp:.2f}"
