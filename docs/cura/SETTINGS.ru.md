@@ -39,8 +39,9 @@ G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-G1 X95 F3000
-G1 Y95 F3000 ;Move bed toward the operator
+M204 P250 T300 ;Gentle final presentation moves
+G1 X95 F1800
+G1 Y95 F1800 ;Move bed toward the operator
 ```
 
 Не добавляй в конец `M84`. Little Hands оставляет моторы доступными для послепечатного recovery workflow.
@@ -67,15 +68,40 @@ G1 Y95 F3000 ;Move bed toward the operator
 - Print infill before walls: `off`
 - Top / bottom pattern: `lines`
 - Initial bottom pattern: `concentric`
+- Ironing / выглаживание: `on`
+- Iron only highest layer: `on`
+- Ironing pattern: `concentric`
+- Ironing line spacing: `0.12 mm`
+- Ironing flow: `7%`
 
 ## Скорости
 
-- Print speed: `16 mm/s`
+- Print speed: `15 mm/s`
 - Wall speed: `12 mm/s`
-- Top / bottom speed: `12 mm/s`
-- Infill speed: `18 mm/s`
-- Travel speed: `40 mm/s`
+- Top / bottom speed: `11 mm/s`
+- Infill speed: `15 mm/s`
+- Travel speed: `35 mm/s`
 - Initial layer speed: `7 mm/s`
+- Ironing speed: `8 mm/s`
+
+## Сглаживание Движений
+
+Эти лимиты специально мягкие для маленькой механики K9 и помогают уменьшить ringing / дребезг на диагональных перемещениях.
+
+- Acceleration control: `on`
+- Print acceleration: `250 mm/s^2`
+- Wall acceleration: `180 mm/s^2`
+- Outer wall acceleration: `150 mm/s^2`
+- Inner wall acceleration: `200 mm/s^2`
+- Top / bottom acceleration: `180 mm/s^2`
+- Infill acceleration: `250 mm/s^2`
+- Support acceleration: `220 mm/s^2`
+- Support interface / roof acceleration: `160 mm/s^2`
+- Initial layer and skirt / brim acceleration: `150 mm/s^2`
+- Travel acceleration: `300 mm/s^2`
+- Ironing acceleration: `120 mm/s^2`
+- Jerk control: `off`
+- Примечание: пока не включай Cura jerk control для этого RepRap-flavor профиля; наша Marlin-прошивка использует `M205`, а Cura в этом режиме генерирует `M566`.
 
 ## Адгезия
 

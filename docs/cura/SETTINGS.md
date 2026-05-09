@@ -39,8 +39,9 @@ G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-G1 X95 F3000
-G1 Y95 F3000 ;Move bed toward the operator
+M204 P250 T300 ;Gentle final presentation moves
+G1 X95 F1800
+G1 Y95 F1800 ;Move bed toward the operator
 ```
 
 Do not add `M84` at the end. Little Hands keeps steppers available for the post-print recovery workflow.
@@ -67,15 +68,40 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Print infill before walls: `off`
 - Top / bottom pattern: `lines`
 - Initial bottom pattern: `concentric`
+- Ironing: `on`
+- Iron only highest layer: `on`
+- Ironing pattern: `concentric`
+- Ironing line spacing: `0.12 mm`
+- Ironing flow: `7%`
 
 ## Speed
 
-- Print speed: `16 mm/s`
+- Print speed: `15 mm/s`
 - Wall speed: `12 mm/s`
-- Top / bottom speed: `12 mm/s`
-- Infill speed: `18 mm/s`
-- Travel speed: `40 mm/s`
+- Top / bottom speed: `11 mm/s`
+- Infill speed: `15 mm/s`
+- Travel speed: `35 mm/s`
 - Initial layer speed: `7 mm/s`
+- Ironing speed: `8 mm/s`
+
+## Motion Smoothing
+
+These limits are intentionally gentle for the small K9 mechanics and help reduce ringing / rattling on diagonal moves.
+
+- Acceleration control: `on`
+- Print acceleration: `250 mm/s^2`
+- Wall acceleration: `180 mm/s^2`
+- Outer wall acceleration: `150 mm/s^2`
+- Inner wall acceleration: `200 mm/s^2`
+- Top / bottom acceleration: `180 mm/s^2`
+- Infill acceleration: `250 mm/s^2`
+- Support acceleration: `220 mm/s^2`
+- Support interface / roof acceleration: `160 mm/s^2`
+- Initial layer and skirt / brim acceleration: `150 mm/s^2`
+- Travel acceleration: `300 mm/s^2`
+- Ironing acceleration: `120 mm/s^2`
+- Jerk control: `off`
+- Note: do not enable Cura jerk control for this RepRap-flavor profile yet; our Marlin firmware uses `M205`, while Cura emits `M566` for jerk in this mode.
 
 ## Adhesion
 

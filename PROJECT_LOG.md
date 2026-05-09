@@ -1996,3 +1996,21 @@ After each test print, append:
   - idle USB silence
   - real command errors
   - failed-start recovery
+
+## 2026-05-09 ModuleBot Cura Quality Pass
+
+- Updated the validated K9 warm-mat Cura profile for `moduleBot.STL` and similar PLA parts:
+  - enabled conservative ironing on the highest top layer only
+  - kept hotend temperature, brim width, support policy, and manual-zero workflow unchanged
+  - reduced print / infill / top-bottom / travel speeds slightly
+  - added explicit acceleration limits for walls, infill, top/bottom, supports, skirt/brim, travel, and ironing
+  - left Cura jerk control disabled because this RepRap-flavor profile emits `M566`, while the validated Marlin firmware exposes jerk through `M205`
+  - softened final presentation moves after Cura resets motion limits at end of print
+- Rationale:
+  - side-wall edge stripes are more likely ringing / mechanical resonance than poor layer bonding
+  - ironing is useful for visible top surfaces, but it is intentionally low-flow and top-only to avoid over-smearing small K9 parts
+- Slicing verification:
+  - `moduleBot.STL` sliced successfully with the updated helper
+  - generated bounds are X `10.729..89.282`, Y `13.150..86.850`, Z `25.00`, inside the validated `100 x 100 x 100 mm` K9 volume
+  - generated start still uses `G92 X0 Y0 Z0` and no startup `G28`
+  - helper-generated G-code now patches CuraEngine's misleading `Filament used: 0m` header from the actual positive `E` moves

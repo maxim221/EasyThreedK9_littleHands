@@ -8,6 +8,8 @@ This directory contains the current tracked Cura baseline for the validated Easy
 - Brim: `6 mm`
 - PLA temperature: `218C` first layer, `214C` after that
 - Bed temperature in G-code: `0C`, because the warm bed is external
+- Ironing: highest top layer only, concentric, low flow
+- Motion smoothing: conservative acceleration limits for reduced diagonal ringing
 - Supports for `mainFlasherTop.STL`: everywhere, support interface / roof enabled, support angle `35`
 
 The app button `Export Cura profile` exports the live local Cura containers to `exports/`, which is intentionally ignored by git. This checked-in copy is the public reference baseline.

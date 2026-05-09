@@ -116,8 +116,9 @@ G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-G1 X95 F3000
-G1 Y95 F3000 ;Move bed toward the operator"""
+M204 P250 T300 ;Gentle final presentation moves
+G1 X95 F1800
+G1 Y95 F1800 ;Move bed toward the operator"""
 
     global_settings = {
         "machine_name": "lilHands K9 warm mat",
@@ -135,16 +136,38 @@ G1 Y95 F3000 ;Move bed toward the operator"""
         "infill_pattern": "lines",
         "infill_before_walls": "False",
         "infill_sparse_density": "20",
-        "ironing_enabled": "False",
+        "acceleration_enabled": "True",
+        "acceleration_infill": "250",
+        "acceleration_ironing": "120",
+        "acceleration_layer_0": "150",
+        "acceleration_print": "250",
+        "acceleration_skirt_brim": "150",
+        "acceleration_support": "220",
+        "acceleration_support_bottom": "160",
+        "acceleration_support_infill": "220",
+        "acceleration_support_interface": "160",
+        "acceleration_support_roof": "160",
+        "acceleration_topbottom": "180",
+        "acceleration_travel": "300",
+        "acceleration_travel_enabled": "True",
+        "acceleration_wall": "180",
+        "acceleration_wall_0": "150",
+        "acceleration_wall_x": "200",
+        "ironing_enabled": "True",
+        "ironing_flow": "7",
+        "ironing_line_spacing": "0.12",
+        "ironing_only_highest_layer": "True",
+        "ironing_pattern": "concentric",
         "layer_height": "0.16",
         "layer_height_0": "0.2",
         "material_bed_temperature": "0",
         "relative_extrusion": "True",
-        "speed_infill": "18",
+        "speed_infill": "15",
+        "speed_ironing": "8",
         "speed_layer_0": "7",
-        "speed_print": "16",
-        "speed_topbottom": "12",
-        "speed_travel": "40",
+        "speed_print": "15",
+        "speed_topbottom": "11",
+        "speed_travel": "35",
         "speed_wall": "12",
         "support_angle": "35",
         "support_enable": "True",
@@ -189,11 +212,34 @@ G1 Y95 F3000 ;Move bed toward the operator"""
         "bridge_wall_material_flow": "90",
         "bridge_wall_speed": "10",
         "initial_layer_line_width_factor": "135",
-        "speed_infill": "18",
+        "acceleration_enabled": "True",
+        "acceleration_infill": "250",
+        "acceleration_ironing": "120",
+        "acceleration_layer_0": "150",
+        "acceleration_print": "250",
+        "acceleration_skirt_brim": "150",
+        "acceleration_support": "220",
+        "acceleration_support_bottom": "160",
+        "acceleration_support_infill": "220",
+        "acceleration_support_interface": "160",
+        "acceleration_support_roof": "160",
+        "acceleration_topbottom": "180",
+        "acceleration_travel": "300",
+        "acceleration_travel_enabled": "True",
+        "acceleration_wall": "180",
+        "acceleration_wall_0": "150",
+        "acceleration_wall_x": "200",
+        "ironing_enabled": "True",
+        "ironing_flow": "7",
+        "ironing_line_spacing": "0.12",
+        "ironing_only_highest_layer": "True",
+        "ironing_pattern": "concentric",
+        "speed_infill": "15",
+        "speed_ironing": "8",
         "speed_layer_0": "7",
-        "speed_print": "16",
-        "speed_topbottom": "12",
-        "speed_travel": "40",
+        "speed_print": "15",
+        "speed_topbottom": "11",
+        "speed_travel": "35",
         "speed_wall": "12",
     }
     return global_settings, extruder_settings
@@ -270,11 +316,53 @@ def gcode_bounds(path: Path) -> tuple[float, float, float, float, float]:
     return min(xs), max(xs), min(ys), max(ys), max(zs) if zs else 0.0
 
 
+def estimate_filament_m(lines: list[str]) -> float:
+    total_mm = 0.0
+    relative_extrusion = False
+    last_absolute_e: float | None = None
+    for line in lines:
+        command = strip_gcode_comment(line).upper()
+        if not command:
+            continue
+        if command.startswith("M83"):
+            relative_extrusion = True
+            last_absolute_e = None
+            continue
+        if command.startswith("M82"):
+            relative_extrusion = False
+            last_absolute_e = None
+            continue
+        if command.startswith("G92"):
+            match = re.search(r"\bE(-?\d+(?:\.\d+)?)", command)
+            if match:
+                last_absolute_e = float(match.group(1))
+            continue
+        if not command.startswith(("G0", "G1")):
+            continue
+        match = re.search(r"\bE(-?\d+(?:\.\d+)?)", command)
+        if not match:
+            continue
+        e_value = float(match.group(1))
+        if relative_extrusion:
+            if e_value > 0:
+                total_mm += e_value
+        else:
+            if last_absolute_e is not None:
+                delta = e_value - last_absolute_e
+                if delta > 0:
+                    total_mm += delta
+            last_absolute_e = e_value
+    return total_mm / 1000.0
+
+
 def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float, float], brim_width: float) -> None:
     min_x, max_x, min_y, max_y, max_z = bounds
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    filament_m = estimate_filament_m(lines)
     for index, line in enumerate(lines[:25]):
-        if line.startswith(";MINX:"):
+        if line.startswith(";Filament used:") and filament_m > 0:
+            lines[index] = f";Filament used: {filament_m:.3f}m"
+        elif line.startswith(";MINX:"):
             lines[index] = f";MINX:{min_x:.3f}"
         elif line.startswith(";MAXX:"):
             lines[index] = f";MAXX:{max_x:.3f}"

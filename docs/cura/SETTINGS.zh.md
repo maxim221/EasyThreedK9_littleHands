@@ -39,8 +39,9 @@ G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-G1 X95 F3000
-G1 Y95 F3000 ;Move bed toward the operator
+M204 P250 T300 ;Gentle final presentation moves
+G1 X95 F1800
+G1 Y95 F1800 ;Move bed toward the operator
 ```
 
 不要在结尾添加 `M84`。Little Hands 需要让步进电机保持可用，以便完成打印后的恢复流程。
@@ -67,15 +68,40 @@ G1 Y95 F3000 ;Move bed toward the operator
 - Print infill before walls：`off`
 - Top / bottom pattern：`lines`
 - Initial bottom pattern：`concentric`
+- Ironing / 熨平：`on`
+- Iron only highest layer：`on`
+- Ironing pattern：`concentric`
+- Ironing line spacing：`0.12 mm`
+- Ironing flow：`7%`
 
 ## 速度
 
-- Print speed：`16 mm/s`
+- Print speed：`15 mm/s`
 - Wall speed：`12 mm/s`
-- Top / bottom speed：`12 mm/s`
-- Infill speed：`18 mm/s`
-- Travel speed：`40 mm/s`
+- Top / bottom speed：`11 mm/s`
+- Infill speed：`15 mm/s`
+- Travel speed：`35 mm/s`
 - Initial layer speed：`7 mm/s`
+- Ironing speed：`8 mm/s`
+
+## 运动平滑
+
+这些限制对小型 K9 机械结构更温和，有助于减少 diagonal moves 上的 ringing / rattling。
+
+- Acceleration control：`on`
+- Print acceleration：`250 mm/s^2`
+- Wall acceleration：`180 mm/s^2`
+- Outer wall acceleration：`150 mm/s^2`
+- Inner wall acceleration：`200 mm/s^2`
+- Top / bottom acceleration：`180 mm/s^2`
+- Infill acceleration：`250 mm/s^2`
+- Support acceleration：`220 mm/s^2`
+- Support interface / roof acceleration：`160 mm/s^2`
+- Initial layer and skirt / brim acceleration：`150 mm/s^2`
+- Travel acceleration：`300 mm/s^2`
+- Ironing acceleration：`120 mm/s^2`
+- Jerk control：`off`
+- 注意：暂时不要为这个 RepRap-flavor 配置启用 Cura jerk control；我们的 Marlin 固件使用 `M205`，而 Cura 在此模式下会生成 `M566`。
 
 ## 平台附着
 
