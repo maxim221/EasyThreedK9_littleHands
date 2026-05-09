@@ -42,11 +42,14 @@ UI_STATE_PATH = LOG_DIR / "little_hands_ui_state.json"
 PRINT_STATE_PATH = LOG_DIR / "little_hands_print_state.json"
 TEMP_GRAPH_WINDOW_SEC = 15 * 60
 TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
-TEMP_LOG_INTERVAL_SEC = 5.0
+TEMP_LOG_PRINT_INTERVAL_SEC = 15.0
+TEMP_LOG_IDLE_INTERVAL_SEC = 60.0
+TELEMETRY_LOG_INTERVAL_SEC = 30.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
 AUTO_SD_REFRESH_REQUIRE_FRESH_TEMP_SEC = 12.0
 PRINT_START_GRACE_SEC = 5 * 60
 POST_M24_USB_QUIET_SEC = 180
+POST_M24_QUIET_UI_LOG_INTERVAL_SEC = 60.0
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
@@ -3782,7 +3785,7 @@ class K9ControlCenter:
                 self._post("progress", (f"Старт SD: не трогаю USB {remaining} c", 0.0))
                 if (
                     not self.last_post_m24_quiet_log_ts
-                    or (now - self.last_post_m24_quiet_log_ts) >= USB_SILENCE_LOG_INTERVAL_SEC
+                    or (now - self.last_post_m24_quiet_log_ts) >= POST_M24_QUIET_UI_LOG_INTERVAL_SEC
                     or remaining <= 5
                 ):
                     self.last_post_m24_quiet_log_ts = now
@@ -3817,7 +3820,10 @@ class K9ControlCenter:
                 self.usb_silence_since = 0.0
                 self.last_usb_silence_log_ts = 0.0
                 self._post("temp", (current_temp, target_temp, heater))
-                if now - self.last_temp_log_ts >= TEMP_LOG_INTERVAL_SEC:
+                temp_log_interval = (
+                    TEMP_LOG_PRINT_INTERVAL_SEC if self.current_print_file != "-" else TEMP_LOG_IDLE_INTERVAL_SEC
+                )
+                if now - self.last_temp_log_ts >= temp_log_interval:
                     self.last_temp_log_ts = now
                     heater_value = heater if heater is not None else "?"
                     self._append_ring_log(
@@ -3969,7 +3975,7 @@ class K9ControlCenter:
                 else:
                     self._post("active-sd", "Печатается: идёт печать (имя не восстановлено)")
                 self._post("progress", (f"Печать: {pct:.1f}% ({done}/{total})", pct))
-                if now - self.last_telemetry_log_ts >= 5.0:
+                if now - self.last_telemetry_log_ts >= TELEMETRY_LOG_INTERVAL_SEC:
                     self.last_telemetry_log_ts = now
                     temp_text = (
                         f"{current_temp:.2f}/{target_temp:.2f}"

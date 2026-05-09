@@ -1980,3 +1980,15 @@ After each test print, append:
 - Active-print USB silence messages were softened:
   - once SD progress has confirmed a real print, intermittent missing `M105` is logged as partial telemetry instead of a failure
   - repeated partial-telemetry logs are throttled to reduce scary noise during real prints
+
+## 2026-05-09 Quieter Print Logging
+
+- Reduced routine log noise while keeping recovery data:
+  - raw `M105` temperature samples are written to the ring log every `15 s` during active print and every `60 s` while idle
+  - SD progress `TELEMETRY` records are written every `30 s` instead of every `5 s`
+  - the visible post-`M24` quiet-window reminder is throttled to about once per minute
+- Important events still go to the visible journal immediately:
+  - start / stop / hard stop
+  - failed start recovery
+  - lost USB / partial telemetry
+  - print completion and post-print recovery prompts
