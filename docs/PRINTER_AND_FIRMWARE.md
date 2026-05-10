@@ -138,8 +138,8 @@ For the current validated public baseline:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
-- brim width: `6 mm`
-- PLA temperature: `218C` first layer, `214C` after that
+- brim width: `12 mm`
+- PLA temperature: `225C` first layer, `222C` after that
 - bed temperature in G-code: `0C` because the warm bed is external
 - support mode for `mainFlasherTop.STL`: supports everywhere, normal supports, interface / roof enabled, support angle `35`
 
@@ -148,8 +148,9 @@ Important G-code rules:
 - do not use startup `G28`
 - the start G-code must use the Little Hands manual-zero `G92 X0 Y0 Z0` workflow
 - the generated file must contain a hotend target command such as `M104` / `M109`
+- when a file is uploaded through Little Hands, early blocking `M109` is rewritten to `M104`; the app preheats the hotend before the SD start
 - reject or re-slice files with `Filament used: 0m`, impossible Cura bounds, or missing hotend target
-- `10 mm` brim caused a selected-but-not-starting SD file on the validated K9; `6 mm` is the current safe default unless you intentionally test a wider brim and inspect the preview
+- `10 mm` brim is now the current default after the automatic hotend-preheat workflow was confirmed; the old start failure was tied to heat / SD-start sequencing, not to brim width itself
 
 Current end-G-code rule:
 
@@ -177,8 +178,11 @@ If a different slicer version is used, configure it from `docs/cura/SETTINGS.md`
 6. Set the physical start pose.
 7. Press `Save start`.
 8. Press `Go to start` and confirm it returns correctly.
-9. Start printing from SD.
-10. After `M24`, Little Hands keeps USB fully quiet for `180` seconds. This is expected and helps this K9 enter SD printing reliably.
+9. Start printing from SD. Manual hotend preheat is not needed: before `M24`, Little Hands preheats the hotend to the target found in the G-code, then sends `M23`, waits for `File selected`, and sends `M24`.
+10. If the file was uploaded through Little Hands or exported by the bundled helper, the early `M109` has been rewritten to `M104` so SD start does not get stuck in a blocking heat wait.
+11. After `M24`, Little Hands keeps USB fully quiet for `180` seconds. This is expected and helps this K9 enter SD printing reliably.
+12. During any remaining `M109` in older G-code, firmware may not answer ordinary `M105` / `M27`; Little Hands first listens passively for `M109` temperature lines and avoids stuffing the queue with extra commands.
+13. If there are no temperature lines, no SD progress, and physically no heating, fan, or motion for about `5` minutes after `M24`, the app treats the start as unconfirmed and offers power-cycle recovery.
 
 ## 10. Between Prints
 
@@ -212,3 +216,5 @@ the current safest workflow is:
 5. start again
 
 Important nuance: silent USB telemetry alone is not enough to decide that the print failed. If the hotend is heating, the printer is moving, or material is printing, do not power-cycle it; visually monitor the print and let Little Hands wait for USB to recover.
+
+For a stuck start, Little Hands sends `M108` before `M524` so Marlin can break out of a blocking `M109` heat wait, then turns off heat and fan.

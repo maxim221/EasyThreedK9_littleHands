@@ -39,6 +39,33 @@ This should help separate:
 - TF card label currently seen by the system:
   - `LHprint`
 
+## 2026-05-10 PLA Profile V2: Anti-Warp And Layer Bond
+
+Observation after the successful `moduleBot` print:
+
+- Application workflow is much more stable.
+- Model quality improved compared with the previous baseline.
+- Remaining issues:
+  - front-right edge has a serious crack starting around `10 mm` above the bed
+  - corners still lift by about `1 mm`
+
+Profile response, intentionally conservative:
+
+- `brim_width`: `10 mm -> 12 mm`
+- normal PLA temperature: `220C -> 222C`
+- first layer temperature: keep `225C`
+- regular fan: `55% -> 45%`
+- fan ramp: full fan only after `3 mm`
+- bridge fan: `100% -> 70%`
+- initial layer line width: `145% -> 150%`
+- Z seam: user-specified `backleft`, to avoid the visible front-right edge
+
+Reasoning:
+
+- Corner lift points to residual bed adhesion / shrink stress, not a total first-layer failure.
+- The one-edge crack may be real delamination from shrink stress, or a visible seam/retraction scar on the front-right corner.
+- Avoid raft and extreme `18 mm` brim for now because the last print is close to usable and large changes would hide the actual cause.
+
 ## Printer Notes
 
 - Printer model: Easythreed K9
@@ -1963,7 +1990,7 @@ After each test print, append:
   - on print start Little Hands records `LH_END_GCODE_V1`
   - expected end position is calculated from the validated Cura G-code as `X95 Y95 Z(min(100, MAXZ + 10))`
   - the model is stored in `monitor_logs/little_hands_print_state.json`
-  - the same state is mirrored best-effort to the printer SD as `LHSTATE.TXT` before the SD print starts
+  - SD mirroring as `LHSTATE.TXT` was later disabled in the print-start path; local state / ring log are the trusted source
 - The state survives closing and reopening Little Hands:
   - reopening the app should not invalidate the print-end model
   - the ring log marker `PRINT_END_EXPECTED ... end_z=...` is also used as a fallback source
@@ -2014,3 +2041,143 @@ After each test print, append:
   - generated bounds are X `10.729..89.282`, Y `13.150..86.850`, Z `25.00`, inside the validated `100 x 100 x 100 mm` K9 volume
   - generated start still uses `G92 X0 Y0 Z0` and no startup `G28`
   - helper-generated G-code now patches CuraEngine's misleading `Filament used: 0m` header from the actual positive `E` moves
+
+## 2026-05-09 Revert Host Preheat And Avoid Pre-Start SD Writes
+
+- Field correction:
+  - host-side preheat before `M24` was the wrong algorithm for the validated K9 SD workflow
+  - superseded later the same day by the proven no-`M109` preheat workflow below, after runtime logs showed the successful print used that exact workaround
+  - the SD file must own its own `M104` / `M109` sequence after `M24`
+  - Little Hands should not keep a long preheat polling session open before handing control to the SD file
+- Restored SD-start semantics:
+  - return to the saved start pose only when needed
+  - send `M23` / `M24`
+  - keep USB fully quiet for `180 s`
+  - let the Cura-generated SD G-code perform hotend heating and first motion
+  - if `M24` has already been sent and the immediate USB read fails, treat the start as possibly active and enter the quiet window instead of probing `M27` or retrying immediately
+- Reliability hardening:
+  - Little Hands no longer mirrors the print-end marker to printer SD as `LHSTATE.TXT` immediately before print start
+  - local print-end recovery state still lives in `monitor_logs/little_hands_print_state.json` and the ring log
+  - this avoids extra `M28` / `M29` / `M30` SD writes in the sensitive window before `M23` / `M24`
+- Rationale from logs:
+  - the failed starts showed `LHSTATE.TXT` being written immediately before `PRINT_START`
+  - the successful long SD print used the pure SD-owned start path with progress/temperature recovery after the quiet window
+
+## 2026-05-09 Unconfirmed Silent Start Watchdog
+
+- Field observation:
+  - `M23` / `M24` could be accepted with `File opened` / `File selected` / `busy: processing`
+  - then the printer could remain physically idle: no hotend fan, no motion, and no `M105` replies after the quiet window
+  - the UI previously stayed in a misleading "printing / no telemetry" state forever because the silent-`M105` branch returned before the failed-start watchdog could clear the session
+- App behavior now:
+  - if `5` minutes pass after `M24` with no `M105`, no SD progress, and no previously observed active print, Little Hands marks the start as unconfirmed
+  - the active print state is cleared locally, the failed-start recovery window is shown, and the log explicitly says to power-cycle only when the printer is physically not heating / not moving / not printing
+  - stale persisted `printing` / `prepared` state without positive progress is no longer restored after the grace window; restart should not resurrect a dead start as an active print
+  - if the printer is physically printing despite USB silence, the operator should not power-cycle and should monitor visually
+- Stop hardening:
+  - normal stop and hard stop now send `M108` before `M524`
+  - this gives Marlin a chance to break out of a blocking `M109` heat wait before SD stop / heat-off commands are sent
+
+## 2026-05-09 Strict SD File Selection Before M24
+
+- Field correction:
+  - the start helper previously sent `M23 <file>` and then `M24` after a fixed short delay
+  - logs showed the current larger `CFFFP_~3.GCO` reporting `File opened` / `File selected` / `busy: processing`, but then never heating or moving
+  - this is consistent with a race where `M24` is sent while the firmware is still finishing SD file selection
+- App behavior now:
+  - Little Hands sends `M23 <file>`
+  - waits up to `8 s` for Marlin's `File selected` confirmation
+  - only then sends `M24`
+  - the same strict sequence is used for plain SD start, start from saved home, and pseudo-home upload-and-start
+- Rationale:
+  - successful starts used the same high-level workflow, but smaller / luckier SD selection timing
+  - waiting for `File selected` is the Marlin-correct ordering and should reduce silent "selected but not actually running" starts without changing Cura G-code ownership of heating
+
+## 2026-05-09 Treat M109 Heatup As Passive Telemetry
+
+- Field correction:
+  - after `M24`, Cura G-code reaches `M109`
+  - while `M109` is waiting, Marlin does not process ordinary host commands like `M105` / `M27` / `M114`
+  - instead it emits heater-state lines about once per second from inside the heatup loop
+- App behavior now:
+  - during the unconfirmed-start window Little Hands first listens passively for unsolicited temperature lines instead of immediately relying on `M105`
+  - the read window is long enough to catch Marlin's roughly 1 Hz `M109` heater reports
+  - if hotend target/current temperature is seen and the hotend is still below target, Little Hands shows `M109 heatup` and avoids sending `M27` / `M114` / `M115` into the blocked command queue
+  - once the hotend reaches target or ordinary `M105` replies again, normal SD progress polling resumes
+- Rationale:
+  - a silent `M105` during `M109` is expected Marlin behavior, not proof of a failed start
+  - this avoids both false failed-start decisions and command pileups while the printer is legitimately heating from SD G-code
+
+## 2026-05-09 Restore The Proven No-M109 Preheat Workflow
+
+- Field correction:
+  - the previous successful overnight start was not a plain unmodified Cura file
+  - the working model file had the early blocking `M109` replaced by non-blocking `M104`
+  - a small `PREHEAT.GCO` / preheat step brought the hotend to temperature before the model file was started
+- App behavior now:
+  - before SD print start, Little Hands reads the target hotend temperature from the known G-code profile and preheats with `M104` / `M105`
+  - for old or unknown files that may still contain blocking `M109`, it preheats about `7C` above the target so `M109 S...` can pass immediately; this mirrors the proven `225C` preheat before a `218C` model
+  - if the target cannot be read from a local file or cached profile, it uses the current validated PLA first-layer target `218C` plus the same safety margin
+  - uploads through Little Hands create a prepared copy where early startup `M109` is rewritten to `M104`
+  - the bundled Cura slicing helper applies the same early `M109` -> `M104` rewrite
+- Why this matters:
+  - this matches the real proven workflow instead of relying on Marlin to sit inside a long blocking `M109` after `M24`
+  - the SD file still owns the actual print moves and temperature target, but Little Hands makes sure heating has already happened before SD execution reaches the first layer
+
+## 2026-05-09 Confirm Automatic Hotend Preheat Start
+
+- Field confirmation:
+  - after power-cycle recovery and saved start, Little Hands preheated the hotend to `225C`
+  - the user then pressed `Start print` once; Little Hands detected the hotend was already at target, selected `CFFFP_~3.GCO`, and sent `M24`
+  - the print finally started successfully with the automatic preheat workflow
+- Final user-facing workflow:
+  - user manually preheats only the external bed / warm mat
+  - user does not manually preheat the hotend
+  - Little Hands handles hotend preheat, strict `M23` / `File selected` / `M24`, and the post-`M24` USB quiet window
+- UI text cleanup:
+  - startup messages now say that the hotend was preheated by Little Hands
+  - the post-`M24` quiet message no longer says that Cura is still responsible for heating
+  - preheat progress is shown in the progress area as temperature rises
+
+## 2026-05-09 Avoid False Failed-Start Window During Real Print
+
+- Field observation:
+  - the print physically started, but Little Hands still opened the "start not confirmed" recovery window at the `5 min` watchdog boundary
+  - logs showed several fresh `M105 T:217-218 /218` samples before the warning
+  - real `SD printing byte ...` progress arrived seconds after the warning, proving this was a false negative
+- Fix:
+  - the failed-start watchdog no longer fires if a recent post-`M24` `M105` sample with a non-zero hotend target was seen
+  - in that state the UI says the hotend is at target and Little Hands is waiting for SD progress
+  - the operator should not power-cycle if the printer is visibly printing
+
+## 2026-05-09 Anti-Warp PLA Profile Update
+
+- Field result:
+  - `moduleBot` printed to completion, but all four bottom corners lifted from the external warm mat
+  - the model bottom warped, and at least one wall showed layer separation
+- Cura baseline changes:
+  - brim widened from `6 mm` to `10 mm`
+  - PLA first layer raised from `218C` to `225C`
+  - PLA normal print temperature raised from `214C` to `220C`
+  - Cura cooling target lowered from `100%` to `55%`
+  - helper post-processing now caps regular `M106` commands to about `55%` because direct CuraEngine still emitted `M106 S255`
+  - initial layer speed lowered from `7 mm/s` to `6 mm/s`
+  - initial layer line width raised from `135%` to `145%`
+- Rationale:
+  - lifting on all corners points to global bed adhesion / shrink stress, not a single bad corner
+  - wall delamination points to too-cold layer bonding for the current filament / airflow / room conditions
+  - `10 mm` brim is acceptable now that the print-start failure was fixed in the automatic preheat / SD-start workflow; the old `10 mm` warning was about start reliability, not the brim geometry itself
+- Operator note:
+  - keep the external bed at the upper end of the tested range and let it soak before starting
+  - clean the perforated mat before retrying
+  - if corners still lift, test `12-14 mm` brim before jumping to `18 mm`
+
+## 2026-05-09 Avoid 232C Preheat On New 225C G-code
+
+- Field correction:
+  - the user-sliced Cura file already had `M104 S225` / `M109 S225`
+  - Little Hands treated any blocking `M109` file as needing a `+7C` safety margin and tried to preheat to `232C`
+  - that margin was only intended for old `218C` files, where the proven workaround was `225C` preheat before a `218C` model
+- Fix:
+  - the `+7C` margin is now applied only when the detected target is below `220C`
+  - new `225C` first-layer G-code preheats to `225C`, not `232C`

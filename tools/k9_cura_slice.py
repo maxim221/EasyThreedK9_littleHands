@@ -164,7 +164,7 @@ G1 Y95 F1800 ;Move bed toward the operator"""
         "relative_extrusion": "True",
         "speed_infill": "15",
         "speed_ironing": "8",
-        "speed_layer_0": "7",
+        "speed_layer_0": "6",
         "speed_print": "15",
         "speed_topbottom": "11",
         "speed_travel": "35",
@@ -193,25 +193,32 @@ G1 Y95 F1800 ;Move bed toward the operator"""
         "roofing_layer_count": "0",
         "flooring_layer_count": "0",
         "support_z_seam_away_from_model": "False",
+        "z_seam_type": "back",
+        "z_seam_position": "backleft",
+        "z_seam_corner": "z_seam_corner_inner",
     }
     extruder_settings = {
         "material_diameter": "1.75",
-        "material_print_temperature": "214",
-        "material_print_temperature_layer_0": "218",
+        "material_print_temperature": "222",
+        "material_print_temperature_layer_0": "225",
         "material_bed_temperature": "0",
         "retraction_amount": "6.5",
         "retraction_enable": "True",
         "retraction_prime_speed": "25",
         "retraction_retract_speed": "25",
-        "cool_fan_speed": "100",
+        "cool_fan_speed": "45",
+        "cool_fan_speed_min": "45",
+        "cool_fan_speed_max": "45",
+        "cool_fan_speed_0": "0",
+        "cool_fan_full_at_height": "3",
         "cool_min_layer_time": "10",
         "bridge_settings_enabled": "True",
-        "bridge_fan_speed": "100",
+        "bridge_fan_speed": "70",
         "bridge_skin_material_flow": "90",
         "bridge_skin_speed": "10",
         "bridge_wall_material_flow": "90",
         "bridge_wall_speed": "10",
-        "initial_layer_line_width_factor": "135",
+        "initial_layer_line_width_factor": "150",
         "acceleration_enabled": "True",
         "acceleration_infill": "250",
         "acceleration_ironing": "120",
@@ -236,7 +243,7 @@ G1 Y95 F1800 ;Move bed toward the operator"""
         "ironing_pattern": "concentric",
         "speed_infill": "15",
         "speed_ironing": "8",
-        "speed_layer_0": "7",
+        "speed_layer_0": "6",
         "speed_print": "15",
         "speed_topbottom": "11",
         "speed_travel": "35",
@@ -355,10 +362,56 @@ def estimate_filament_m(lines: list[str]) -> float:
     return total_mm / 1000.0
 
 
+def replace_early_m109_with_m104(lines: list[str]) -> bool:
+    for index, line in enumerate(lines[:120]):
+        stripped = line.strip()
+        if stripped.startswith(";LAYER:") or stripped.startswith(";LAYER_COUNT:"):
+            return False
+        if not stripped or stripped.startswith(";"):
+            continue
+        command = stripped.split(";", 1)[0].strip()
+        if not command.upper().startswith("M109"):
+            continue
+        match = re.search(r"\bS([-+]?\d+(?:\.\d+)?)\b", command, re.IGNORECASE)
+        if not match:
+            continue
+        target = float(match.group(1))
+        prefix = line[: len(line) - len(line.lstrip())]
+        lines[index] = (
+            f"{prefix}M104 S{target:g} ; LH: non-blocking heat target; "
+            "Little Hands preheats before SD start"
+        )
+        return True
+    return False
+
+
+def cap_regular_fan_speed(lines: list[str], max_pwm: int = 115) -> int:
+    replacements = 0
+    for index, line in enumerate(lines):
+        command = strip_gcode_comment(line).upper()
+        if not command.startswith("M106") or "S" not in command:
+            continue
+        match = re.search(r"\bS(\d+(?:\.\d+)?)\b", command)
+        if not match:
+            continue
+        value = float(match.group(1))
+        if value <= max_pwm:
+            continue
+        prefix = line[: len(line) - len(line.lstrip())]
+        comment = ""
+        if ";" in line:
+            comment = " ;" + line.split(";", 1)[1]
+        lines[index] = f"{prefix}M106 S{max_pwm} ; LH: cap part cooling for layer adhesion{comment}"
+        replacements += 1
+    return replacements
+
+
 def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float, float], brim_width: float) -> None:
     min_x, max_x, min_y, max_y, max_z = bounds
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     filament_m = estimate_filament_m(lines)
+    replace_early_m109_with_m104(lines)
+    cap_regular_fan_speed(lines)
     for index, line in enumerate(lines[:25]):
         if line.startswith(";Filament used:") and filament_m > 0:
             lines[index] = f";Filament used: {filament_m:.3f}m"
@@ -378,12 +431,14 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
     footer = (
         ';SETTING_3 {"global_quality": "[values]\\n'
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
-        'layer_height = 0.16\\nlayer_height_0 = 0.2\\nspeed_layer_0 = 7\\n'
+        'layer_height = 0.16\\nlayer_height_0 = 0.2\\nspeed_layer_0 = 6\\n'
         'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = 35\\n'
-        'support_infill_rate = 12\\nsupport_interface_enable = True\\nsupport_roof_enable = True\\n", '
-        '"extruder_quality": ["[values]\\nmaterial_print_temperature = 214\\n'
-        'material_print_temperature_layer_0 = 218\\nretraction_enable = True\\n'
-        'retraction_amount = 6.5\\n"]}'
+        'support_infill_rate = 12\\nsupport_interface_enable = True\\nsupport_roof_enable = True\\n'
+        'z_seam_type = back\\nz_seam_position = backleft\\n", '
+        '"extruder_quality": ["[values]\\nmaterial_print_temperature = 222\\n'
+        'material_print_temperature_layer_0 = 225\\nretraction_enable = True\\n'
+        'retraction_amount = 6.5\\ncool_fan_speed = 45\\n'
+        'cool_fan_full_at_height = 3\\nbridge_fan_speed = 70\\n"]}'
     )
     if not any(line.startswith(";SETTING_3") for line in lines[-80:]):
         lines.append(footer)
@@ -415,7 +470,7 @@ def main() -> int:
     parser.add_argument("stl", type=Path, help="Input STL file")
     parser.add_argument("--output", type=Path, default=None, help="Output G-code path")
     parser.add_argument("--appimage", type=Path, default=DEFAULT_APPIMAGE, help="UltiMaker Cura 5.11 AppImage")
-    parser.add_argument("--brim-width", type=float, default=6.0, help="Brim width in mm")
+    parser.add_argument("--brim-width", type=float, default=12.0, help="Brim width in mm")
     parser.add_argument("--bed-size", type=float, default=100.0, help="Validated square bed size in mm")
     parser.add_argument("--sd-mount", type=Path, default=None, help="Optional mounted SD card path to copy to")
     parser.add_argument("--sd-name", default=None, help="Optional filename to use on SD")

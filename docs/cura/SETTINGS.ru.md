@@ -49,11 +49,12 @@ G1 Y95 F1800 ;Move bed toward the operator
 ## Материал И Температура
 
 - Материал: PLA
-- Hotend первый слой: `218C`
-- Hotend дальше: `214C`
+- Hotend первый слой: `225C`
+- Hotend дальше: `222C`
 - Температура стола в G-code: `0C`
 - Реальный внешний warm mat / hotbed: вручную прогрет примерно до `40-50C`
-- Обдув: `100%`
+- Обдув в Cura: `45%`, helper дополнительно ограничивает обычные `M106` до примерно `45%`
+- Fan full at height: `3 mm`
 - Minimum layer time: `10 s`
 
 ## Качество
@@ -73,6 +74,8 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Ironing pattern: `concentric`
 - Ironing line spacing: `0.12 mm`
 - Ironing flow: `7%`
+- Z seam alignment: `User Specified`
+- Z seam position: `Back Left`
 
 ## Скорости
 
@@ -81,7 +84,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Top / bottom speed: `11 mm/s`
 - Infill speed: `15 mm/s`
 - Travel speed: `35 mm/s`
-- Initial layer speed: `7 mm/s`
+- Initial layer speed: `6 mm/s`
 - Ironing speed: `8 mm/s`
 
 ## Сглаживание Движений
@@ -106,9 +109,9 @@ G1 Y95 F1800 ;Move bed toward the operator
 ## Адгезия
 
 - Build plate adhesion: `brim`
-- Brim width: `6 mm`
+- Brim width: `12 mm`
 
-Не используй `10 mm` brim как default. Файл с `10 mm` brim выбирался на SD, но не входил в надёжный старт печати на проверенном K9.
+Если снова отрывает углы, сначала проверь чистоту/прогрев стола и первый слой, затем можно временно поднять brim до `14 mm`. `18 mm` оставляем как аварийный вариант, потому что он заметно увеличивает площадь и время печати.
 
 ## Поддержки
 
@@ -139,12 +142,12 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Retraction speed: `25 mm/s`
 - Prime speed: `25 mm/s`
 - Bridge settings: `on`
-- Bridge fan speed: `100%`
+- Bridge fan speed: `70%`
 - Bridge skin speed: `10 mm/s`
 - Bridge wall speed: `10 mm/s`
 - Bridge skin flow: `90%`
 - Bridge wall flow: `90%`
-- Initial layer line width: около `135%`
+- Initial layer line width: около `150%`
 
 ## Перед Записью На SD
 
@@ -153,6 +156,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 - нет настоящего стартового `G28`
 - рядом со стартом есть `G92 X0 Y0 Z0`
 - есть команда цели hotend, например `M104` / `M109`
+- если файл загружается через Little Hands или slicing helper, ранний `M109` будет заменён на `M104`, а hotend прогреется перед SD-стартом
 - bed target остаётся `0C`
 - bounds слайсера адекватные и укладываются в стол `100 x 100 mm`
 - нет `Filament used: 0m`

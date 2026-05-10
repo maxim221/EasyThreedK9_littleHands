@@ -49,11 +49,12 @@ G1 Y95 F1800 ;Move bed toward the operator
 ## 材料和温度
 
 - 材料：PLA
-- 第一层热端：`218C`
-- 后续热端：`214C`
+- 第一层热端：`225C`
+- 后续热端：`222C`
 - G-code 中的热床温度：`0C`
 - 实际外部 warm mat / hotbed：手动预热到约 `40-50C`
-- 风扇：`100%`
+- Cura 冷却目标：`45%`；helper 还会把普通 `M106` 限制到约 `45%`
+- Fan full at height：`3 mm`
 - Minimum layer time：`10 s`
 
 ## 质量
@@ -73,6 +74,8 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Ironing pattern：`concentric`
 - Ironing line spacing：`0.12 mm`
 - Ironing flow：`7%`
+- Z seam alignment：`User Specified`
+- Z seam position：`Back Left`
 
 ## 速度
 
@@ -81,7 +84,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Top / bottom speed：`11 mm/s`
 - Infill speed：`15 mm/s`
 - Travel speed：`35 mm/s`
-- Initial layer speed：`7 mm/s`
+- Initial layer speed：`6 mm/s`
 - Ironing speed：`8 mm/s`
 
 ## 运动平滑
@@ -106,9 +109,9 @@ G1 Y95 F1800 ;Move bed toward the operator
 ## 平台附着
 
 - Build plate adhesion：`brim`
-- Brim width：`6 mm`
+- Brim width：`12 mm`
 
-不要把 `10 mm` brim 作为默认值。已验证 K9 上曾出现一个 `10 mm` brim 文件：SD 可以选中，但不能可靠进入打印启动。
+如果四角仍然翘起，请先检查平台清洁、外部热床预热和首层压实；然后可以临时尝试 `14 mm` brim。`18 mm` 作为救急设置保留，因为它会明显增加占地和打印时间。
 
 ## 支撑
 
@@ -139,12 +142,12 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Retraction speed：`25 mm/s`
 - Prime speed：`25 mm/s`
 - Bridge settings：`on`
-- Bridge fan speed：`100%`
+- Bridge fan speed：`70%`
 - Bridge skin speed：`10 mm/s`
 - Bridge wall speed：`10 mm/s`
 - Bridge skin flow：`90%`
 - Bridge wall flow：`90%`
-- Initial layer line width：约 `135%`
+- Initial layer line width：约 `150%`
 
 ## 写入 SD 前检查
 
@@ -153,6 +156,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 - 没有真正的启动 `G28`
 - 开头附近包含 `G92 X0 Y0 Z0`
 - 包含热端目标温度命令，例如 `M104` / `M109`
+- 如果文件通过 Little Hands 上传或由 slicing helper 生成，早期 `M109` 会改写为 `M104`，热端会在 SD 启动前预热
 - bed target 保持 `0C`
 - slicer bounds 正常，并位于 `100 x 100 mm` 平台内
 - 不出现 `Filament used: 0m`

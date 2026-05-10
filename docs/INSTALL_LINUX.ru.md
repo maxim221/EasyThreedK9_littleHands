@@ -104,7 +104,8 @@ Little Hands пишет runtime-состояние и логи сюда:
 
 - машина: `lilHands K9 warm mat`
 - профиль: `codex - K9 warm mat cautious`
-- текущий brim: `6 mm`
+- текущий brim: `12 mm`
+- температура PLA: `225C` первый слой, затем `222C`
 - внешний тёплый стол: в Cura температура стола должна быть `0C`
 - для `mainFlasherTop.STL`: supports everywhere, support interface / roof включены, support angle `35`
 

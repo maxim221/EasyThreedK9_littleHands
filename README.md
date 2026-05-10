@@ -117,7 +117,8 @@ python3 tools/k9_control_center.py
 4. In Cura choose:
    - machine: `lilHands K9 warm mat`
    - profile: `codex - K9 warm mat cautious`
-   - brim: `6 mm`
+   - brim: `12 mm`
+   - PLA: `225C` first layer, then `222C`
    - supports for `mainFlasherTop.STL`: everywhere, interface / roof enabled, support angle `35`
 
 The tracked public Cura baseline is in [docs/cura/](docs/cura/).

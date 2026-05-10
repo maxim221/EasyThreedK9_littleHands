@@ -104,7 +104,8 @@ Use:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
-- current brim: `6 mm`
+- current brim: `12 mm`
+- PLA temperature: `225C` first layer, then `222C`
 - external bed / warm mat: keep Cura bed temperature at `0C`
 - for `mainFlasherTop.STL`: supports everywhere, support interface / roof enabled, support angle `35`
 

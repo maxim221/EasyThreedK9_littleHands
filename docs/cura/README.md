@@ -5,8 +5,8 @@ This directory contains the current tracked Cura baseline for the validated Easy
 - Cura version used during testing: `5.11`
 - Machine: `lilHands K9 warm mat`
 - Profile: `codex - K9 warm mat cautious`
-- Brim: `6 mm`
-- PLA temperature: `218C` first layer, `214C` after that
+- Brim: `12 mm`
+- PLA temperature: `225C` first layer, `222C` after that
 - Bed temperature in G-code: `0C`, because the warm bed is external
 - Ironing: highest top layer only, concentric, low flow
 - Motion smoothing: conservative acceleration limits for reduced diagonal ringing

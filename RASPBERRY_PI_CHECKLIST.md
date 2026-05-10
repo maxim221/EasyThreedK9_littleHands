@@ -235,7 +235,8 @@ Current known-good Cura setup:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
-- brim width: `6 mm`
+- brim width: `10 mm`
+- PLA temperature: `225C` first layer, then `220C`
 - bed temperature in G-code: `0C` because the bed is external
 - `mainFlasherTop.STL`: supports everywhere, support interface / roof enabled, support angle `35`
 
@@ -243,7 +244,10 @@ Important behavior assumptions:
 
 - external heated bed, not wired into the printer
 - bed is manually preheated outside the printer electronics
+- manual hotend preheat is not part of the normal workflow
 - `Little Hands` uses manual-zero workflow, not `G28`
+- before `M24`, Little Hands preheats the hotend to the target found in the G-code
+- during upload/export, early blocking `M109` is rewritten to non-blocking `M104`
 - after `M24`, Little Hands intentionally leaves USB quiet for `180` seconds so this K9 can enter SD printing reliably
 
 ## 11. What Not To Do

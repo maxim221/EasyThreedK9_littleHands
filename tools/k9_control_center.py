@@ -46,6 +46,7 @@ TEMP_LOG_INTERVAL_SEC = 5.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
 AUTO_SD_REFRESH_REQUIRE_FRESH_TEMP_SEC = 12.0
 PRINT_START_GRACE_SEC = 5 * 60
+PRINT_START_RECENT_TEMP_CONFIRM_SEC = 90.0
 POST_M24_USB_QUIET_SEC = 180
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
@@ -54,12 +55,17 @@ PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
 PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
 PRINT_END_CONTRACT = "LH_END_GCODE_V1"
 PRINT_END_MAX_Z = 100.0
-LH_STATE_SD_FILE = "LHSTATE.TXT"
+DEFAULT_PRINT_HOTEND_TARGET_C = 218.0
+PRINT_PREHEAT_BLOCKING_M109_EXTRA_C = 7.0
+PRINT_PREHEAT_MARGIN_C = 2.0
+PRINT_PREHEAT_TIMEOUT_SEC = 240.0
+PRINT_PREHEAT_POLL_SEC = 3.0
 
 
 TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
 HEATER_RE = re.compile(r"@:(\d+)")
 SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+HOTEND_TARGET_RE = re.compile(r"\bS([-+]?\d+(?:\.\d+)?)\b", re.IGNORECASE)
 PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
 MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
 LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
@@ -141,8 +147,9 @@ MANUAL_TEXT = textwrap.dedent(
     3. Move the printer into the fixed print-start pose.
     4. Press "Save start" to save this pose as print zero.
     5. Use "Go to start" to return to this saved zero.
-    6. Use "Start print" to return to the saved zero and then send M24.
-    7. After M24 the app keeps USB fully quiet for 180 seconds so this K9 can enter SD printing reliably.
+    6. Use "Start print"; the app preheats the hotend first, then returns to the saved zero and sends M24.
+    7. Files uploaded by Little Hands have early blocking M109 rewritten to M104.
+    8. After M24 the app keeps USB fully quiet for 180 seconds so this K9 can enter SD printing reliably.
 
     Bed leveling
     - Use the four corners and the center.
@@ -216,8 +223,9 @@ MANUAL_TEXTS = {
         3. Move the printer into the fixed print-start pose.
         4. Press "Save start" to save this pose as print zero.
         5. Use "Go to start" to return to this saved zero.
-        6. Use "Start print" to return to the saved zero and then send M24.
-        7. After M24 the app keeps USB fully quiet for 180 seconds so this K9 can enter SD printing reliably.
+        6. Use "Start print"; the app preheats the hotend first, then returns to the saved zero and sends M24.
+        7. Files uploaded by Little Hands have early blocking M109 rewritten to M104.
+        8. After M24 the app keeps USB fully quiet for 180 seconds so this K9 can enter SD printing reliably.
 
         Diagnostics
         - This printer does not have a reliable standard Marlin endstop-based home.
@@ -255,8 +263,9 @@ MANUAL_TEXTS = {
         3. 将打印机移动到固定起始姿态。
         4. 点击“Save start”保存当前零点。
         5. 点击“Go to start”返回该零点。
-        6. 点击“Start print”回到零点并发送 M24。
-        7. 发送 M24 后，程序会让 USB 完全安静 180 秒，以便这台 K9 稳定进入 SD 打印。
+        6. 点击“Start print”；程序会先预热热端，然后回到零点并发送 M24。
+        7. 通过 Little Hands 上传的文件会把早期阻塞式 M109 改写为 M104。
+        8. 发送 M24 后，程序会让 USB 完全安静 180 秒，以便这台 K9 稳定进入 SD 打印。
 
         诊断说明
         - 这台打印机没有可靠的标准 Marlin 限位回零。
@@ -600,14 +609,24 @@ class K9ControlCenter:
             self.predicted_print_end_z = None
         phase = str(data.get("phase") or "")
         if self.current_print_file == "-" and phase in {"prepared", "printing", "print_end_expected"}:
-            self.current_print_file = file_name
-            self.current_print_display = self.predicted_print_end_display
-            self.current_print_start_ts = self.predicted_print_end_start_ts or updated_ts or None
+            restore_start_ts = self.predicted_print_end_start_ts or updated_ts or None
             progress = data.get("progress_pct")
             try:
-                self.current_print_progress_pct = float(progress) if progress is not None else None
+                progress_value = float(progress) if progress is not None else None
             except (TypeError, ValueError):
-                self.current_print_progress_pct = None
+                progress_value = None
+            if (
+                (progress_value is None or progress_value <= 0.0)
+                and restore_start_ts
+                and (time.time() - restore_start_ts) > PRINT_START_GRACE_SEC
+            ):
+                self._clear_predicted_print_end(save=False)
+                self._save_print_state("idle", force=True)
+                return
+            self.current_print_file = file_name
+            self.current_print_display = self.predicted_print_end_display
+            self.current_print_start_ts = restore_start_ts
+            self.current_print_progress_pct = progress_value
             self.print_state_restored_from_log = True
             self.print_completion_armed = bool(self.current_print_progress_pct is not None)
             self.print_was_active = bool(self.current_print_progress_pct is not None)
@@ -671,6 +690,8 @@ class K9ControlCenter:
             "updated_ts": time.time(),
             "max_z": float(max_z) if isinstance(max_z, (int, float)) else None,
             "bounds": bounds,
+            "hotend_target": info.get("hotend_target"),
+            "has_blocking_m109": bool(info.get("has_blocking_m109")),
         }
         self.sd_gcode_profiles[self._normalize_sd_key(sd_path)] = profile
         if len(self.sd_gcode_profiles) > 40:
@@ -689,6 +710,73 @@ class K9ControlCenter:
         cached = self.sd_gcode_profiles.get(self._normalize_sd_key(sd_path))
         return cached if isinstance(cached, dict) else None
 
+    def _hotend_target_for_print(self, sd_path: str, display: str, source: Path | None = None) -> float:
+        profile = self._profile_for_print(sd_path, display, source)
+        target = profile.get("hotend_target") if isinstance(profile, dict) else None
+        if isinstance(target, (int, float)) and target > 0:
+            base_target = float(target)
+        else:
+            base_target = DEFAULT_PRINT_HOTEND_TARGET_C
+        has_blocking_m109 = True if profile is None else bool(profile.get("has_blocking_m109"))
+        if has_blocking_m109 and base_target < 220.0:
+            return base_target + PRINT_PREHEAT_BLOCKING_M109_EXTRA_C
+        return base_target
+
+    def _preheat_hotend_for_sd_start(self, target: float) -> None:
+        target = float(target)
+        if target <= 0:
+            return
+        self._post("log", f"Предпрогрев hotend до {target:.0f}C перед SD-стартом.")
+        self._post("files-status", f"Предпрогрев hotend: цель {target:.0f}C")
+        self._post("progress", (f"Предпрогрев hotend: цель {target:.0f}C", 0.0))
+        sdtool.query_command(
+            self._port(),
+            self._baud(),
+            f"M104 S{target:.0f}",
+            wait_before_read=0.25,
+            read_seconds=0.9,
+            sync=False,
+            reset_input=False,
+        )
+        deadline = time.monotonic() + PRINT_PREHEAT_TIMEOUT_SEC
+        last_logged = 0.0
+        last_temp: float | None = None
+        while time.monotonic() < deadline:
+            temp_reply = sdtool.query_command(
+                self._port(),
+                self._baud(),
+                "M105",
+                wait_before_read=0.25,
+                read_seconds=1.0,
+                sync=False,
+                reset_input=False,
+            )
+            match = TEMP_RE.search(temp_reply)
+            if match:
+                current = float(match.group(1))
+                seen_target = float(match.group(2))
+                last_temp = current
+                heater_match = HEATER_RE.search(temp_reply)
+                heater = int(heater_match.group(1)) if heater_match else None
+                self._post("temp", (current, seen_target, heater))
+                pct = max(0.0, min(100.0, (current / max(target, 1.0)) * 100.0))
+                self._post("progress", (f"Предпрогрев hotend: {current:.1f}/{seen_target:.0f}C", pct))
+                now = time.monotonic()
+                if now - last_logged >= 8.0:
+                    last_logged = now
+                    self._post("log", f"Предпрогрев: {current:.1f}/{seen_target:.0f}C")
+                if current >= target - PRINT_PREHEAT_MARGIN_C:
+                    self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
+                    self._post("log", f"Предпрогрев завершён: {current:.1f}/{seen_target:.0f}C. Запускаю SD-файл.")
+                    return
+            time.sleep(PRINT_PREHEAT_POLL_SEC)
+        if last_temp is None:
+            raise RuntimeError("Не удалось получить температуру hotend перед SD-стартом.")
+        raise RuntimeError(
+            f"Hotend не вышел на температуру перед SD-стартом: {last_temp:.1f}/{target:.0f}C. "
+            "Не запускаю печать вслепую."
+        )
+
     def _prime_print_end_contract(self, sd_path: str, display: str, source: Path | None = None) -> None:
         profile = self._profile_for_print(sd_path, display, source)
         max_z = profile.get("max_z") if isinstance(profile, dict) else None
@@ -706,38 +794,22 @@ class K9ControlCenter:
             f"{time.strftime('%H:%M:%S')} PRINT_END_EXPECTED file={sd_path} contract={PRINT_END_CONTRACT} end_x=95.00 end_y=95.00 end_z={z_text}"
         )
         self._save_print_state("prepared", force=True)
-        self._write_lh_state_to_sd("prepared")
 
-    def _write_lh_state_to_sd(self, phase: str) -> None:
-        if not self._port():
-            return
-        end_z = self.predicted_print_end_z
-        z_text = f"{end_z:.2f}" if end_z is not None else "unknown"
-        lines = [
-            "; Little Hands state marker",
-            f"; phase={phase}",
-            f"; file={self.predicted_print_end_file}",
-            f"; contract={self.predicted_print_end_contract or PRINT_END_CONTRACT}",
-            f"; end_x={self.predicted_print_end_x:.2f}",
-            f"; end_y={self.predicted_print_end_y:.2f}",
-            f"; end_z={z_text}",
-            f"; updated={time.strftime('%Y-%m-%d %H:%M:%S')}",
-            "; If recovery is unsafe, delete this file and set start manually.",
-        ]
-        try:
-            sdtool.write_text_file(self._port(), self._baud(), LH_STATE_SD_FILE, "\n".join(lines) + "\n")
-            self._post("log", f"Состояние Little Hands записано на SD: {LH_STATE_SD_FILE} ({phase}).")
-        except Exception as exc:
-            self._post("log", f"Не удалось записать {LH_STATE_SD_FILE} на SD; локальный лог всё равно сохранён: {exc}")
-
-    def _delete_lh_state_from_sd(self) -> None:
-        if not self._port():
-            return
-        try:
-            sdtool.delete_file(self._port(), self._baud(), LH_STATE_SD_FILE)
-            self._post("log", f"Служебное состояние {LH_STATE_SD_FILE} удалено с SD.")
-        except Exception as exc:
-            self._post("log", f"Не удалось удалить {LH_STATE_SD_FILE} с SD автоматически: {exc}")
+    def _source_for_print(self, sd_path: str, display: str) -> Path | None:
+        raw = self.local_gcode_var.get().strip()
+        if not raw:
+            return None
+        source = Path(raw).expanduser()
+        if not source.is_file():
+            return None
+        source_sd_name = sdtool.make_sd_name(source.name)
+        if (
+            self._normalize_sd_key(source_sd_name) == self._normalize_sd_key(sd_path)
+            or source.name in display
+            or self._normalize_sd_key(source.name) == self._normalize_sd_key(display)
+        ):
+            return source
+        return None
 
     def _load_ui_state(self) -> dict[str, object]:
         if not UI_STATE_PATH.is_file():
@@ -2335,17 +2407,17 @@ class K9ControlCenter:
         self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
         self._save_print_state("printing", force=True)
         self._post("active-sd", f"Печатается: {display}")
-        self._post("progress", ("Печать: старт отправлен, жду SD/прогрев", 0.0))
+        self._post("progress", ("Печать: старт отправлен, жду вход в SD-печать", 0.0))
         self._post(
             "log",
-            "Старт SD отправлен. На K9 после M24 прошивка может несколько минут отвечать только busy "
-            "или молчать, особенно пока входит в прогрев. Не обновляй список SD в этот момент.",
+            "Старт SD отправлен. Hotend уже был прогрет Little Hands; теперь K9 может несколько минут отвечать busy "
+            "или молчать, пока входит в SD-печать. Не обновляй список SD в этот момент.",
         )
         self._post(
             "log",
             f"Первые {POST_M24_USB_QUIET_SEC} с после M24 Little Hands не трогает USB вообще. "
             "Это нужно этой K9-прошивке, чтобы спокойно войти в SD-печать. "
-            "Если хотенд греется или вентилятор/моторы ожили — не выключай питание, просто наблюдай.",
+            "Если вентилятор/моторы ожили или пластик пошёл - не выключай питание, просто наблюдай.",
         )
 
     def _refresh_ports_on_startup(self) -> None:
@@ -2558,7 +2630,8 @@ class K9ControlCenter:
                 "3. Если порт не отвечает, нажми 'Найти'.\n"
                 "4. Вручную проверь стартовую позу.\n"
                 "5. Нажми 'Запомнить старт'.\n"
-                "6. Перед повтором проверь, что G-code сделан проверенным профилем Cura и не был испорчен ручной правкой.\n\n"
+                "6. Перед повтором проверь, что G-code сделан проверенным профилем Cura или залит через Little Hands; "
+                "ручной предпрогрев hotend в нормальном сценарии не нужен.\n\n"
                 "Почему так: этот K9 после плохого старта может оставлять USB/SD в полуживом состоянии, "
                 "но одно только молчание USB ещё не доказывает, что реальная печать сорвалась."
             )
@@ -2775,6 +2848,8 @@ class K9ControlCenter:
         info: dict[str, object] = {
             "has_g28": False,
             "has_hotend_target": False,
+            "has_blocking_m109": False,
+            "hotend_target": None,
             "has_little_hands_start": False,
             "target_machine_unknown": False,
             "start_gcode_comment": "",
@@ -2810,6 +2885,15 @@ class K9ControlCenter:
                 info["has_g28"] = True
             if code.startswith(("M104", "M109")) and "S" in code:
                 info["has_hotend_target"] = True
+                match = HOTEND_TARGET_RE.search(code)
+                if match:
+                    try:
+                        if info["hotend_target"] is None:
+                            info["hotend_target"] = float(match.group(1))
+                    except ValueError:
+                        pass
+            if code.startswith("M109"):
+                info["has_blocking_m109"] = True
         suspicious: list[str] = []
         if filament_m is not None and filament_m <= 0.0:
             suspicious.append("Cura записала 'Filament used: 0m'")
@@ -2871,6 +2955,52 @@ class K9ControlCenter:
                 "(TARGET_MACHINE.NAME:Unknown). Переслайсь модель заново и залей новый файл.",
             )
         return True, ""
+
+    def _replace_early_m109_with_m104(self, source: Path, target: Path) -> tuple[bool, float | None]:
+        lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+        patched = False
+        hotend_target: float | None = None
+        for index, line in enumerate(lines[:120]):
+            stripped = line.strip()
+            if stripped.startswith(";LAYER:") or stripped.startswith(";LAYER_COUNT:"):
+                break
+            if not stripped or stripped.startswith(";"):
+                continue
+            command = stripped.split(";", 1)[0].strip()
+            if not command.upper().startswith("M109"):
+                continue
+            match = HOTEND_TARGET_RE.search(command)
+            if not match:
+                continue
+            hotend_target = float(match.group(1))
+            prefix = line[: len(line) - len(line.lstrip())]
+            lines[index] = (
+                f"{prefix}M104 S{hotend_target:g} ; LH: non-blocking heat target; "
+                "Little Hands preheats before SD start"
+            )
+            patched = True
+            break
+        if patched:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return patched, hotend_target
+
+    def _prepared_gcode_for_sd_upload(self, source: Path) -> tuple[Path, bool]:
+        info = self._inspect_gcode_file(source)
+        if not info.get("has_blocking_m109"):
+            return source, False
+        prepared_dir = GUI_EXPORT_DIR / "prepared"
+        prepared = prepared_dir / f"{source.stem}_lh_noM109{source.suffix or '.gcode'}"
+        patched, target = self._replace_early_m109_with_m104(source, prepared)
+        if not patched:
+            return source, False
+        target_text = f"{target:.0f}C" if isinstance(target, (int, float)) else "рабочей температуры"
+        self._post(
+            "log",
+            "G-code подготовлен для K9: ранний блокирующий M109 заменён на M104; "
+            f"Little Hands прогреет hotend до {target_text} перед SD-стартом.",
+        )
+        return prepared, True
 
     def pick_firmware(self) -> None:
         path = filedialog.askopenfilename(
@@ -3043,7 +3173,6 @@ class K9ControlCenter:
             self.log(reason)
             return
         dest = self.dest_name_var.get().strip() or source.name
-        size_mib = source.stat().st_size / (1024 * 1024)
 
         def task() -> None:
             last_stage = {"name": None}
@@ -3055,12 +3184,16 @@ class K9ControlCenter:
                     last_stage["name"] = stage
                     self._post("log", f"Этап записи: {stage}")
 
+            upload_source, patched = self._prepared_gcode_for_sd_upload(source)
+            size_mib = upload_source.stat().st_size / (1024 * 1024)
             self._post("log", f"Локальный файл: {source}")
+            if patched:
+                self._post("log", f"На SD будет записана подготовленная копия: {upload_source}")
             self._post("log", f"Размер файла: {size_mib:.2f} MiB. Большие G-code могут писаться 1-5 минут.")
             self._post("progress", ("Upload (preflight): 0.0%", 0.0))
             self._post("files-status", f"Заливка G-code: preflight 0.0%")
-            method = sdtool.upload_gcode_auto(self._port(), self._baud(), source, dest, progress_cb=on_progress)
-            self._remember_gcode_profile(dest, source.name, source)
+            method = sdtool.upload_gcode_auto(self._port(), self._baud(), upload_source, dest, progress_cb=on_progress)
+            self._remember_gcode_profile(dest, source.name, upload_source)
             self._post("progress", ("Upload complete: 100.0%", 100.0))
             self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method})")
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
@@ -3083,7 +3216,6 @@ class K9ControlCenter:
             return
         dest = (self.dest_name_var.get().strip() or sdtool.make_sd_name(source.name))
         self.dest_name_var.set(dest)
-        size_mib = source.stat().st_size / (1024 * 1024)
 
         def task() -> None:
             last_stage = {"name": None}
@@ -3095,20 +3227,25 @@ class K9ControlCenter:
                     last_stage["name"] = stage
                     self._post("log", f"Этап записи: {stage}")
 
+            upload_source, patched = self._prepared_gcode_for_sd_upload(source)
+            size_mib = upload_source.stat().st_size / (1024 * 1024)
             self._post("log", f"Локальный файл: {source}")
+            if patched:
+                self._post("log", f"На SD будет записана подготовленная копия: {upload_source}")
             self._post("log", f"Размер файла: {size_mib:.2f} MiB. Большие G-code могут писаться 1-5 минут.")
             self._post("files-status", "Заливка и старт: preflight 0.0%")
-            method = sdtool.upload_gcode_auto(self._port(), self._baud(), source, dest, progress_cb=on_progress)
+            method = sdtool.upload_gcode_auto(self._port(), self._baud(), upload_source, dest, progress_cb=on_progress)
             self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method}). Запускаю печать...")
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
-            self._prime_print_end_contract(dest, source.name, source)
+            target = self._hotend_target_for_print(dest, source.name, upload_source)
+            self._preheat_hotend_for_sd_start(target)
+            self._prime_print_end_contract(dest, source.name, upload_source)
             try:
                 out = sdtool.start_sd_print_from_pseudo_home(self._port(), self._baud(), dest)
             except Exception:
                 self._clear_predicted_print_end()
-                self._delete_lh_state_from_sd()
                 raise
             self._mark_sd_start_sent(dest, source.name)
             self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {source.name}")
@@ -3210,18 +3347,14 @@ class K9ControlCenter:
             return
 
         def task() -> None:
-            source = Path(self.local_gcode_var.get().strip()).expanduser()
-            source_for_profile = None
-            if source.is_file():
-                source_sd_name = sdtool.make_sd_name(source.name)
-                if self._normalize_sd_key(source_sd_name) == self._normalize_sd_key(path) or source.name in display:
-                    source_for_profile = source
+            source_for_profile = self._source_for_print(path, display)
+            target = self._hotend_target_for_print(path, display, source_for_profile)
+            self._preheat_hotend_for_sd_start(target)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
                 out = sdtool.start_sd_print(self._port(), self._baud(), path)
             except Exception:
                 self._clear_predicted_print_end()
-                self._delete_lh_state_from_sd()
                 raise
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"Печать запущена: {display}")
@@ -3245,29 +3378,21 @@ class K9ControlCenter:
             return
 
         def task() -> None:
-            source = Path(self.local_gcode_var.get().strip()).expanduser()
-            source_for_profile = None
-            if source.is_file():
-                source_sd_name = sdtool.make_sd_name(source.name)
-                if self._normalize_sd_key(source_sd_name) == self._normalize_sd_key(path) or source.name in display:
-                    source_for_profile = source
+            source_for_profile = self._source_for_print(path, display)
+            target = self._hotend_target_for_print(path, display, source_for_profile)
+            self._preheat_hotend_for_sd_start(target)
             self._prime_print_end_contract(path, display, source_for_profile)
-            if self.at_saved_start_pose:
-                try:
+            try:
+                if self.at_saved_start_pose:
                     out = sdtool.start_sd_print(self._port(), self._baud(), path)
                     start_note = "Печать с SD запущена из уже сохранённой стартовой позы"
-                except Exception:
-                    self._clear_predicted_print_end()
-                    self._delete_lh_state_from_sd()
-                    raise
-            else:
-                try:
+                else:
                     out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
+                    self.at_saved_start_pose = True
                     start_note = "Печать с SD запущена от сохранённого старта"
-                except Exception:
-                    self._clear_predicted_print_end()
-                    self._delete_lh_state_from_sd()
-                    raise
+            except Exception:
+                self._clear_predicted_print_end()
+                raise
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"{start_note}: {display}")
             self.at_saved_start_pose = False
@@ -3402,7 +3527,7 @@ class K9ControlCenter:
                 out = sdtool.run_commands(
                     self._port(),
                     self._baud(),
-                    ["M524", "M104 S0", "M140 S0", "M107", "M400", "M18"],
+                    ["M108", "M524", "M104 S0", "M140 S0", "M107", "M400", "M18"],
                     settle_after_each=0.4,
                     final_wait=1.2,
                     read_seconds=2.5,
@@ -3453,7 +3578,6 @@ class K9ControlCenter:
             self.session_zero_defined = True
             self.at_saved_start_pose = True
             self.post_print_pose_known = False
-            had_lh_state = self.predicted_print_end_valid
             had_active_print = self.current_print_file != "-"
             self._clear_predicted_print_end(save=False)
             if had_active_print:
@@ -3471,8 +3595,6 @@ class K9ControlCenter:
                 self._post("active-sd", "Печатается: -")
                 self._post("progress", ("Печать: состояние закрыто после сохранения старта", 0.0))
             self._save_print_state("idle", force=True)
-            if had_lh_state:
-                self._delete_lh_state_from_sd()
             if self.post_print_recovery_required:
                 self._post("post-print-recovery-clear", None)
                 self._post("log", "Стартовая поза записана после послепечатного цикла: следующая печать разрешена.")
@@ -3488,7 +3610,7 @@ class K9ControlCenter:
                 "The app does not currently have a trusted saved start pose. "
                 "For safety it will not send 'Go to start'. If the printer is already physically at the start pose, press 'Save start'. "
                 "Otherwise use manual jog first, then press 'Save start'. "
-                "If a print completed while Little Hands was closed or disconnected, automatic return is only safe if the app offers the explicit saved print-end / SD marker recovery prompt."
+                "If a print completed while Little Hands was closed or disconnected, automatic return is only safe if the app offers the explicit saved print-end recovery prompt."
             )
         if lang == "zh":
             return (
@@ -3500,7 +3622,7 @@ class K9ControlCenter:
             "Сейчас у приложения нет доверенной сохранённой стартовой позы, поэтому оно безопасно не отправляет 'К старту'. "
             "Если принтер уже физически стоит в стартовой позе, нажми 'Запомнить старт'. "
             "Если нет — сначала выставь позу ручными кнопками, потом нажми 'Запомнить старт'. "
-            "Если печать завершилась, пока Little Hands был закрыт или потерял USB, автоматический возврат безопасен только через отдельное подтверждение recovery по сохранённому print-end / SD-маркеру."
+            "Если печать завершилась, пока Little Hands был закрыт или потерял USB, автоматический возврат безопасен только через отдельное подтверждение recovery по сохранённому print-end."
         )
 
     def _can_return_from_known_post_print_pose(self) -> bool:
@@ -3642,7 +3764,6 @@ class K9ControlCenter:
                 return
             if choice == "manual":
                 self._clear_print_session_state("Печать: сохранённый print-end удалён", 0.0)
-                self._delete_lh_state_from_sd()
                 self.log("Сохранённый print-end удалён. Выставь стартовую позу вручную и нажми 'Запомнить старт'.")
                 return
             use_predicted_print_end_pose = True
@@ -3653,7 +3774,6 @@ class K9ControlCenter:
         elif not self.session_zero_defined and self._has_unusable_predicted_print_end():
             if self._confirm_clear_unusable_predicted_print_end():
                 self._clear_print_session_state("Печать: неполный print-end удалён", 0.0)
-                self._delete_lh_state_from_sd()
                 self.log("Неполный print-end удалён. Выставь стартовую позу вручную и нажми 'Запомнить старт'.")
             return
         elif not self.session_zero_defined:
@@ -3692,7 +3812,6 @@ class K9ControlCenter:
                 self.last_sd_progress_ts = None
                 self._clear_predicted_print_end(save=False)
                 self._save_print_state("recovered-to-start", force=True)
-                self._delete_lh_state_from_sd()
                 self._post("active-sd", "Печатается: -")
                 self._post("progress", ("Recovery print-end: возвращён к старту", 0.0))
                 self._post("log", out.strip() or "Recovery по print-end выполнен: принтер возвращён к стартовой позе")
@@ -3787,7 +3906,7 @@ class K9ControlCenter:
                     self._post(
                         "log",
                         f"Стартовая USB-пауза после M24: осталось примерно {remaining} c. "
-                        "Это нормальное ожидание; power cycle нужен только если принтер физически не греется, не двигается и не начинает печать.",
+                        "Это нормальное ожидание: hotend уже прогрет, сейчас даём K9 войти в SD-печать. SD не обновляй.",
                     )
                 return
             if self.post_m24_usb_quiet_until and self.current_print_file != "-":
@@ -3795,15 +3914,40 @@ class K9ControlCenter:
                 self.last_post_m24_quiet_log_ts = 0.0
                 self._post("busy", (False, "USB: idle"))
                 self._post("log", "Стартовая USB-пауза после M24 завершена: начинаю аккуратный опрос M105/M27.")
-            temp = sdtool.query_command(
-                self._port(),
-                self._baud(),
-                "M105",
-                wait_before_read=0.12,
-                read_seconds=0.45,
-                sync=False,
-                reset_input=False,
+            pending_start_heatup = (
+                self.current_print_file != "-"
+                and self.current_print_start_ts
+                and not self.print_was_active
             )
+            if pending_start_heatup:
+                # During M109 Marlin doesn't answer ordinary M105 commands.
+                # It does emit temperature lines about once a second, so listen first.
+                temp = sdtool.listen_serial(
+                    self._port(),
+                    self._baud(),
+                    read_seconds=1.35,
+                    reset_input=False,
+                )
+                if not TEMP_RE.search(temp):
+                    temp = sdtool.query_command(
+                        self._port(),
+                        self._baud(),
+                        "M105",
+                        wait_before_read=0.12,
+                        read_seconds=1.10,
+                        sync=False,
+                        reset_input=False,
+                    )
+            else:
+                temp = sdtool.query_command(
+                    self._port(),
+                    self._baud(),
+                    "M105",
+                    wait_before_read=0.12,
+                    read_seconds=0.45,
+                    sync=False,
+                    reset_input=False,
+                )
             match = TEMP_RE.search(temp)
             current_temp = None
             target_temp = None
@@ -3840,13 +3984,20 @@ class K9ControlCenter:
                         or (self.current_print_progress_pct is not None and self.current_print_progress_pct > 0.0)
                     )
                 )
+                recent_post_start_temp = (
+                    self.current_print_file != "-"
+                    and self.current_print_start_ts
+                    and self.last_temp_sample_ts >= self.current_print_start_ts
+                    and (now - self.last_temp_sample_ts) <= PRINT_START_RECENT_TEMP_CONFIRM_SEC
+                    and self.last_temp_target > 0.0
+                )
                 if in_start_grace:
                     self._post("sd", "SD: старт/прогрев, USB занят")
                     self._post("progress", ("Печать: старт отправлен, жду прогрев/движение", 0.0))
                     silence_message = (
                         "Во время старта SD-печати принтер временно не отвечает на M105. "
-                        "Это не повод выключать питание: если хотенд или моторы начали работу, просто жди. "
-                        "Little Hands пока не отправляет SD/позиционные запросы и ждёт подтверждение старта."
+                        "Это не повод выключать питание: если хотенд греется, вентилятор ожил или моторы начали работу, просто жди. "
+                        "Little Hands пока не отправляет SD/позиционные запросы и ждёт подтверждения старта."
                     )
                 elif active_print_observed:
                     pct = self.current_print_progress_pct
@@ -3859,6 +4010,13 @@ class K9ControlCenter:
                     self._post("sd", "SD: печать активна, USB частичный")
                     self._post("progress", (progress_text, progress_value))
                     return
+                elif recent_post_start_temp:
+                    self._post("sd", "SD: hotend держит цель, жду SD-прогресс")
+                    self._post("progress", ("Печать: hotend на цели, жду SD-прогресс", 0.0))
+                    silence_message = (
+                        "USB иногда молчит во время входа K9 в SD-печать, но после M24 уже были свежие M105 "
+                        "с рабочей целью hotend. Это не считается провалом старта; Little Hands ждёт SD-прогресс."
+                    )
                 elif self.current_print_file != "-":
                     self._post("sd", "SD: печать/USB занят")
                     self._post("progress", ("Печать: нет телеметрии, проверь визуально", 0.0))
@@ -3882,14 +4040,43 @@ class K9ControlCenter:
                     and self.current_print_start_ts
                     and not self.print_was_active
                     and not self.print_start_watchdog_alerted
+                    and not recent_post_start_temp
                     and (now - self.current_print_start_ts) >= PRINT_START_GRACE_SEC
                 ):
+                    file_name = self.current_print_file
                     self.print_start_watchdog_alerted = True
+                    self._append_ring_log(
+                        f"{time.strftime('%H:%M:%S')} PRINT_START_UNCONFIRMED file={file_name} reason=m105_silent"
+                    )
+                    self._clear_print_session_state("Печать: старт не подтверждён", 0.0)
+                    self._post("post-print-recovery", "failed-start")
                     self._post(
                         "log",
-                        "Старт печати пока не подтверждён по USB, но это не доказательство сбоя: "
-                        "если принтер физически греется или печатает, ничего не выключай. "
-                        "Если движения и нагрева нет несколько минут, останови попытку и сделай power cycle перед новым стартом.",
+                        "Старт печати не подтвердился: 5 минут после M24 нет M105/SD-прогресса. "
+                        "Если принтер физически не греется, вентилятор не включился и движения нет, "
+                        "это зависший старт; сделай power cycle перед новой попыткой. "
+                        "Если принтер всё-таки реально печатает, не выключай питание и наблюдай визуально.",
+                    )
+                return
+            if (
+                pending_start_heatup
+                and self.current_print_file != "-"
+                and not self.print_was_active
+                and current_temp is not None
+                and target_temp is not None
+                and target_temp > 0.0
+                and current_temp < (target_temp - 1.5)
+            ):
+                display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
+                self._post("active-sd", f"Печатается: {display}")
+                self._post("sd", "SD: прогрев hotend (M109)")
+                self._post("progress", (f"Прогрев hotend: {current_temp:.1f}/{target_temp:.0f} C", 0.0))
+                self.current_print_progress_pct = 0.0
+                self._save_print_state("printing")
+                if now - self.last_telemetry_log_ts >= 5.0:
+                    self.last_telemetry_log_ts = now
+                    self._append_ring_log(
+                        f"{time.strftime('%H:%M:%S')} TELEMETRY file={self.current_print_file} progress=0.0% temp={current_temp:.2f}/{target_temp:.2f} sd=\"M109 heatup\""
                     )
                 return
             sd = sdtool.query_command(

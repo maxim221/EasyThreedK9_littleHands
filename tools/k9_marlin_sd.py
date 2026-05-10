@@ -265,6 +265,17 @@ def query_command(
         return read_for(ser, read_seconds)
 
 
+def listen_serial(
+    port: str,
+    baud: int,
+    *,
+    read_seconds: float = 1.5,
+    reset_input: bool = False,
+) -> str:
+    with open_serial(port, baud, reset_input=reset_input) as ser:
+        return read_for(ser, read_seconds)
+
+
 def run_commands(
     port: str,
     baud: int,
@@ -429,20 +440,57 @@ def _with_start_retry(port: str, baud: int, label: str, starter: Callable[[], st
     )
 
 
+def _accept_m24_sent_response(out: str, target: str, context: str) -> str:
+    stripped = out.strip()
+    lowered = stripped.lower()
+    if any(marker in lowered for marker in ("open failed", "cannot open", "file not found", "error:", "no media", "no card")):
+        raise RuntimeError(f"{context} may have failed for {target}: {stripped or '<no response>'}")
+    if "not sd printing" in lowered:
+        raise RuntimeError(f"{context} was not accepted for {target}: {stripped}")
+    if "file opened" in lowered or "ok" in lowered or "echo:now fresh file" in lowered or "busy: processing" in lowered:
+        return out
+    if not stripped:
+        return f"{context}: M24 sent for {target}; no immediate USB confirmation. Entering quiet SD-start window."
+    return out
+
+
+def _select_sd_file_for_print(ser: serial.Serial, target: str, timeout: float = 8.0) -> str:
+    """Send M23 and wait until Marlin confirms that the SD file is selected."""
+    send_line(ser, f"M23 {target}")
+    end = time.monotonic() + timeout
+    chunks: list[str] = []
+    while time.monotonic() < end:
+        chunk = read_for(ser, 0.25)
+        if chunk:
+            chunks.append(chunk)
+        out = "".join(chunks)
+        lowered = out.lower()
+        if any(marker in lowered for marker in ("open failed", "cannot open", "file not found", "error:", "no media", "no card")):
+            raise RuntimeError(f"M23 failed for {target}: {out.strip() or '<no response>'}")
+        if "file selected" in lowered:
+            return out
+    out = "".join(chunks)
+    if "file opened" in out.lower():
+        return out
+    raise RuntimeError(f"Could not confirm file selection for {target}: {out.strip() or '<no response>'}")
+
+
 def _start_sd_print_once(port: str, baud: int, target: str) -> str:
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
         send_line(ser, "M17")
         time.sleep(0.4)
-        send_line(ser, f"M23 {target}")
-        time.sleep(0.8)
+        select_out = _select_sd_file_for_print(ser, target)
         send_line(ser, "M24")
         time.sleep(0.8)
-        out = read_for(ser, 2.0)
-    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
-        raise RuntimeError(f"Start print may have failed for {target}: {out.strip() or '<no response>'}")
-    return out
+        try:
+            out = select_out + read_for(ser, 2.0)
+        except Exception as exc:
+            if is_transient_serial_error(exc):
+                return f"M24 sent for {target}; USB read ended early: {exc}"
+            raise
+    return _accept_m24_sent_response(out, target, "Start print")
 
 
 def start_sd_print(port: str, baud: int, path: str) -> str:
@@ -458,14 +506,16 @@ def _start_sd_print_from_home_once(port: str, baud: int, target: str) -> str:
             send_line(ser, line)
             time.sleep(0.5)
         _ = read_for(ser, 2.0)
-        send_line(ser, f"M23 {target}")
-        time.sleep(0.8)
+        select_out = _select_sd_file_for_print(ser, target)
         send_line(ser, "M24")
         time.sleep(0.8)
-        out = read_for(ser, 2.5)
-    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
-        raise RuntimeError(f"Start print from home may have failed for {target}: {out.strip() or '<no response>'}")
-    return out
+        try:
+            out = select_out + read_for(ser, 2.5)
+        except Exception as exc:
+            if is_transient_serial_error(exc):
+                return f"M24 sent for {target} after start-pose move; USB read ended early: {exc}"
+            raise
+    return _accept_m24_sent_response(out, target, "Start print from home")
 
 
 def set_current_home_zero(port: str, baud: int) -> str:
@@ -592,14 +642,16 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
             send_line(ser, line)
             time.sleep(0.5)
         _ = read_for(ser, 5.0)
-        send_line(ser, f"M23 {target}")
-        time.sleep(0.8)
+        select_out = _select_sd_file_for_print(ser, target)
         send_line(ser, "M24")
         time.sleep(0.8)
-        out = read_for(ser, 2.5)
-    if "File opened" not in out and "ok" not in out and "echo:Now fresh file" not in out:
-        raise RuntimeError(f"Start print from pseudo-home may have failed for {target}: {out.strip() or '<no response>'}")
-    return out
+        try:
+            out = select_out + read_for(ser, 2.5)
+        except Exception as exc:
+            if is_transient_serial_error(exc):
+                return f"M24 sent for {target} after pseudo-home; USB read ended early: {exc}"
+            raise
+    return _accept_m24_sent_response(out, target, "Start print from pseudo-home")
 
 
 def start_sd_print_from_pseudo_home(port: str, baud: int, path: str) -> str:
@@ -620,7 +672,7 @@ def stop_sd_print(port: str, baud: int) -> str:
     return run_commands(
         port,
         baud,
-        ["M524", "M104 S0", "M140 S0", "M107", "M400"],
+        ["M108", "M524", "M104 S0", "M140 S0", "M107", "M400"],
         settle_after_each=0.4,
         final_wait=1.2,
         read_seconds=2.5,
