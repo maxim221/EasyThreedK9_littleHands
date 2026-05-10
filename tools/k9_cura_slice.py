@@ -199,8 +199,14 @@ G1 Y95 F1800 ;Move bed toward the operator"""
     }
     extruder_settings = {
         "material_diameter": "1.75",
-        "material_print_temperature": "222",
+        "material_print_temperature": "224",
         "material_print_temperature_layer_0": "225",
+        "material_flow": "103",
+        "wall_material_flow": "103",
+        "wall_0_material_flow": "102",
+        "wall_x_material_flow": "103",
+        "skin_material_flow": "102",
+        "infill_material_flow": "101",
         "material_bed_temperature": "0",
         "retraction_amount": "6.5",
         "retraction_enable": "True",
@@ -432,9 +438,10 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
         'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = 35\\n'
         'support_infill_rate = 12\\nsupport_interface_enable = True\\nsupport_roof_enable = True\\n'
         'z_seam_type = back\\nz_seam_position = backleft\\n", '
-        '"extruder_quality": ["[values]\\nmaterial_print_temperature = 222\\n'
+        '"extruder_quality": ["[values]\\nmaterial_print_temperature = 224\\n'
         'material_print_temperature_layer_0 = 225\\nretraction_enable = True\\n'
-        'retraction_amount = 6.5\\ncool_fan_enabled = False\\n'
+        'retraction_amount = 6.5\\nmaterial_flow = 103\\nwall_material_flow = 103\\n'
+        'cool_fan_enabled = False\\n'
         'cool_fan_speed = 0\\nbridge_fan_speed = 0\\n"]}'
     )
     if not any(line.startswith(";SETTING_3") for line in lines[-80:]):

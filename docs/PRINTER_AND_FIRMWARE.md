@@ -139,7 +139,7 @@ For the current validated public baseline:
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
 - brim width: `12 mm`
-- PLA temperature: `225C` first layer, `222C` after that
+- PLA temperature: `225C` first layer, `224C` after that
 - bed temperature in G-code: `0C` because the warm bed is external
 - support mode for `mainFlasherTop.STL`: supports everywhere, normal supports, interface / roof enabled, support angle `35`
 
@@ -150,7 +150,7 @@ Important G-code rules:
 - the generated file must contain a hotend target command such as `M104` / `M109`
 - when a file is uploaded through Little Hands, early blocking `M109` is rewritten to `M104`; the app preheats the hotend before the SD start
 - reject or re-slice files with `Filament used: 0m`, impossible Cura bounds, or missing hotend target
-- `10 mm` brim is now the current default after the automatic hotend-preheat workflow was confirmed; the old start failure was tied to heat / SD-start sequencing, not to brim width itself
+- `12 mm` brim is now the current default after the automatic hotend-preheat workflow was confirmed; the old start failure was tied to heat / SD-start sequencing, not to brim width itself
 
 Current end-G-code rule:
 

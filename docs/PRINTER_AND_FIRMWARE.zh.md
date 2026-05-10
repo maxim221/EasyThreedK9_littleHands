@@ -131,7 +131,7 @@ G92 X0 Y0 Z0
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
 - brim width: `12 mm`
-- PLA 温度：第一层 `225C`，之后 `222C`
+- PLA 温度：第一层 `225C`，之后 `224C`
 - G-code 中的热床温度：`0C`，因为热床是外部供电
 - `mainFlasherTop.STL` 的支撑：supports everywhere、normal supports、启用 interface / roof、support angle `35`
 

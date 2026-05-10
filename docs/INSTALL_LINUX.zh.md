@@ -100,7 +100,7 @@ Little Hands 会写入：
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
 - 当前 brim：`12 mm`
-- PLA 温度：第一层 `225C`，之后 `222C`
+- PLA 温度：第一层 `225C`，之后 `224C`
 - 外部热床 / warm mat：Cura 热床温度保持 `0C`
 - 对于 `mainFlasherTop.STL`：supports everywhere，启用 support interface / roof，support angle `35`
 

@@ -50,7 +50,7 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 
 - Material: PLA
 - First layer hotend: `225C`
-- Normal hotend: `222C`
+- Normal hotend: `224C`
 - Bed temperature in G-code: `0C`
 - Real external warm bed / warm mat: manually preheated to about `40-50C`
 - Part cooling in Cura: `off`
@@ -67,6 +67,11 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Infill density: `20%`
 - Infill pattern: `lines`
 - Print infill before walls: `off`
+- Flow: `103%`
+- Wall flow: `103%`
+- Outer wall flow: `102%`
+- Top / bottom flow: `102%`
+- Infill flow: `101%`
 - Top / bottom pattern: `lines`
 - Initial bottom pattern: `concentric`
 - Ironing: `on`

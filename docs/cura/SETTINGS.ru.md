@@ -50,7 +50,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 
 - Материал: PLA
 - Hotend первый слой: `225C`
-- Hotend дальше: `222C`
+- Hotend дальше: `224C`
 - Температура стола в G-code: `0C`
 - Реальный внешний warm mat / hotbed: вручную прогрет примерно до `40-50C`
 - Part-cooling в Cura: `off`
@@ -67,6 +67,11 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Infill density: `20%`
 - Infill pattern: `lines`
 - Print infill before walls: `off`
+- Flow: `103%`
+- Wall flow: `103%`
+- Outer wall flow: `102%`
+- Top / bottom flow: `102%`
+- Infill flow: `101%`
 - Top / bottom pattern: `lines`
 - Initial bottom pattern: `concentric`
 - Ironing / выглаживание: `on`

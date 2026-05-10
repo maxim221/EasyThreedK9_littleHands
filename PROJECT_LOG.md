@@ -66,6 +66,35 @@ Reasoning:
 - Do not use Cura fan tuning as a quality lever on this hardware revision; the single fan belongs to hotend safety.
 - Avoid raft and extreme `18 mm` brim for now because the last print is close to usable and large changes would hide the actual cause.
 
+## 2026-05-10 PLA Profile V3: Crack Moved Up To 15 Mm
+
+Field observation during the next `moduleBot` print:
+
+- The print is more stable overall.
+- The previous crack moved upward from roughly `10 mm` to roughly `15 mm`.
+- Runtime telemetry shows the hotend holding `222C` cleanly, so this is not a heater stability fault.
+- The active G-code already has:
+  - `brim_width = 12`
+  - `z_seam_position = backleft`
+  - part cooling disabled / slicer `M106/M107` removed
+
+Profile response for the next slice:
+
+- normal PLA temperature: `222C -> 224C`
+- first layer temperature: keep `225C`
+- add mild flow compensation:
+  - total flow `103%`
+  - wall flow `103%`
+  - outer wall flow `102%`
+  - top / bottom flow `102%`
+  - infill flow `101%`
+
+Reasoning:
+
+- Moving the crack upward is progress: first-layer adhesion and lower-wall bonding improved, but residual shrink stress is still finding a weak layer higher in the model.
+- The next safest lever is slightly hotter extrusion plus mild flow compensation, not fan tuning.
+- Do not change brim, supports, or geometry yet; keep the experiment narrow.
+
 ## Printer Notes
 
 - Printer model: Easythreed K9
