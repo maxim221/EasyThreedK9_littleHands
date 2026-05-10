@@ -53,8 +53,8 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Normal hotend: `222C`
 - Bed temperature in G-code: `0C`
 - Real external warm bed / warm mat: manually preheated to about `40-50C`
-- Cura cooling target: `45%`; the helper also caps regular `M106` commands to about `45%`
-- Fan full at height: `3 mm`
+- Part cooling in Cura: `off`
+- Important: the current K9 has one physical fan, used as the firmware-managed hotend fan. Little Hands / the helper strip slicer `M106/M107` commands so Cura cannot treat that fan as part cooling.
 - Minimum layer time: `10 s`
 
 ## Quality
@@ -142,7 +142,7 @@ If the slicer preview does not show supports under the problematic underside, do
 - Retraction speed: `25 mm/s`
 - Prime speed: `25 mm/s`
 - Bridge settings: `on`
-- Bridge fan speed: `70%`
+- Bridge fan speed: `0%`
 - Bridge skin speed: `10 mm/s`
 - Bridge wall speed: `10 mm/s`
 - Bridge skin flow: `90%`

@@ -8,6 +8,7 @@ This directory contains the current tracked Cura baseline for the validated Easy
 - Brim: `12 mm`
 - PLA temperature: `225C` first layer, `222C` after that
 - Bed temperature in G-code: `0C`, because the warm bed is external
+- Part cooling: `off`; the single K9 fan is the firmware-managed hotend fan, not an independent part-cooling fan
 - Ironing: highest top layer only, concentric, low flow
 - Motion smoothing: conservative acceleration limits for reduced diagonal ringing
 - Supports for `mainFlasherTop.STL`: everywhere, support interface / roof enabled, support angle `35`

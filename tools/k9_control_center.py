@@ -2894,6 +2894,8 @@ class K9ControlCenter:
                         pass
             if code.startswith("M109"):
                 info["has_blocking_m109"] = True
+            if code.startswith(("M106", "M107")):
+                info["has_slicer_fan_commands"] = True
         suspicious: list[str] = []
         if filament_m is not None and filament_m <= 0.0:
             suspicious.append("Cura записала 'Filament used: 0m'")
@@ -2956,10 +2958,11 @@ class K9ControlCenter:
             )
         return True, ""
 
-    def _replace_early_m109_with_m104(self, source: Path, target: Path) -> tuple[bool, float | None]:
+    def _prepare_k9_gcode_for_sd(self, source: Path, target: Path) -> tuple[bool, float | None, int]:
         lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
         patched = False
         hotend_target: float | None = None
+        removed_fan_commands = 0
         for index, line in enumerate(lines[:120]):
             stripped = line.strip()
             if stripped.startswith(";LAYER:") or stripped.startswith(";LAYER_COUNT:"):
@@ -2980,26 +2983,45 @@ class K9ControlCenter:
             )
             patched = True
             break
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            command = stripped.split(";", 1)[0].strip()
+            command_upper = command.upper()
+            if not command_upper.startswith(("M106", "M107")):
+                continue
+            prefix = line[: len(line) - len(line.lstrip())]
+            comment = ""
+            if ";" in line:
+                comment = " ;" + line.split(";", 1)[1]
+            lines[index] = (
+                f"{prefix}; LH: removed slicer fan command '{command_upper}' "
+                f"because K9 has one firmware-managed hotend fan{comment}"
+            )
+            removed_fan_commands += 1
+            patched = True
         if patched:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return patched, hotend_target
+        return patched, hotend_target, removed_fan_commands
 
     def _prepared_gcode_for_sd_upload(self, source: Path) -> tuple[Path, bool]:
         info = self._inspect_gcode_file(source)
-        if not info.get("has_blocking_m109"):
+        if not info.get("has_blocking_m109") and not info.get("has_slicer_fan_commands"):
             return source, False
         prepared_dir = GUI_EXPORT_DIR / "prepared"
-        prepared = prepared_dir / f"{source.stem}_lh_noM109{source.suffix or '.gcode'}"
-        patched, target = self._replace_early_m109_with_m104(source, prepared)
+        prepared = prepared_dir / f"{source.stem}_lh_k9safe{source.suffix or '.gcode'}"
+        patched, target, removed_fan_commands = self._prepare_k9_gcode_for_sd(source, prepared)
         if not patched:
             return source, False
         target_text = f"{target:.0f}C" if isinstance(target, (int, float)) else "рабочей температуры"
-        self._post(
-            "log",
-            "G-code подготовлен для K9: ранний блокирующий M109 заменён на M104; "
-            f"Little Hands прогреет hotend до {target_text} перед SD-стартом.",
-        )
+        changes: list[str] = []
+        if info.get("has_blocking_m109"):
+            changes.append(f"ранний блокирующий M109 заменён на M104; hotend будет прогрет до {target_text} перед SD-стартом")
+        if removed_fan_commands:
+            changes.append(f"удалены команды вентилятора M106/M107 ({removed_fan_commands}), потому что у K9 один firmware-managed hotend fan")
+        self._post("log", "G-code подготовлен для K9: " + "; ".join(changes) + ".")
         return prepared, True
 
     def pick_firmware(self) -> None:

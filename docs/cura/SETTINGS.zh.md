@@ -53,8 +53,8 @@ G1 Y95 F1800 ;Move bed toward the operator
 - 后续热端：`222C`
 - G-code 中的热床温度：`0C`
 - 实际外部 warm mat / hotbed：手动预热到约 `40-50C`
-- Cura 冷却目标：`45%`；helper 还会把普通 `M106` 限制到约 `45%`
-- Fan full at height：`3 mm`
+- Cura part cooling：`off`
+- 重要：当前 K9 只有一个物理风扇，它作为 firmware-managed hotend fan 使用。Little Hands / helper 会移除 slicer 的 `M106/M107`，避免 Cura 把这个风扇当作模型冷却风扇控制。
 - Minimum layer time：`10 s`
 
 ## 质量
@@ -142,7 +142,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Retraction speed：`25 mm/s`
 - Prime speed：`25 mm/s`
 - Bridge settings：`on`
-- Bridge fan speed：`70%`
+- Bridge fan speed：`0%`
 - Bridge skin speed：`10 mm/s`
 - Bridge wall speed：`10 mm/s`
 - Bridge skin flow：`90%`

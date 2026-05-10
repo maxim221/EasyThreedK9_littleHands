@@ -53,8 +53,8 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Hotend дальше: `222C`
 - Температура стола в G-code: `0C`
 - Реальный внешний warm mat / hotbed: вручную прогрет примерно до `40-50C`
-- Обдув в Cura: `45%`, helper дополнительно ограничивает обычные `M106` до примерно `45%`
-- Fan full at height: `3 mm`
+- Part-cooling в Cura: `off`
+- Важно: у текущего K9 один физический вентилятор, он используется как firmware-managed hotend fan. Little Hands / helper удаляют slicer-команды `M106/M107`, чтобы Cura не управляла этим вентилятором как обдувом детали.
 - Minimum layer time: `10 s`
 
 ## Качество
@@ -142,7 +142,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Retraction speed: `25 mm/s`
 - Prime speed: `25 mm/s`
 - Bridge settings: `on`
-- Bridge fan speed: `70%`
+- Bridge fan speed: `0%`
 - Bridge skin speed: `10 mm/s`
 - Bridge wall speed: `10 mm/s`
 - Bridge skin flow: `90%`

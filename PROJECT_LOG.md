@@ -54,9 +54,8 @@ Profile response, intentionally conservative:
 - `brim_width`: `10 mm -> 12 mm`
 - normal PLA temperature: `220C -> 222C`
 - first layer temperature: keep `225C`
-- regular fan: `55% -> 45%`
-- fan ramp: full fan only after `3 mm`
-- bridge fan: `100% -> 70%`
+- part-cooling removed from the quality-tuning plan
+- slicer `M106/M107` commands are stripped because the current K9 has one physical firmware-managed hotend fan, not an independent part-cooling fan
 - initial layer line width: `145% -> 150%`
 - Z seam: user-specified `backleft`, to avoid the visible front-right edge
 
@@ -64,6 +63,7 @@ Reasoning:
 
 - Corner lift points to residual bed adhesion / shrink stress, not a total first-layer failure.
 - The one-edge crack may be real delamination from shrink stress, or a visible seam/retraction scar on the front-right corner.
+- Do not use Cura fan tuning as a quality lever on this hardware revision; the single fan belongs to hotend safety.
 - Avoid raft and extreme `18 mm` brim for now because the last print is close to usable and large changes would hide the actual cause.
 
 ## Printer Notes
@@ -2159,8 +2159,8 @@ After each test print, append:
   - brim widened from `6 mm` to `10 mm`
   - PLA first layer raised from `218C` to `225C`
   - PLA normal print temperature raised from `214C` to `220C`
-  - Cura cooling target lowered from `100%` to `55%`
-  - helper post-processing now caps regular `M106` commands to about `55%` because direct CuraEngine still emitted `M106 S255`
+  - historical note: this first attempt lowered Cura fan targets, but that was later corrected because the K9 has no independent part-cooling fan
+  - current rule: slicer `M106/M107` commands are stripped; the single fan is reserved for firmware-managed hotend cooling
   - initial layer speed lowered from `7 mm/s` to `6 mm/s`
   - initial layer line width raised from `135%` to `145%`
 - Rationale:

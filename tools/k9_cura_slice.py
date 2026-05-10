@@ -206,14 +206,14 @@ G1 Y95 F1800 ;Move bed toward the operator"""
         "retraction_enable": "True",
         "retraction_prime_speed": "25",
         "retraction_retract_speed": "25",
-        "cool_fan_speed": "45",
-        "cool_fan_speed_min": "45",
-        "cool_fan_speed_max": "45",
+        "cool_fan_enabled": "False",
+        "cool_fan_speed": "0",
+        "cool_fan_speed_min": "0",
+        "cool_fan_speed_max": "0",
         "cool_fan_speed_0": "0",
-        "cool_fan_full_at_height": "3",
         "cool_min_layer_time": "10",
         "bridge_settings_enabled": "True",
-        "bridge_fan_speed": "70",
+        "bridge_fan_speed": "0",
         "bridge_skin_material_flow": "90",
         "bridge_skin_speed": "10",
         "bridge_wall_material_flow": "90",
@@ -385,23 +385,20 @@ def replace_early_m109_with_m104(lines: list[str]) -> bool:
     return False
 
 
-def cap_regular_fan_speed(lines: list[str], max_pwm: int = 115) -> int:
+def remove_slicer_fan_commands(lines: list[str]) -> int:
     replacements = 0
     for index, line in enumerate(lines):
         command = strip_gcode_comment(line).upper()
-        if not command.startswith("M106") or "S" not in command:
-            continue
-        match = re.search(r"\bS(\d+(?:\.\d+)?)\b", command)
-        if not match:
-            continue
-        value = float(match.group(1))
-        if value <= max_pwm:
+        if not command.startswith(("M106", "M107")):
             continue
         prefix = line[: len(line) - len(line.lstrip())]
         comment = ""
         if ";" in line:
             comment = " ;" + line.split(";", 1)[1]
-        lines[index] = f"{prefix}M106 S{max_pwm} ; LH: cap part cooling for layer adhesion{comment}"
+        lines[index] = (
+            f"{prefix}; LH: removed slicer fan command '{command}' "
+            f"because K9 has one firmware-managed hotend fan{comment}"
+        )
         replacements += 1
     return replacements
 
@@ -411,7 +408,7 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     filament_m = estimate_filament_m(lines)
     replace_early_m109_with_m104(lines)
-    cap_regular_fan_speed(lines)
+    remove_slicer_fan_commands(lines)
     for index, line in enumerate(lines[:25]):
         if line.startswith(";Filament used:") and filament_m > 0:
             lines[index] = f";Filament used: {filament_m:.3f}m"
@@ -437,8 +434,8 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
         'z_seam_type = back\\nz_seam_position = backleft\\n", '
         '"extruder_quality": ["[values]\\nmaterial_print_temperature = 222\\n'
         'material_print_temperature_layer_0 = 225\\nretraction_enable = True\\n'
-        'retraction_amount = 6.5\\ncool_fan_speed = 45\\n'
-        'cool_fan_full_at_height = 3\\nbridge_fan_speed = 70\\n"]}'
+        'retraction_amount = 6.5\\ncool_fan_enabled = False\\n'
+        'cool_fan_speed = 0\\nbridge_fan_speed = 0\\n"]}'
     )
     if not any(line.startswith(";SETTING_3") for line in lines[-80:]):
         lines.append(footer)
