@@ -121,6 +121,30 @@ Operator note:
 - If the crack turns into small scattered seam marks, the seam was the main culprit.
 - If the crack remains in exactly the same physical corner and height, the next fix should be in the model geometry: fillet / chamfer / local reinforcement at that stress riser.
 
+## 2026-05-11 Orientation Test: Upside Down With Supports
+
+Field observation during print:
+
+- The part appears to be printing upside down with supports.
+- No crack is visible during the active print so far.
+- Final inspection is pending after the print completes and the supports are removed.
+
+Why this matters:
+
+- This test changes more than one variable at once:
+  - model orientation
+  - support contact / load path
+  - effective stress direction during cooling
+  - likely visible seam location relative to the previous physical corner
+- Therefore, do not treat it as proof that only one Cura setting fixed the crack.
+
+What to inspect after completion:
+
+- Whether the old crack location is gone entirely or only moved.
+- Whether random seam creates small scattered surface marks instead of one vertical crack.
+- Whether supports damaged the visible face or left acceptable cleanup marks.
+- Whether bottom warp / lifted corners improved or got worse in the new orientation.
+
 ## Printer Notes
 
 - Printer model: Easythreed K9
