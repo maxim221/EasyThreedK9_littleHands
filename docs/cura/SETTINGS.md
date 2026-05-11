@@ -128,16 +128,18 @@ For `mainFlasherTop.STL` and similar overhang-heavy parts:
 - Support overhang angle: `35 deg`
 - Support structure: `normal`
 - Support pattern: `zigzag`
-- Support density: `12%`
+- Support density: `10%`
 - Support interface: `on`
 - Support roof: `on`
-- Support interface density: `85%`
-- Support roof density: `85%`
-- Support interface height: `0.8 mm`
-- Support roof height: `0.8 mm`
+- Support interface density: `65%`
+- Support roof density: `65%`
+- Support interface height: `0.48 mm`
+- Support roof height: `0.48 mm`
 - Support Z distance: `0.16 mm`
 - Support top distance: `0.16 mm`
-- Support XY distance: `0.2 mm`
+- Support XY distance: `0.3 mm`
+
+If supports grip too hard, try these `easy-release` values first. Keep Z distance at `0.16 mm` for now to protect underside quality. If removal is still difficult, make the next separate test Support Z distance / top distance `0.24-0.32 mm`.
 
 If the slicer preview does not show supports under the problematic underside, do not print yet. Change support placement / threshold until the preview actually shows support where needed.
 

@@ -128,16 +128,18 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Support overhang angle: `35 deg`
 - Support structure: `normal`
 - Support pattern: `zigzag`
-- Support density: `12%`
+- Support density: `10%`
 - Support interface: `on`
 - Support roof: `on`
-- Support interface density: `85%`
-- Support roof density: `85%`
-- Support interface height: `0.8 mm`
-- Support roof height: `0.8 mm`
+- Support interface density: `65%`
+- Support roof density: `65%`
+- Support interface height: `0.48 mm`
+- Support roof height: `0.48 mm`
 - Support Z distance: `0.16 mm`
 - Support top distance: `0.16 mm`
-- Support XY distance: `0.2 mm`
+- Support XY distance: `0.3 mm`
+
+Если поддержки держатся слишком крепко, сначала используй эти `easy-release` значения. Z-distance пока оставляем `0.16 mm`, чтобы не испортить нижнюю поверхность. Если снять поддержки всё ещё трудно, следующим отдельным тестом поднимай Support Z distance / top distance до `0.24-0.32 mm`.
 
 Если preview не показывает поддержки под проблемной нижней поверхностью, не печатай. Меняй placement / threshold, пока support реально не появится в preview.
 

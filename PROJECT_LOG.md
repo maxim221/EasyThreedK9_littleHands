@@ -127,7 +127,10 @@ Field observation during print:
 
 - The part appears to be printing upside down with supports.
 - No crack is visible during the active print so far.
-- Final inspection is pending after the print completes and the supports are removed.
+- Final inspection after print:
+  - part quality is good
+  - walls have no cracks
+  - supports are difficult to remove cleanly
 
 Why this matters:
 
@@ -144,6 +147,29 @@ What to inspect after completion:
 - Whether random seam creates small scattered surface marks instead of one vertical crack.
 - Whether supports damaged the visible face or left acceptable cleanup marks.
 - Whether bottom warp / lifted corners improved or got worse in the new orientation.
+
+## 2026-05-11 PLA Profile V5: Easy-Release Supports
+
+Field result from the upside-down support print:
+
+- Crack problem is solved in this orientation / support workflow.
+- Main remaining issue is support cleanup difficulty.
+- Keep the successful orientation, `5` walls, random seam, `224C`, and mild flow compensation.
+
+Profile response for the next slice:
+
+- support infill: `12% -> 10%`
+- support interface density: `85% -> 65%`
+- support roof density: `85% -> 65%`
+- support interface height: `0.8 mm -> 0.48 mm`
+- support roof height: `0.8 mm -> 0.48 mm`
+- support XY distance: `0.2 mm -> 0.3 mm`
+- keep support Z distance / top distance at `0.16 mm` for now
+
+Reasoning:
+
+- Reducing dense interface / roof contact should make support removal easier while preserving underside quality better than immediately doubling the Z gap.
+- If supports are still too hard to remove, the next separate test should increase support Z distance / top distance to `0.24-0.32 mm`, accepting a rougher supported underside.
 
 ## Printer Notes
 

@@ -171,19 +171,19 @@ G1 Y95 F1800 ;Move bed toward the operator"""
         "speed_wall": "12",
         "support_angle": "35",
         "support_enable": "True",
-        "support_infill_rate": "12",
-        "support_interface_density": "85",
+        "support_infill_rate": "10",
+        "support_interface_density": "65",
         "support_interface_enable": "True",
-        "support_interface_height": "0.8",
+        "support_interface_height": "0.48",
         "support_interface_pattern": "lines",
         "support_pattern": "zigzag",
-        "support_roof_density": "85",
+        "support_roof_density": "65",
         "support_roof_enable": "True",
-        "support_roof_height": "0.8",
+        "support_roof_height": "0.48",
         "support_structure": "normal",
         "support_top_distance": "0.16",
         "support_type": "everywhere",
-        "support_xy_distance": "0.2",
+        "support_xy_distance": "0.3",
         "support_z_distance": "0.16",
         "top_bottom_pattern": "lines",
         "top_bottom_pattern_0": "concentric",
@@ -435,7 +435,10 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
         'layer_height = 0.16\\nlayer_height_0 = 0.2\\nspeed_layer_0 = 6\\n'
         'wall_line_count = 5\\n'
         'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = 35\\n'
-        'support_infill_rate = 12\\nsupport_interface_enable = True\\nsupport_roof_enable = True\\n'
+        'support_infill_rate = 10\\nsupport_xy_distance = 0.3\\n'
+        'support_interface_enable = True\\nsupport_interface_density = 65\\n'
+        'support_interface_height = 0.48\\nsupport_roof_enable = True\\n'
+        'support_roof_density = 65\\nsupport_roof_height = 0.48\\n'
         'z_seam_type = random\\n", '
         '"extruder_quality": ["[values]\\nmaterial_print_temperature = 224\\n'
         'material_print_temperature_layer_0 = 225\\nretraction_enable = True\\n'
