@@ -171,6 +171,34 @@ Reasoning:
 - Reducing dense interface / roof contact should make support removal easier while preserving underside quality better than immediately doubling the Z gap.
 - If supports are still too hard to remove, the next separate test should increase support Z distance / top distance to `0.24-0.32 mm`, accepting a rougher supported underside.
 
+## 2026-05-11 First-Layer Failure After Bed Calibration
+
+Field observation:
+
+- A later print detached from the bed at all four corners from the beginning.
+- The operator had calibrated the bed before this attempt.
+- The active profile still keeps the first-layer adhesion settings unchanged:
+  - `brim_width = 12`
+  - first-layer hotend `225C`
+  - first-layer speed `6 mm/s`
+  - initial layer line width `150%`
+
+Interpretation:
+
+- Because all four corners lifted immediately, this is more likely a first-layer / bed-state issue than a support-removal profile issue.
+- Most likely causes:
+  - nozzle too high after bed calibration / saved start
+  - external warm bed not soaked long enough
+  - surface contamination after handling / support cleanup
+  - first layer visually round rather than flattened/squished
+
+Next action:
+
+- Do not change Cura support settings yet.
+- Re-check start pose and first-layer squish on the warm bed.
+- Clean the perforated mat before retrying.
+- During the next start, inspect brim lines: they should be continuous and slightly flattened, not round strings sitting on top of the surface.
+
 ## Printer Notes
 
 - Printer model: Easythreed K9
