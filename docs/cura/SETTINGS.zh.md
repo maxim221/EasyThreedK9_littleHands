@@ -61,7 +61,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 
 - Layer height：`0.16 mm`
 - Initial layer height：`0.20 mm`
-- Wall line count：`4`
+- Wall line count：`5`
 - Top layers：`6`
 - Bottom layers：`6`
 - Infill density：`20%`
@@ -79,8 +79,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Ironing pattern：`concentric`
 - Ironing line spacing：`0.12 mm`
 - Ironing flow：`7%`
-- Z seam alignment：`User Specified`
-- Z seam position：`Back Left`
+- Z seam alignment：`Random`
 
 ## 速度
 
@@ -117,6 +116,8 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Brim width：`12 mm`
 
 如果四角仍然翘起，请先检查平台清洁、外部热床预热和首层压实；然后可以临时尝试 `14 mm` brim。`18 mm` 作为救急设置保留，因为它会明显增加占地和打印时间。
+
+对于同一个物理角上反复出现的裂纹，请在打印机旁边放置实体挡风墙。默认不要启用 Cura Draft Shield：实体挡风墙更简单，也不会在 G-code 中增加额外打印塑料。
 
 ## 支撑
 

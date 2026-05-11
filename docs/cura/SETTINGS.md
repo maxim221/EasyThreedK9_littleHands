@@ -61,7 +61,7 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 
 - Layer height: `0.16 mm`
 - First layer height: `0.20 mm`
-- Wall line count: `4`
+- Wall line count: `5`
 - Top layers: `6`
 - Bottom layers: `6`
 - Infill density: `20%`
@@ -79,8 +79,7 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Ironing pattern: `concentric`
 - Ironing line spacing: `0.12 mm`
 - Ironing flow: `7%`
-- Z seam alignment: `User Specified`
-- Z seam position: `Back Left`
+- Z seam alignment: `Random`
 
 ## Speed
 
@@ -117,6 +116,8 @@ These limits are intentionally gentle for the small K9 mechanics and help reduce
 - Brim width: `12 mm`
 
 If corners still lift, first check bed cleanliness, external bed warm-up, and first-layer squish; then temporarily try `14 mm` brim. Keep `18 mm` as a rescue setting because it adds significant footprint and time.
+
+For the repeatable crack in one physical corner, use a physical draft wall / wind shield near the printer. Do not enable Cura Draft Shield by default: a real wall is simpler and does not add extra printed plastic to the G-code.
 
 ## Supports
 

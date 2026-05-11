@@ -95,6 +95,32 @@ Reasoning:
 - The next safest lever is slightly hotter extrusion plus mild flow compensation, not fan tuning.
 - Do not change brim, supports, or geometry yet; keep the experiment narrow.
 
+## 2026-05-11 PLA Profile V4: Random Seam And Stronger Walls
+
+Field observation:
+
+- After the hotter / mild-flow `v3` profile, the crack remained in the same physical corner and at the same height.
+- That makes a pure temperature / extrusion fix unlikely.
+- G-code around `Z ~= 15 mm` repeatedly transitions through the same corner area, so the current failure looks like concentrated Z-seam / corner stress rather than missing support.
+
+Profile response for the next slice:
+
+- `wall_line_count`: `4 -> 5`
+- `z_seam_type`: `back -> random`
+- keep:
+  - normal PLA temperature `224C`
+  - first layer `225C`
+  - `brim_width = 12`
+  - part cooling off / slicer fan commands stripped
+  - mild flow compensation from `v3`
+- do not enable Cura Draft Shield by default
+
+Operator note:
+
+- Use a physical draft wall / wind shield around the printer instead of Cura Draft Shield.
+- If the crack turns into small scattered seam marks, the seam was the main culprit.
+- If the crack remains in exactly the same physical corner and height, the next fix should be in the model geometry: fillet / chamfer / local reinforcement at that stress riser.
+
 ## Printer Notes
 
 - Printer model: Easythreed K9

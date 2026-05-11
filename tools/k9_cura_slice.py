@@ -188,14 +188,12 @@ G1 Y95 F1800 ;Move bed toward the operator"""
         "top_bottom_pattern": "lines",
         "top_bottom_pattern_0": "concentric",
         "top_layers": "6",
-        "wall_line_count": "4",
+        "wall_line_count": "5",
         # Cura GUI normally resolves these defaults; direct CuraEngine needs them.
         "roofing_layer_count": "0",
         "flooring_layer_count": "0",
         "support_z_seam_away_from_model": "False",
-        "z_seam_type": "back",
-        "z_seam_position": "backleft",
-        "z_seam_corner": "z_seam_corner_inner",
+        "z_seam_type": "random",
     }
     extruder_settings = {
         "material_diameter": "1.75",
@@ -435,9 +433,10 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
         ';SETTING_3 {"global_quality": "[values]\\n'
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
         'layer_height = 0.16\\nlayer_height_0 = 0.2\\nspeed_layer_0 = 6\\n'
+        'wall_line_count = 5\\n'
         'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = 35\\n'
         'support_infill_rate = 12\\nsupport_interface_enable = True\\nsupport_roof_enable = True\\n'
-        'z_seam_type = back\\nz_seam_position = backleft\\n", '
+        'z_seam_type = random\\n", '
         '"extruder_quality": ["[values]\\nmaterial_print_temperature = 224\\n'
         'material_print_temperature_layer_0 = 225\\nretraction_enable = True\\n'
         'retraction_amount = 6.5\\nmaterial_flow = 103\\nwall_material_flow = 103\\n'

@@ -9,6 +9,8 @@ This directory contains the current tracked Cura baseline for the validated Easy
 - PLA temperature: `225C` first layer, `224C` after that
 - Bed temperature in G-code: `0C`, because the warm bed is external
 - Part cooling: `off`; the single K9 fan is the firmware-managed hotend fan, not an independent part-cooling fan
+- Walls: `5`, with randomized Z seam to avoid concentrating the seam in one corner
+- Draft protection: use a physical wind shield around the printer rather than Cura Draft Shield
 - Ironing: highest top layer only, concentric, low flow
 - Motion smoothing: conservative acceleration limits for reduced diagonal ringing
 - Supports for `mainFlasherTop.STL`: everywhere, support interface / roof enabled, support angle `35`

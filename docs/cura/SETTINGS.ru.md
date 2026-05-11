@@ -61,7 +61,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 
 - Layer height: `0.16 mm`
 - Initial layer height: `0.20 mm`
-- Wall line count: `4`
+- Wall line count: `5`
 - Top layers: `6`
 - Bottom layers: `6`
 - Infill density: `20%`
@@ -79,8 +79,7 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Ironing pattern: `concentric`
 - Ironing line spacing: `0.12 mm`
 - Ironing flow: `7%`
-- Z seam alignment: `User Specified`
-- Z seam position: `Back Left`
+- Z seam alignment: `Random`
 
 ## Скорости
 
@@ -117,6 +116,8 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Brim width: `12 mm`
 
 Если снова отрывает углы, сначала проверь чистоту/прогрев стола и первый слой, затем можно временно поднять brim до `14 mm`. `18 mm` оставляем как аварийный вариант, потому что он заметно увеличивает площадь и время печати.
+
+Для повторяемой трещины в одном углу используй физическую защитную стенку от сквозняка рядом с принтером. Не включай Cura Draft Shield по умолчанию: физическая стенка проще и не добавляет пластик в G-code.
 
 ## Поддержки
 
