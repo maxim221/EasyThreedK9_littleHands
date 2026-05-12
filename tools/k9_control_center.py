@@ -367,6 +367,8 @@ class K9ControlCenter:
         self.print_start_watchdog_alerted = False
         self.post_print_recovery_required = False
         self.bed_clear_before_go_start_required = False
+        self.stopped_print_pose: tuple[float, float, float] | None = None
+        self.stopped_print_display = "-"
         self.predicted_print_end_valid = False
         self.predicted_print_end_file = "-"
         self.predicted_print_end_display = "-"
@@ -2465,6 +2467,8 @@ class K9ControlCenter:
         self.first_sd_progress_ts = None
         self.last_sd_progress_ts = None
         self.bed_clear_before_go_start_required = True
+        self.stopped_print_pose = None
+        self.stopped_print_display = "-"
         self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
         self._save_print_state("printing", force=True)
         self._post("active-sd", f"Печатается: {display}")
@@ -3627,6 +3631,9 @@ class K9ControlCenter:
     def upload_and_start_gcode(self) -> None:
         if not self._guard_post_print_recovery():
             return
+        if not self.session_zero_defined:
+            self._show_missing_start_zero()
+            return
         source = Path(self.local_gcode_var.get().strip()).expanduser().resolve()
         if not source.is_file():
             messagebox.showerror("Little Hands", "Выбери существующий G-code файл.")
@@ -3667,12 +3674,16 @@ class K9ControlCenter:
             self._preheat_hotend_for_sd_start(target)
             self._prime_print_end_contract(dest, source.name, upload_source)
             try:
-                out = sdtool.start_sd_print_from_pseudo_home(self._port(), self._baud(), dest)
+                if self.at_saved_start_pose:
+                    out = sdtool.start_sd_print(self._port(), self._baud(), dest)
+                else:
+                    out = sdtool.start_sd_print_from_home(self._port(), self._baud(), dest)
+                    self.at_saved_start_pose = True
             except Exception:
                 self._clear_predicted_print_end()
                 raise
             self._mark_sd_start_sent(dest, source.name)
-            self._post("log", out.strip() or f"Печать запущена от K9 pseudo-home: {source.name}")
+            self._post("log", out.strip() or f"Печать запущена от сохранённого старта: {source.name}")
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
             self.print_was_active = False
@@ -3920,8 +3931,10 @@ class K9ControlCenter:
             self.suppress_next_completion_chime = True
             out = ""
             error_text = None
+            stop_pose: tuple[float, float, float] | None = None
+            stopped_display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
             try:
-                out = sdtool.stop_sd_print(self._port(), self._baud())
+                out, stop_pose = sdtool.stop_sd_print_with_position(self._port(), self._baud())
             except Exception as exc:
                 error_text = str(exc)
             finally:
@@ -3929,6 +3942,8 @@ class K9ControlCenter:
                 self.bed_clear_before_go_start_required = True
                 self.session_zero_defined = False
                 self.at_saved_start_pose = False
+                self.stopped_print_pose = stop_pose
+                self.stopped_print_display = stopped_display or "-"
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
@@ -3938,9 +3953,19 @@ class K9ControlCenter:
             self._post(
                 "log",
                 "После остановки печати сохранённый старт сброшен: эта K9 может сообщать X0/Y0 после Stop, "
-                "даже если физически сопло осталось не в стартовой X/Y-позе. Сними пластик со стола, "
-                "выставь старт ручными кнопками и нажми 'Запомнить старт'.",
+                "даже если физически сопло осталось не в стартовой X/Y-позе. После удаления пластика со стола "
+                "можно нажать 'К старту': Little Hands попробует вернуться по позиции, снятой перед M524.",
             )
+            if stop_pose is not None:
+                self._post(
+                    "log",
+                    f"Позиция остановки сохранена до M524: X{stop_pose[0]:.2f} Y{stop_pose[1]:.2f} Z{stop_pose[2]:.2f}.",
+                )
+            else:
+                self._post(
+                    "log",
+                    "Позицию остановки до M524 получить не удалось. Автоматический возврат к старту после этого стопа недоступен.",
+                )
 
         self._run_task("Остановка печати", task)
 
@@ -3972,6 +3997,8 @@ class K9ControlCenter:
                 self.bed_clear_before_go_start_required = True
                 self.session_zero_defined = False
                 self.at_saved_start_pose = False
+                self.stopped_print_pose = None
+                self.stopped_print_display = "-"
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
@@ -4014,6 +4041,8 @@ class K9ControlCenter:
             self.session_zero_defined = True
             self.at_saved_start_pose = True
             self.bed_clear_before_go_start_required = False
+            self.stopped_print_pose = None
+            self.stopped_print_display = "-"
             self.post_print_pose_known = False
             had_active_print = self.current_print_file != "-"
             self._clear_predicted_print_end(save=False)
@@ -4187,6 +4216,47 @@ class K9ControlCenter:
         )
         return bool(messagebox.askyesno("Little Hands", prompt))
 
+    def _confirm_aborted_print_recovery(self, pose: tuple[float, float, float]) -> bool:
+        lang = self.lang_var.get().strip() or "ru"
+        pose_text = f"X{pose[0]:.2f} Y{pose[1]:.2f} Z{pose[2]:.2f}"
+        file_text = self.stopped_print_display if self.stopped_print_display != "-" else "stopped print"
+        prompt = {
+            "en": (
+                "Return to start after a stopped / failed print?\n\n"
+                f"Little Hands saved the interrupted position before M524:\n{file_text}\n{pose_text}\n\n"
+                "It will not use any endstop-based homing. It will:\n"
+                "1. lift the nozzle\n"
+                "2. temporarily restore that interrupted coordinate model with G92\n"
+                "3. move back to X0 Y0 Z0\n"
+                "4. save the start pose again\n\n"
+                "Continue only if the bed is clear: remove the model, brim, strings, and failed first layer."
+            ),
+            "zh": (
+                "停止/失败打印后回到起点吗？\n\n"
+                f"Little Hands 在 M524 前保存了中断位置：\n{file_text}\n{pose_text}\n\n"
+                "它不会使用任何基于限位开关的 homing。它会：\n"
+                "1. 抬起喷嘴\n"
+                "2. 用 G92 临时恢复中断时的坐标模型\n"
+                "3. 回到 X0 Y0 Z0\n"
+                "4. 再次保存起点\n\n"
+                "只有平台清空后才继续：请移除模型、brim、拉丝和失败的第一层。"
+            ),
+            "ru": (
+                "Вернуть к старту после остановленной / сорванной печати?\n\n"
+                f"Little Hands сохранил позицию прерывания до M524:\n{file_text}\n{pose_text}\n\n"
+                "Он не будет использовать home по концевикам. Recovery будет таким:\n"
+                "1. поднимет сопло\n"
+                "2. временно восстановит координаты прерывания через G92\n"
+                "3. вернётся в X0 Y0 Z0\n"
+                "4. заново сохранит стартовую позу\n\n"
+                "Продолжай только если стол свободен: убери модель, brim, нитки и неудавшийся первый слой."
+            ),
+        }.get(lang) or (
+            "Вернуть к старту после остановленной печати?\n\n"
+            "Продолжай только если стол свободен: убери модель, brim, нитки и неудавшийся первый слой."
+        )
+        return bool(messagebox.askyesno("Little Hands", prompt))
+
     def go_print_home(self, *, confirm_model_removed: bool = False) -> None:
         if self.current_print_file != "-" and not confirm_model_removed:
             msg = (
@@ -4196,12 +4266,27 @@ class K9ControlCenter:
             self.log(msg)
             messagebox.showwarning("Little Hands", msg)
             return
-        if (self.post_print_recovery_required or self.bed_clear_before_go_start_required) and not confirm_model_removed:
+        use_stopped_print_pose = False
+        stopped_pose = self.stopped_print_pose
+        if not self.session_zero_defined and self.bed_clear_before_go_start_required and stopped_pose is not None:
+            if not self._confirm_aborted_print_recovery(stopped_pose):
+                return
+            use_stopped_print_pose = True
+        if (
+            not use_stopped_print_pose
+            and (self.post_print_recovery_required or self.bed_clear_before_go_start_required)
+            and not confirm_model_removed
+        ):
             if not self._confirm_model_removed_before_go_start():
                 return
         use_post_print_pose = False
         use_predicted_print_end_pose = False
-        if not self.session_zero_defined and self._can_return_from_known_post_print_pose():
+        if use_stopped_print_pose:
+            self.log(
+                "Выполняю recovery к старту после остановленной печати: использую позицию, "
+                "снятую до M524, затем возвращаюсь в X0 Y0 Z0."
+            )
+        elif not self.session_zero_defined and self._can_return_from_known_post_print_pose():
             use_post_print_pose = True
             self.log(
                 "Использую известную послепечатную позу: Little Hands видел завершение печати. "
@@ -4225,12 +4310,30 @@ class K9ControlCenter:
                 self._clear_print_session_state("Печать: неполный print-end удалён", 0.0)
                 self.log("Неполный print-end удалён. Выставь стартовую позу вручную и нажми 'Запомнить старт'.")
             return
+        elif not self.session_zero_defined and self.bed_clear_before_go_start_required:
+            msg = (
+                "После остановки печати нет надёжно сохранённой позиции прерывания. "
+                "Автоматический 'К старту' сейчас небезопасен: убери пластик со стола, "
+                "выставь стартовую позу ручными кнопками и нажми 'Запомнить старт'."
+            )
+            self.log(msg)
+            messagebox.showerror("Little Hands", msg)
+            return
         elif not self.session_zero_defined:
             self._show_missing_start_zero()
             return
 
         def task() -> None:
-            if use_predicted_print_end_pose:
+            if use_stopped_print_pose:
+                assert stopped_pose is not None
+                out = sdtool.goto_print_home_from_predicted_end(
+                    self._port(),
+                    self._baud(),
+                    end_x=stopped_pose[0],
+                    end_y=stopped_pose[1],
+                    end_z=stopped_pose[2],
+                )
+            elif use_predicted_print_end_pose:
                 assert self.predicted_print_end_z is not None
                 out = sdtool.goto_print_home_from_predicted_end(
                     self._port(),
@@ -4241,12 +4344,20 @@ class K9ControlCenter:
                 )
             else:
                 out = sdtool.goto_print_home(self._port(), self._baud())
-            if use_post_print_pose or use_predicted_print_end_pose:
+            if use_stopped_print_pose or use_post_print_pose or use_predicted_print_end_pose:
                 self.session_zero_defined = True
             self.at_saved_start_pose = True
             self.bed_clear_before_go_start_required = False
+            self.stopped_print_pose = None
+            self.stopped_print_display = "-"
             self.post_print_pose_known = False
-            if use_post_print_pose:
+            if use_stopped_print_pose:
+                self._clear_predicted_print_end(save=False)
+                self._save_print_state("recovered-to-start", force=True)
+                self._post("progress", ("Recovery после стопа: старт восстановлен", 0.0))
+                self._post("log", out.strip() or "Recovery после остановленной печати выполнен: стартовая поза заново сохранена")
+                self._post("log", "Теперь можно запускать следующую печать из сохранённого старта.")
+            elif use_post_print_pose:
                 self._post("log", out.strip() or "Принтер возвращён к стартовой позе из известной послепечатной позы")
             elif use_predicted_print_end_pose:
                 self.current_print_file = "-"
@@ -4297,6 +4408,8 @@ class K9ControlCenter:
         def task() -> None:
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
+            self.stopped_print_pose = None
+            self.stopped_print_display = "-"
             self._clear_predicted_print_end()
             self._post(
                 "log",

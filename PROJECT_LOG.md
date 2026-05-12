@@ -2364,11 +2364,16 @@ After each test print, append:
   - the start pose had been saved correctly
   - after `Stop`, pressing `Go to start` returned to the saved `Z0`
   - in this workflow `Z0` means the nozzle touches the bed, so the motion was expected mechanically but unsafe without a clear-bed confirmation
+  - K9 has no real mechanical endstops; do not solve stopped-print recovery by driving axes blindly into hard limits
 - App fix:
   - while an SD start / print is active, `Go to start` is blocked; the operator must stop the print first
   - after any SD print start, `Stop`, or `Hard stop`, Little Hands requires the operator to confirm that the bed is clear before any recovery path can lower the nozzle back to `Z0`
   - `Stop` now invalidates the trusted saved start pose because this K9 can report `X0/Y0` after `M524` even when the nozzle is physically not back at the start X/Y pose
+  - before `M524`, `Stop` now tries to pause SD printing and capture `M114`; if that interrupted pose is available, `Go to start` restores that coordinate model with `G92`, lifts Z, moves to `X0/Y0`, lowers to `Z0`, and saves start again
+  - if the interrupted pose was not captured, `Go to start` refuses automatic recovery and asks the operator to re-establish start manually
   - `Hard stop` also invalidates the trusted saved start pose because it sends `M18` and releases the steppers
+  - `Upload & start` no longer uses pseudo-home; it requires a trusted saved start pose and starts from that pose
 - Operator rule:
   - `Go to start` is a real return to print zero, not just a high safe travel point
-  - after a stopped / aborted print, remove the failed first layer, manually re-establish the fixed start pose, and press `Save start`
+  - after a stopped / aborted print, remove the failed first layer before pressing `Go to start`
+  - if Little Hands says the stop pose was not captured, manually re-establish the fixed start pose and press `Save start`

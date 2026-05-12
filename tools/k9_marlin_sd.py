@@ -45,6 +45,7 @@ RESTORE_TRAVEL_ACCEL = 1000
 SAFE_BED_FEEDRATE = 600
 SAFE_VERTICAL_FEEDRATE = 600
 SAFE_X_FEEDRATE = 1800
+POSITION_RE = re.compile(r"X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)")
 
 
 def soft_service_travel_commands(commands: list[str]) -> list[str]:
@@ -219,6 +220,16 @@ def read_for(ser: serial.Serial, seconds: float) -> str:
 def is_transient_serial_error(exc: BaseException | str) -> bool:
     text = str(exc).lower()
     return any(marker in text for marker in TRANSIENT_SERIAL_ERROR_MARKERS)
+
+
+def parse_position(text: str) -> tuple[float, float, float] | None:
+    match = POSITION_RE.search(text)
+    if not match:
+        return None
+    try:
+        return (float(match.group(1)), float(match.group(2)), float(match.group(3)))
+    except ValueError:
+        return None
 
 
 def sync_ascii(ser: serial.Serial) -> None:
@@ -712,6 +723,27 @@ def stop_sd_print(port: str, baud: int) -> str:
         final_wait=1.2,
         read_seconds=2.5,
     )
+
+
+def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float, float, float] | None]:
+    with open_serial(port, baud) as ser:
+        sync_ascii(ser)
+        # Pause first so M114 has a chance to report the interrupted SD-print pose
+        # before M524 tears down the SD job state.
+        for command, delay in (
+            ("M25", 0.6),
+            ("M400", 0.4),
+            ("M114", 0.4),
+        ):
+            send_line(ser, command)
+            time.sleep(delay)
+        pose_out = read_for(ser, 1.8)
+        pose = parse_position(pose_out)
+        for command in ("M108", "M524", "M104 S0", "M140 S0", "M107", "M400"):
+            send_line(ser, command)
+            time.sleep(0.4)
+        stop_out = read_for(ser, 2.5)
+    return pose_out + stop_out, pose
 
 
 def resume_sd_print(port: str, baud: int) -> str:
