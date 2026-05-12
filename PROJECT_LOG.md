@@ -2356,3 +2356,19 @@ After each test print, append:
   - early blocking `M109`, which is rewritten to `M104` during upload
   - slicer `M106/M107`, which is stripped because the single fan is firmware-managed hotend cooling
   - high Cura acceleration reset in the final tail when the validated end-gcode softens presentation moves afterward
+
+## 2026-05-12 Stop / Go-To-Start Safety
+
+- Field correction:
+  - no power cycle was involved in the failed restart scenario
+  - the start pose had been saved correctly
+  - after `Stop`, pressing `Go to start` returned to the saved `Z0`
+  - in this workflow `Z0` means the nozzle touches the bed, so the motion was expected mechanically but unsafe without a clear-bed confirmation
+- App fix:
+  - while an SD start / print is active, `Go to start` is blocked; the operator must stop the print first
+  - after any SD print start, `Stop`, or `Hard stop`, Little Hands requires the operator to confirm that the bed is clear before any recovery path can lower the nozzle back to `Z0`
+  - `Stop` now invalidates the trusted saved start pose because this K9 can report `X0/Y0` after `M524` even when the nozzle is physically not back at the start X/Y pose
+  - `Hard stop` also invalidates the trusted saved start pose because it sends `M18` and releases the steppers
+- Operator rule:
+  - `Go to start` is a real return to print zero, not just a high safe travel point
+  - after a stopped / aborted print, remove the failed first layer, manually re-establish the fixed start pose, and press `Save start`

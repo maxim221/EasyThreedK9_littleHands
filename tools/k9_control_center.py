@@ -366,6 +366,7 @@ class K9ControlCenter:
         self.print_state_restored_from_log = False
         self.print_start_watchdog_alerted = False
         self.post_print_recovery_required = False
+        self.bed_clear_before_go_start_required = False
         self.predicted_print_end_valid = False
         self.predicted_print_end_file = "-"
         self.predicted_print_end_display = "-"
@@ -2463,6 +2464,7 @@ class K9ControlCenter:
         self.sd_progress_sample_count = 0
         self.first_sd_progress_ts = None
         self.last_sd_progress_ts = None
+        self.bed_clear_before_go_start_required = True
         self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
         self._save_print_state("printing", force=True)
         self._post("active-sd", f"Печатается: {display}")
@@ -3924,12 +3926,21 @@ class K9ControlCenter:
                 error_text = str(exc)
             finally:
                 self._clear_print_session_state("Печать: остановлена", 0.0)
+                self.bed_clear_before_go_start_required = True
+                self.session_zero_defined = False
+                self.at_saved_start_pose = False
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
                 self._post("log", f"Стоп отправлен локально, но принтер ответил неуверенно: {error_text}")
             else:
                 self._post("log", "Стоп отправлен")
+            self._post(
+                "log",
+                "После остановки печати сохранённый старт сброшен: эта K9 может сообщать X0/Y0 после Stop, "
+                "даже если физически сопло осталось не в стартовой X/Y-позе. Сними пластик со стола, "
+                "выставь старт ручными кнопками и нажми 'Запомнить старт'.",
+            )
 
         self._run_task("Остановка печати", task)
 
@@ -3958,6 +3969,9 @@ class K9ControlCenter:
                 error_text = str(exc)
             finally:
                 self._clear_print_session_state("Печать: жёсткий стоп", 0.0)
+                self.bed_clear_before_go_start_required = True
+                self.session_zero_defined = False
+                self.at_saved_start_pose = False
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
@@ -3999,6 +4013,7 @@ class K9ControlCenter:
             out = sdtool.set_current_home_zero(self._port(), self._baud())
             self.session_zero_defined = True
             self.at_saved_start_pose = True
+            self.bed_clear_before_go_start_required = False
             self.post_print_pose_known = False
             had_active_print = self.current_print_file != "-"
             self._clear_predicted_print_end(save=False)
@@ -4152,24 +4167,36 @@ class K9ControlCenter:
         prompt = {
             "en": (
                 "Is the bed clear now?\n\n"
-                "Little Hands can return to start only after the printed part, if any, has been removed."
+                "'Go to start' returns to Z0, which means the nozzle touches the bed. "
+                "Use it only after the printed part or failed first layer has been removed."
             ),
             "zh": (
                 "平台现在已经清空了吗？\n\n"
-                "只有取下可能存在的模型后，Little Hands 才能回到起点。"
+                "'Go to start' 会回到 Z0，也就是喷嘴接触平台。"
+                "只有取下模型或失败的第一层后才使用。"
             ),
             "ru": (
                 "Стол сейчас свободен?\n\n"
-                "Little Hands может возвращать принтер к старту только после удаления детали, если она есть на столе."
+                "'К старту' возвращает в Z0, то есть сопло опустится до касания стола. "
+                "Нажимай это только после удаления детали или неудавшегося первого слоя."
             ),
         }.get(lang) or (
             "Стол сейчас свободен?\n\n"
-            "Little Hands может возвращать принтер к старту только после удаления детали, если она есть на столе."
+            "'К старту' возвращает в Z0, то есть сопло опустится до касания стола. "
+            "Нажимай это только после удаления детали или неудавшегося первого слоя."
         )
         return bool(messagebox.askyesno("Little Hands", prompt))
 
     def go_print_home(self, *, confirm_model_removed: bool = False) -> None:
-        if self.post_print_recovery_required and not confirm_model_removed:
+        if self.current_print_file != "-" and not confirm_model_removed:
+            msg = (
+                "Сейчас у приложения есть активный SD-старт/печать. 'К старту' не выполняется во время активной печати: "
+                "сначала нажми 'Стоп', дождись остановки, убери пластик со стола и заново выставь стартовую позу."
+            )
+            self.log(msg)
+            messagebox.showwarning("Little Hands", msg)
+            return
+        if (self.post_print_recovery_required or self.bed_clear_before_go_start_required) and not confirm_model_removed:
             if not self._confirm_model_removed_before_go_start():
                 return
         use_post_print_pose = False
@@ -4217,6 +4244,7 @@ class K9ControlCenter:
             if use_post_print_pose or use_predicted_print_end_pose:
                 self.session_zero_defined = True
             self.at_saved_start_pose = True
+            self.bed_clear_before_go_start_required = False
             self.post_print_pose_known = False
             if use_post_print_pose:
                 self._post("log", out.strip() or "Принтер возвращён к стартовой позе из известной послепечатной позы")
