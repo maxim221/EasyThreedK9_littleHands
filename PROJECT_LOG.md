@@ -2314,3 +2314,25 @@ After each test print, append:
 - Fix:
   - the `+7C` margin is now applied only when the detected target is below `220C`
   - new `225C` first-layer G-code preheats to `225C`, not `232C`
+
+## 2026-05-12 Manual Jog / Long-Idle Coordinate Safety
+
+- Field observation:
+  - after a long idle / fresh power-on, manual bed jog felt much smaller and slower than the selected `20 mm` step
+  - live printer settings were checked over USB: `M92 X606 Y606 Z600 E1040`, so EEPROM / firmware scale was not 10x wrong
+  - controlled `Y +2 mm` / `Y -2 mm` test changed the Marlin step counter by exactly `1212` steps each way, confirming `Y606` math
+- App fixes:
+  - Little Hands now persists the selected manual jog step in `little_hands_ui_state.json`
+  - manual jog log messages now include the physical hint, commanded distance, raw G-code axis, and feedrate
+  - stale active-print state from logs / persisted print state expires after 30 minutes, so the app should not rebuild a trusted post-print coordinate model after a long idle
+  - manual jog feedrates are explicit: `X F2400`, bed/logical `Y F600`, head vertical/logical `Z F600`
+  - bed/logical `Y` and head vertical/logical `Z` jogs temporarily lower travel acceleration with `M204 T80`, wait for `M400`, then restore `M204 T1000`
+- Rationale:
+  - the dangerous case was not a bad `M92`, but trusting old print/position state after the printer may have been power-cycled or left idle
+  - the confirmed slow `Y +/-5 mm F300` test moved the bed both ways, so the channel and motor were not treated as failed hardware
+  - the live printer profile had `M201 Y1000` / `M204 T1000`; manual bed jog at high acceleration can skip steps while Marlin still believes the move completed
+  - root cause was traced to the `LH v4` source baseline in `firmware_src/ECF-Marlin-upstream/Marlin/Configuration.h`: it carried `DEFAULT_MAX_ACCELERATION {1000,1000,100,1000}` and `DEFAULT_TRAVEL_ACCELERATION 1000`, and those values were persisted in EEPROM
+  - `firmware_src/` is intentionally ignored by git, so the safe future-firmware change is captured as `docs/firmware/LH-v4-safe-motion.patch`
+  - next firmware rebuild should apply that patch: `DEFAULT_MAX_ACCELERATION {300,200,100,1000}`, `DEFAULT_ACCELERATION 250`, and `DEFAULT_TRAVEL_ACCELERATION 200`
+  - treat the bed/logical `Y` axis as the limiting axis when calculating print speeds, travel acceleration, service moves, and post-print presentation
+  - after idle, the safe workflow is to establish the physical start pose again and press `Save start`

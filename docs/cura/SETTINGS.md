@@ -24,7 +24,7 @@ Use exactly this style of start G-code. Do not add `G28`.
 ; X = fully left, Y = bed fully back (away from operator), Z = nozzle touching bed
 ; This pose is treated as logical 0,0,0. Do not G28 before print.
 G92 X0 Y0 Z0
-G1 Z10.0 F1800
+G1 Z10.0 F600
 G92 E0
 ```
 
@@ -39,9 +39,9 @@ G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-M204 P250 T300 ;Gentle final presentation moves
+M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 G1 X95 F1800
-G1 Y95 F1800 ;Move bed toward the operator
+G1 Y95 F600 ;Move bed toward the operator
 ```
 
 Do not add `M84` at the end. Little Hands keeps steppers available for the post-print recovery workflow.
@@ -105,10 +105,11 @@ These limits are intentionally gentle for the small K9 mechanics and help reduce
 - Support acceleration: `220 mm/s^2`
 - Support interface / roof acceleration: `160 mm/s^2`
 - Initial layer and skirt / brim acceleration: `150 mm/s^2`
-- Travel acceleration: `300 mm/s^2`
+- Travel acceleration: `200 mm/s^2`
 - Ironing acceleration: `120 mm/s^2`
 - Jerk control: `off`
 - Note: do not enable Cura jerk control for this RepRap-flavor profile yet; our Marlin firmware uses `M205`, while Cura emits `M566` for jerk in this mode.
+- Y-bed limit: the verified `LH-v4` currently stores `M201 Y1000` and `M204 T1000` in EEPROM/Marlin, which is too aggressive for manual and service moves on the tiny bed. Keep travel acceleration at or below `200 mm/s^2`; Little Hands temporarily lowers service moves to `M204 T80`.
 
 ## Adhesion
 

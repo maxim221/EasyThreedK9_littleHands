@@ -24,7 +24,7 @@
 ; X = fully left, Y = bed fully back (away from operator), Z = nozzle touching bed
 ; This pose is treated as logical 0,0,0. Do not G28 before print.
 G92 X0 Y0 Z0
-G1 Z10.0 F1800
+G1 Z10.0 F600
 G92 E0
 ```
 
@@ -39,9 +39,9 @@ G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-M204 P250 T300 ;Gentle final presentation moves
+M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 G1 X95 F1800
-G1 Y95 F1800 ;Move bed toward the operator
+G1 Y95 F600 ;Move bed toward the operator
 ```
 
 Не добавляй в конец `M84`. Little Hands оставляет моторы доступными для послепечатного recovery workflow.
@@ -105,10 +105,11 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Support acceleration: `220 mm/s^2`
 - Support interface / roof acceleration: `160 mm/s^2`
 - Initial layer and skirt / brim acceleration: `150 mm/s^2`
-- Travel acceleration: `300 mm/s^2`
+- Travel acceleration: `200 mm/s^2`
 - Ironing acceleration: `120 mm/s^2`
 - Jerk control: `off`
 - Примечание: пока не включай Cura jerk control для этого RepRap-flavor профиля; наша Marlin-прошивка использует `M205`, а Cura в этом режиме генерирует `M566`.
+- Ограничение Y-стола: verified `LH-v4` сейчас хранит в EEPROM/Marlin `M201 Y1000` и `M204 T1000`, что слишком резко для ручных и сервисных движений маленького стола. Для печати держи travel acceleration не выше `200 mm/s^2`; для ручного управления и возвратов Little Hands временно снижает `M204 T80`.
 
 ## Адгезия
 

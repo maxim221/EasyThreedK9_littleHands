@@ -24,7 +24,7 @@
 ; X = fully left, Y = bed fully back (away from operator), Z = nozzle touching bed
 ; This pose is treated as logical 0,0,0. Do not G28 before print.
 G92 X0 Y0 Z0
-G1 Z10.0 F1800
+G1 Z10.0 F600
 G92 E0
 ```
 
@@ -39,9 +39,9 @@ G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-M204 P250 T300 ;Gentle final presentation moves
+M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 G1 X95 F1800
-G1 Y95 F1800 ;Move bed toward the operator
+G1 Y95 F600 ;Move bed toward the operator
 ```
 
 不要在结尾添加 `M84`。Little Hands 需要让步进电机保持可用，以便完成打印后的恢复流程。
@@ -105,10 +105,11 @@ G1 Y95 F1800 ;Move bed toward the operator
 - Support acceleration：`220 mm/s^2`
 - Support interface / roof acceleration：`160 mm/s^2`
 - Initial layer and skirt / brim acceleration：`150 mm/s^2`
-- Travel acceleration：`300 mm/s^2`
+- Travel acceleration：`200 mm/s^2`
 - Ironing acceleration：`120 mm/s^2`
 - Jerk control：`off`
 - 注意：暂时不要为这个 RepRap-flavor 配置启用 Cura jerk control；我们的 Marlin 固件使用 `M205`，而 Cura 在此模式下会生成 `M566`。
+- Y 平台限制：当前验证的 `LH-v4` 在 EEPROM/Marlin 中保存了 `M201 Y1000` 和 `M204 T1000`，这对小平台的手动和维护移动过于激进。打印时把 travel acceleration 保持在 `200 mm/s^2` 或更低；Little Hands 对维护移动会临时降到 `M204 T80`。
 
 ## 平台附着
 

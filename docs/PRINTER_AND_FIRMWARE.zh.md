@@ -85,6 +85,30 @@
 - 固件初始化后应保留在卡上
 - 新刷写后应确认设置已初始化并且文件存在
 
+### Y 平台“故障”的重要真实原因
+
+之前那台打印机很可能不是 Y 电机或驱动通道烧坏。新的 K9 复现了同样现象：通电后平台几乎不动，但电机和通道本身仍然可用。
+
+已确认：
+
+- 已验证的 `LH v4` 在 `M503` 中显示正确步进比例：`M92 X606 Y606 Z600 E1040`
+- 慢速 `G1 Y5 F300` 测试可以让平台双向移动
+- 使用 EEPROM 中保存的激进 profile `M201 Y1000` / `M204 T1000` 做快速手动 jog 时会丢步：Marlin 认为 20 mm 已完成，但平台实际几乎没有移动
+
+错误速度/动态的来源：
+
+- 当前公开 `LH v4` 对应 `firmware_src/ECF-Marlin-upstream/Marlin/Configuration.h`
+- 这个源码树里默认加速度是 `DEFAULT_MAX_ACCELERATION {1000,1000,100,1000}` 和 `DEFAULT_TRAVEL_ACCELERATION 1000`
+- 这些值被保存进 EEPROM/设置，并会在断电重启后继续存在
+
+当前规则：
+
+- 计算打印速度和加速度时，把 Y 平台当作限制轴
+- Little Hands 对手动 / service moves 临时降到 `M204 T80`，平台速度约 `F600`
+- Cura baseline 将 travel acceleration 保持在 `200 mm/s^2` 或更低
+- 下一次重新构建固件时，应用已跟踪的补丁：`docs/firmware/LH-v4-safe-motion.patch`
+- 如果平台嗡嗡响或几乎不动，先检查速度/加速度，再怀疑电机或驱动
+
 ## 6. Home 的工作方式
 
 目前项目使用 `manual-zero`，不是真正的限位自动回零。

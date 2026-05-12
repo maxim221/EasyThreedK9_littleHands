@@ -108,7 +108,7 @@ def k9_profile_settings(brim_width: float) -> tuple[dict[str, str], dict[str, st
 ; X = fully left, Y = bed fully back (away from operator), Z = nozzle touching bed
 ; This pose is treated as logical 0,0,0. Do not G28 before print.
 G92 X0 Y0 Z0
-G1 Z10.0 F1800
+G1 Z10.0 F600
 G92 E0"""
     end_gcode = """M104 S0 ;Hotend off
 M140 S0 ;Bed off in G-code even though bed is external
@@ -116,9 +116,9 @@ G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-M204 P250 T300 ;Gentle final presentation moves
+M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 G1 X95 F1800
-G1 Y95 F1800 ;Move bed toward the operator"""
+G1 Y95 F600 ;Move bed toward the operator"""
 
     global_settings = {
         "machine_name": "lilHands K9 warm mat",
@@ -148,7 +148,7 @@ G1 Y95 F1800 ;Move bed toward the operator"""
         "acceleration_support_interface": "160",
         "acceleration_support_roof": "160",
         "acceleration_topbottom": "180",
-        "acceleration_travel": "300",
+        "acceleration_travel": "200",
         "acceleration_travel_enabled": "True",
         "acceleration_wall": "180",
         "acceleration_wall_0": "150",
@@ -235,7 +235,7 @@ G1 Y95 F1800 ;Move bed toward the operator"""
         "acceleration_support_interface": "160",
         "acceleration_support_roof": "160",
         "acceleration_topbottom": "180",
-        "acceleration_travel": "300",
+        "acceleration_travel": "200",
         "acceleration_travel_enabled": "True",
         "acceleration_wall": "180",
         "acceleration_wall_0": "150",

@@ -88,6 +88,30 @@ Rules:
 - keep it on the card after the firmware is initialized
 - after a fresh flash, initialize settings and verify the file exists
 
+### Important Cause Of The False Y-Bed "Failure"
+
+The previous printer was most likely not killed by a bad Y motor or a dead driver channel. The same symptom was reproduced on the new K9: after power-on the bed barely moved, while the motor and channel were still alive.
+
+What was confirmed:
+
+- `M503` on the validated `LH v4` reports correct step scaling: `M92 X606 Y606 Z600 E1040`
+- a slow `G1 Y5 F300` test moves the bed both ways
+- fast manual jog with the saved EEPROM profile `M201 Y1000` / `M204 T1000` can skip steps: Marlin believes the 20 mm move completed, but the bed physically barely moves
+
+Where the bad speed/dynamics came from:
+
+- the current public `LH v4` matches `firmware_src/ECF-Marlin-upstream/Marlin/Configuration.h`
+- that tree had `DEFAULT_MAX_ACCELERATION {1000,1000,100,1000}` and `DEFAULT_TRAVEL_ACCELERATION 1000`
+- those values were saved in EEPROM/settings and survive power cycles
+
+Current rule:
+
+- treat the Y bed as the limiting motion axis when choosing print speeds and acceleration
+- Little Hands now lowers service/manual moves to `M204 T80` and moves the bed around `F600`
+- the Cura baseline keeps travel acceleration at or below `200 mm/s^2`
+- for the next firmware rebuild, apply the tracked patch: `docs/firmware/LH-v4-safe-motion.patch`
+- if the bed buzzes or barely moves, check speed/acceleration first, before blaming the motor or driver
+
 ## 6. How Home Works Here
 
 This project currently uses a `manual-zero` workflow, not a true endstop-based auto-home.

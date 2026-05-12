@@ -40,6 +40,15 @@ TRANSIENT_SERIAL_ERROR_MARKERS = (
     "input/output error",
     "errno 5",
 )
+SOFT_TRAVEL_ACCEL = 80
+RESTORE_TRAVEL_ACCEL = 1000
+SAFE_BED_FEEDRATE = 600
+SAFE_VERTICAL_FEEDRATE = 600
+SAFE_X_FEEDRATE = 1800
+
+
+def soft_service_travel_commands(commands: list[str]) -> list[str]:
+    return ["M204 T%d" % SOFT_TRAVEL_ACCEL, *commands, "M400", "M204 T%d" % RESTORE_TRAVEL_ACCEL]
 
 
 def list_serial_ports() -> list[dict[str, str]]:
@@ -502,7 +511,17 @@ def _start_sd_print_from_home_once(port: str, baud: int, target: str) -> str:
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
-        for line in ("M17", "G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M400"):
+        for line in (
+            "M17",
+            "G90",
+            "M211 S0",
+            *soft_service_travel_commands([
+                f"G1 Z10 F{SAFE_VERTICAL_FEEDRATE}",
+                f"G1 X0 F{SAFE_X_FEEDRATE}",
+                f"G1 Y0 F{SAFE_BED_FEEDRATE}",
+                f"G1 Z0 F{SAFE_VERTICAL_FEEDRATE}",
+            ]),
+        ):
             send_line(ser, line)
             time.sleep(0.5)
         _ = read_for(ser, 2.0)
@@ -547,14 +566,16 @@ def pseudo_home_to_zero(port: str, baud: int) -> str:
             "G90",
             "M211 S0",
             "G91",
+            "M204 T80",
             "G1 Z15 F600",
             "M400",
             "G1 X-130 F1800",
             "M400",
-            "G1 Y-130 F1800",
+            "G1 Y-130 F600",
             "M400",
             "G1 Z-120 F300",
             "M400",
+            "M204 T1000",
             "G90",
             "G92 X0 Y0 Z0",
             "M114",
@@ -569,7 +590,18 @@ def goto_print_home(port: str, baud: int) -> str:
     return run_commands(
         port,
         baud,
-        ["M17", "G90", "M211 S0", "G1 Z10 F600", "G1 X0 Y0 F1800", "G1 Z0 F600", "M400", "M114"],
+        [
+            "M17",
+            "G90",
+            "M211 S0",
+            *soft_service_travel_commands([
+                f"G1 Z10 F{SAFE_VERTICAL_FEEDRATE}",
+                f"G1 X0 F{SAFE_X_FEEDRATE}",
+                f"G1 Y0 F{SAFE_BED_FEEDRATE}",
+                f"G1 Z0 F{SAFE_VERTICAL_FEEDRATE}",
+            ]),
+            "M114",
+        ],
         final_wait=0.8,
         read_seconds=2.0,
     )
@@ -592,13 +624,14 @@ def goto_print_home_from_predicted_end(
     travel_z = min(100.0, end_z + 3.0)
     if travel_z > end_z:
         commands.append(f"G1 Z{travel_z:.3f} F600")
-    commands.extend([
-        "G1 X0 Y0 F1800",
-        "G1 Z0 F600",
-        "G92 X0 Y0 Z0",
-        "M400",
-        "M114",
-    ])
+    commands.extend(
+        soft_service_travel_commands([
+            f"G1 X0 F{SAFE_X_FEEDRATE}",
+            f"G1 Y0 F{SAFE_BED_FEEDRATE}",
+            f"G1 Z0 F{SAFE_VERTICAL_FEEDRATE}",
+        ])
+    )
+    commands.extend(["G92 X0 Y0 Z0", "M114"])
     return run_commands(
         port,
         baud,
@@ -628,14 +661,16 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
             "G90",
             "M211 S0",
             "G91",
+            "M204 T80",
             "G1 Z15 F600",
             "M400",
             "G1 X-130 F1800",
             "M400",
-            "G1 Y-130 F1800",
+            "G1 Y-130 F600",
             "M400",
             "G1 Z-120 F300",
             "M400",
+            "M204 T1000",
             "G90",
             "G92 X0 Y0 Z0",
         ):

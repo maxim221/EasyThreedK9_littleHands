@@ -53,6 +53,7 @@ PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
 PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
 PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
+PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC = 30 * 60
 PRINT_END_CONTRACT = "LH_END_GCODE_V1"
 PRINT_END_MAX_Z = 100.0
 DEFAULT_PRINT_HOTEND_TARGET_C = 218.0
@@ -67,6 +68,18 @@ HEATER_RE = re.compile(r"@:(\d+)")
 SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 HOTEND_TARGET_RE = re.compile(r"\bS([-+]?\d+(?:\.\d+)?)\b", re.IGNORECASE)
 PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
+JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
+JOG_DEFAULT_STEP_MM = 5.0
+JOG_FEEDRATES = {
+    "X": 2400,
+    "Y": 600,
+    "Z": 600,
+}
+JOG_TRAVEL_ACCEL = {
+    "Y": 80,
+    "Z": 80,
+}
+JOG_RESTORE_TRAVEL_ACCEL = 1000
 MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
 LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
 M92_RE = re.compile(r"M92\s+X([-\d.]+)\s+Y([-\d.]+)\s+Z([-\d.]+)\s+E([-\d.]+)")
@@ -310,7 +323,7 @@ class K9ControlCenter:
         self.active_sd_var = tk.StringVar(value="Печатается: -")
         self.sd_notice_var = tk.StringVar(value="")
         self.files_status_var = tk.StringVar(value="Выбери G-code или прошивку.")
-        self.step_var = tk.DoubleVar(value=5.0)
+        self.step_var = tk.DoubleVar(value=self._initial_jog_step())
         self.computer_melody_on_complete_var = tk.BooleanVar(value=True)
 
         self.sd_list: list[str] = []
@@ -395,6 +408,7 @@ class K9ControlCenter:
         self._restore_persistent_print_state()
 
         self._build_ui()
+        self.step_var.trace_add("write", self._on_jog_step_changed)
         if self.pending_flash_finalize:
             source_name = str(self.pending_flash_finalize.get("source_name", "mksLite.bin"))
             self.files_status_var.set(self._t("files_status_flash_pending").format(source=source_name))
@@ -485,6 +499,7 @@ class K9ControlCenter:
         last_start_ts: float | None = None
         last_progress_pct: float | None = None
         first_active_telem_ts: float | None = None
+        last_active_evidence_ts: float | None = None
         expected_by_file: dict[str, dict[str, object]] = {}
         today = time.localtime(time.time())
 
@@ -520,6 +535,7 @@ class K9ControlCenter:
                 last_active = ms.group(4).strip()
                 last_end = None
                 last_start_ts = stamp_for(int(ms.group(1)), int(ms.group(2)), int(ms.group(3)))
+                last_active_evidence_ts = last_start_ts
                 first_active_telem_ts = None
                 last_progress_pct = None
                 continue
@@ -529,6 +545,7 @@ class K9ControlCenter:
                 last_active = file_name
                 last_progress_pct = float(mt.group(5))
                 ts = stamp_for(int(mt.group(1)), int(mt.group(2)), int(mt.group(3)))
+                last_active_evidence_ts = ts
                 if file_name == last_active and first_active_telem_ts is None:
                     first_active_telem_ts = ts
                 continue
@@ -537,6 +554,8 @@ class K9ControlCenter:
                 last_end = me.group(4).strip()
         if last_active and last_active != "-" and last_active != last_end:
             now = time.time()
+            if last_active_evidence_ts and (now - last_active_evidence_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC:
+                return
             unconfirmed_start_age = (now - last_start_ts) if last_start_ts and last_progress_pct is None else None
             if unconfirmed_start_age is not None and unconfirmed_start_age > PRINT_START_GRACE_SEC:
                 return
@@ -584,6 +603,15 @@ class K9ControlCenter:
         profiles = data.get("sd_gcode_profiles")
         if isinstance(profiles, dict):
             self.sd_gcode_profiles.update(profiles)
+        phase = str(data.get("phase") or "")
+        if (
+            phase in {"prepared", "printing", "print_end_expected"}
+            and updated_ts
+            and (time.time() - updated_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC
+        ):
+            self._clear_predicted_print_end(save=False)
+            self._save_print_state("idle", force=True)
+            return
         predicted = data.get("predicted_end")
         if not isinstance(predicted, dict) or not predicted.get("valid"):
             return
@@ -607,7 +635,6 @@ class K9ControlCenter:
             self.predicted_print_end_z = float(end_z) if end_z is not None else None
         except (TypeError, ValueError):
             self.predicted_print_end_z = None
-        phase = str(data.get("phase") or "")
         if self.current_print_file == "-" and phase in {"prepared", "printing", "print_end_expected"}:
             restore_start_ts = self.predicted_print_end_start_ts or updated_ts or None
             progress = data.get("progress_pct")
@@ -822,9 +849,25 @@ class K9ControlCenter:
             pass
         return {}
 
+    def _initial_jog_step(self) -> float:
+        try:
+            value = float(self.ui_state.get("jog_step", JOG_DEFAULT_STEP_MM))
+        except (TypeError, ValueError):
+            value = JOG_DEFAULT_STEP_MM
+        if any(abs(value - allowed) < 0.0001 for allowed in JOG_STEPS_MM):
+            return value
+        return JOG_DEFAULT_STEP_MM
+
+    def _on_jog_step_changed(self, *_args) -> None:
+        self._save_ui_state()
+
     def _save_ui_state(self) -> None:
         state: dict[str, object] = {"geometry": self.root.winfo_geometry()}
         state["language"] = self.lang_var.get().strip() or "ru"
+        try:
+            state["jog_step"] = float(self.step_var.get())
+        except (tk.TclError, TypeError, ValueError):
+            state["jog_step"] = JOG_DEFAULT_STEP_MM
         state["sd_gcode_profiles"] = self.sd_gcode_profiles
         if self.pending_flash_finalize:
             state["pending_flash_finalize"] = self.pending_flash_finalize
@@ -1550,7 +1593,7 @@ class K9ControlCenter:
         self.step_label.grid(row=1, column=0, sticky="w", pady=(2, 1))
         step_box = ttk.Frame(motion)
         step_box.grid(row=1, column=1, columnspan=3, sticky="w", pady=(2, 1))
-        for value in (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0):
+        for value in JOG_STEPS_MM:
             ttk.Radiobutton(step_box, text=str(value), value=value, variable=self.step_var).pack(side="left", padx=2)
 
         self.head_left_button = ttk.Button(motion, text="Голова влево", command=lambda: self.jog_axis("X", -self.step_var.get()))
@@ -2767,11 +2810,13 @@ class K9ControlCenter:
             "M17",
             "G90",
             "M211 S0",
+            "M204 T80",
             "G91",
             "G1 Z20 F600",
             "G90",
-            "G1 Y95 F900",
+            "G1 Y95 F600",
             "M400",
+            "M204 T1000",
         ]
         return sdtool.run_commands(
             self._port(),
@@ -3860,24 +3905,44 @@ class K9ControlCenter:
         self._run_task("Отключение моторов", task)
 
     def jog_axis(self, axis: str, distance: float) -> None:
-        feedrate = 1200 if axis == "Y" else 2400
-        display_axis = self._operator_axis_name(axis)
+        axis = axis.upper()
+        feedrate = JOG_FEEDRATES.get(axis, 1200)
+        travel_accel = JOG_TRAVEL_ACCEL.get(axis)
         display_hint = self._operator_axis_hint(axis)
+        signed_distance = f"{distance:+g}"
 
         def task() -> None:
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
             self._clear_predicted_print_end()
+            self._post(
+                "log",
+                f"Jog: {display_hint} {signed_distance} мм; G-code {axis}{distance:.3f} F{feedrate}"
+                + (f", M204 T{travel_accel}" if travel_accel is not None else ""),
+            )
+            commands = ["M17", "G90", "M211 S0"]
+            if travel_accel is not None:
+                commands.append(f"M204 T{travel_accel}")
+            commands.extend(["G91", f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])
+            if travel_accel is not None:
+                commands.append(f"M204 T{JOG_RESTORE_TRAVEL_ACCEL}")
+            commands.append("G90")
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
-                ["M17", "G90", "M211 S0", "G91", f"G1 {axis}{distance:.3f} F{feedrate}", "G90"],
+                commands,
                 final_wait=0.8,
                 read_seconds=1.5,
             )
-            self._post("log", out.strip() or f"{display_axis} ({display_hint}) {'+' if distance >= 0 else ''}{distance:g}")
+            useful_lines = [
+                line.strip()
+                for line in out.splitlines()
+                if line.strip() and line.strip().lower() != "ok"
+            ]
+            if useful_lines:
+                self._post("log", "\n".join(useful_lines))
 
-        self._run_task(f"Сдвиг {display_axis}", task)
+        self._run_task(f"Сдвиг {display_hint} {signed_distance} мм", task)
 
     def move_level_point(self, x: float, y: float) -> None:
         def task() -> None:
@@ -3887,7 +3952,17 @@ class K9ControlCenter:
             out = sdtool.run_commands(
                 self._port(),
                 self._baud(),
-                ["G90", "M211 S0", "G1 Z10 F600", f"G1 X{x:.2f} Y{y:.2f} F1800", "G1 Z0 F600"],
+                [
+                    "G90",
+                    "M211 S0",
+                    "M204 T80",
+                    "G1 Z10 F600",
+                    f"G1 X{x:.2f} F1800",
+                    f"G1 Y{y:.2f} F600",
+                    "G1 Z0 F600",
+                    "M400",
+                    "M204 T1000",
+                ],
                 final_wait=0.8,
                 read_seconds=2.0,
             )
