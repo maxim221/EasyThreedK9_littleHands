@@ -2377,3 +2377,17 @@ After each test print, append:
   - `Go to start` is a real return to print zero, not just a high safe travel point
   - after a stopped / aborted print, remove the failed first layer before pressing `Go to start`
   - if Little Hands says the stop pose was not captured, manually re-establish the fixed start pose and press `Save start`
+
+## 2026-05-12 Hotend Preheat Failure Guard
+
+- Field observation:
+  - `Upload & start` uploaded `moduleBot_k9_warmmat_v5_easysupport.gcode` successfully and started the Little Hands hotend preheat stage
+  - `M105` showed the target as `225C`, but the measured hotend temperature only drifted from about `39C` to `46C` over four minutes
+  - the application correctly refused to send `M24`, so the model did not start cold
+- App fix:
+  - the preheat stage now keeps one serial session open instead of reopening the port for every `M105`
+  - Little Hands selects `T0`, sends `M104 S...`, logs the hotend heater power value `@`, and shows it in the preheat progress text
+  - if Marlin reports a non-zero target but the heater power stays `@0`, the app aborts early with a clear message
+  - if the hotend target is not accepted, no temperature data arrives, or temperature does not rise, the app sends `M104 S0` before reporting failure
+- Operator rule:
+  - after this specific failure mode, power-cycle the printer before retrying, because the K9 USB/Marlin state may remain half-alive while still exposing the serial port
