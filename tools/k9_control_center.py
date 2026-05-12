@@ -61,6 +61,17 @@ PRINT_PREHEAT_BLOCKING_M109_EXTRA_C = 7.0
 PRINT_PREHEAT_MARGIN_C = 2.0
 PRINT_PREHEAT_TIMEOUT_SEC = 240.0
 PRINT_PREHEAT_POLL_SEC = 3.0
+K9_PRINT_BED_SIZE_MM = 100.0
+K9_MAX_PRINT_Z_MM = 100.0
+K9_GCODE_BOUNDS_TOLERANCE_MM = 0.2
+K9_HOTEND_MIN_TARGET_C = 150.0
+K9_HOTEND_WARN_LOW_C = 185.0
+K9_HOTEND_WARN_HIGH_C = 240.0
+K9_HOTEND_MAX_TARGET_C = 260.0
+K9_WARN_TRAVEL_ACCEL = 250.0
+K9_MAX_BODY_TRAVEL_ACCEL = 600.0
+K9_WARN_PRINT_ACCEL = 350.0
+K9_MAX_BODY_PRINT_ACCEL = 600.0
 
 
 TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
@@ -935,6 +946,7 @@ class K9ControlCenter:
             "pick_gcode": {"ru": "Выбрать", "en": "Choose", "zh": "选择"},
             "gcode": {"ru": "G-code", "en": "G-code", "zh": "G-code"},
             "sd_name": {"ru": "Имя на SD", "en": "Name on SD", "zh": "SD 文件名"},
+            "check_gcode": {"ru": "Проверить G-code", "en": "Check G-code", "zh": "检查 G-code"},
             "upload_gcode": {"ru": "Залить G-code", "en": "Upload G-code", "zh": "上传 G-code"},
             "upload_and_start": {"ru": "Залить и старт", "en": "Upload & start", "zh": "上传并开始"},
             "firmware": {"ru": "Прошивка", "en": "Firmware", "zh": "固件"},
@@ -1911,6 +1923,10 @@ class K9ControlCenter:
         self.upload_and_start_button = ttk.Button(parent, text=self._t("upload_and_start"), command=self.upload_and_start_gcode)
         self.upload_and_start_button.grid(row=2, column=2, columnspan=2, padx=4, pady=(4, 0), sticky="ew")
         self.action_widgets.append(self.upload_and_start_button)
+
+        self.check_gcode_button = ttk.Button(parent, text=self._t("check_gcode"), command=self.check_gcode_validity)
+        self.check_gcode_button.grid(row=2, column=1, padx=4, pady=(4, 0), sticky="ew")
+        self.action_widgets.append(self.check_gcode_button)
 
         ttk.Separator(parent, orient="horizontal").grid(row=3, column=0, columnspan=4, sticky="ew", pady=8)
         self.firmware_label = ttk.Label(parent, text=self._t("firmware"))
@@ -2889,62 +2905,244 @@ class K9ControlCenter:
         else:
             self.log("Baseline использует обычный Cura G-code: auto-fan FAN1 + физический swap Y/Z + запуск от сохранённого 0.")
 
+    @staticmethod
+    def _gcode_param(command: str, letter: str) -> float | None:
+        match = re.search(rf"\b{re.escape(letter.upper())}\s*([-+]?\d+(?:\.\d+)?)", command.upper())
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _gcode_command_word(command: str) -> str:
+        match = re.match(r"^(?:N\d+\s*)?([GMT]\d+(?:\.\d+)?)\b", command.strip(), re.IGNORECASE)
+        return match.group(1).upper() if match else ""
+
+    @staticmethod
+    def _format_gcode_line(line_number: object) -> str:
+        return f", строка {line_number}" if isinstance(line_number, int) and line_number > 0 else ""
+
     def _inspect_gcode_file(self, source: Path) -> dict[str, object]:
         info: dict[str, object] = {
+            "read_error": "",
+            "line_count": 0,
+            "file_size": 0,
             "has_g28": False,
+            "first_g28_line": None,
             "has_hotend_target": False,
-            "has_blocking_m109": False,
             "hotend_target": None,
+            "hotend_target_line": None,
+            "has_blocking_m109": False,
             "has_little_hands_start": False,
+            "has_manual_zero": False,
+            "manual_zero_line": None,
             "target_machine_unknown": False,
+            "target_machine_name": "",
             "start_gcode_comment": "",
+            "has_slicer_fan_commands": False,
+            "fan_command_count": 0,
+            "has_bed_heat": False,
+            "bed_heat_line": None,
+            "bed_target": None,
+            "has_motor_disable": False,
+            "motor_disable_line": None,
+            "end_has_y95": False,
+            "end_has_y0": False,
+            "extrusion_move_count": 0,
+            "body_max_travel_accel": None,
+            "body_max_travel_accel_line": None,
+            "body_max_print_accel": None,
+            "body_max_print_accel_line": None,
+            "end_max_travel_accel": None,
+            "end_max_travel_accel_line": None,
             "suspicious": [],
         }
         try:
-            lines = source.read_text(encoding="utf-8", errors="replace").splitlines()[:300]
-        except Exception:
+            text = source.read_text(encoding="utf-8", errors="replace")
+            try:
+                info["file_size"] = source.stat().st_size
+            except OSError:
+                info["file_size"] = len(text.encode("utf-8", "replace"))
+            lines = text.splitlines()
+        except Exception as exc:
+            info["read_error"] = str(exc)
             return info
+
+        info["line_count"] = len(lines)
         bounds: dict[str, float] = {}
+        computed_bounds: dict[str, float] = {}
         filament_m: float | None = None
-        for line in lines:
+        required_bounds = {"MINX", "MINY", "MINZ", "MAXX", "MAXY", "MAXZ"}
+        position: dict[str, float | None] = {"X": None, "Y": None, "Z": None, "E": None}
+        relative_xyz = False
+        relative_e = False
+        end_phase = False
+
+        def update_computed_bounds(axis: str, value: float) -> None:
+            low = f"MIN{axis}"
+            high = f"MAX{axis}"
+            computed_bounds[low] = min(value, computed_bounds.get(low, value))
+            computed_bounds[high] = max(value, computed_bounds.get(high, value))
+
+        for line_number, line in enumerate(lines, start=1):
             stripped = line.strip()
+            if stripped.startswith(";TIME_ELAPSED:") or stripped.startswith(";End of Gcode"):
+                end_phase = True
             if stripped.startswith(";Filament used:"):
                 match = re.search(r"([-+]?\d+(?:\.\d+)?)\s*m\b", stripped, re.IGNORECASE)
                 if match:
                     filament_m = float(match.group(1))
-            bound_match = re.match(r";(MINX|MINY|MINZ|MAXX|MAXY|MAXZ):\s*([-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)", stripped, re.IGNORECASE)
+            bound_match = re.match(
+                r";(MINX|MINY|MINZ|MAXX|MAXY|MAXZ):\s*([-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)",
+                stripped,
+                re.IGNORECASE,
+            )
             if bound_match:
                 try:
                     bounds[bound_match.group(1).upper()] = float(bound_match.group(2))
                 except ValueError:
                     pass
-            if stripped.startswith(";TARGET_MACHINE.NAME:Unknown"):
-                info["target_machine_unknown"] = True
+            if stripped.startswith(";TARGET_MACHINE.NAME:"):
+                machine = stripped.split(":", 1)[1].strip()
+                info["target_machine_name"] = machine
+                info["target_machine_unknown"] = machine.lower() == "unknown"
             if stripped.startswith("; Little Hands"):
                 info["start_gcode_comment"] = stripped
                 info["has_little_hands_start"] = True
-            if not stripped or stripped.startswith(";"):
+
+            command = stripped.split(";", 1)[0].strip()
+            if not command:
                 continue
-            code = stripped.split(";", 1)[0].strip().upper()
-            if code.startswith("G28"):
+            command_upper = command.upper()
+            word = self._gcode_command_word(command_upper)
+            if not word:
+                continue
+
+            if word == "G90":
+                relative_xyz = False
+            elif word == "G91":
+                relative_xyz = True
+            elif word == "M82":
+                relative_e = False
+            elif word == "M83":
+                relative_e = True
+
+            if word == "G28":
                 info["has_g28"] = True
-            if code.startswith(("M104", "M109")) and "S" in code:
-                info["has_hotend_target"] = True
-                match = HOTEND_TARGET_RE.search(code)
-                if match:
-                    try:
-                        if info["hotend_target"] is None:
-                            info["hotend_target"] = float(match.group(1))
-                    except ValueError:
-                        pass
-            if code.startswith("M109"):
-                info["has_blocking_m109"] = True
-            if code.startswith(("M106", "M107")):
+                info["first_g28_line"] = info["first_g28_line"] or line_number
+
+            if word == "G92":
+                x = self._gcode_param(command_upper, "X")
+                y = self._gcode_param(command_upper, "Y")
+                z = self._gcode_param(command_upper, "Z")
+                if (
+                    x is not None
+                    and y is not None
+                    and z is not None
+                    and abs(x) <= 0.001
+                    and abs(y) <= 0.001
+                    and abs(z) <= 0.001
+                ):
+                    info["has_manual_zero"] = True
+                    info["manual_zero_line"] = info["manual_zero_line"] or line_number
+                for axis in ("X", "Y", "Z", "E"):
+                    value = self._gcode_param(command_upper, axis)
+                    if value is not None:
+                        position[axis] = value
+
+            if word in {"G0", "G1", "G00", "G01"}:
+                new_position = dict(position)
+                for axis in ("X", "Y", "Z"):
+                    value = self._gcode_param(command_upper, axis)
+                    if value is None:
+                        continue
+                    if relative_xyz:
+                        new_position[axis] = None if position[axis] is None else position[axis] + value
+                    else:
+                        new_position[axis] = value
+
+                e_value = self._gcode_param(command_upper, "E")
+                extruding = False
+                if e_value is not None:
+                    if relative_e:
+                        extruding = e_value > 0.000001
+                        new_position["E"] = (position["E"] or 0.0) + e_value
+                    else:
+                        if position["E"] is None:
+                            extruding = e_value > 0.000001
+                        else:
+                            extruding = e_value > position["E"] + 0.000001
+                        new_position["E"] = e_value
+                position = new_position
+
+                if extruding and all(position.get(axis) is not None for axis in ("X", "Y", "Z")):
+                    info["extrusion_move_count"] = int(info["extrusion_move_count"]) + 1
+                    update_computed_bounds("X", float(position["X"] or 0.0))
+                    update_computed_bounds("Y", float(position["Y"] or 0.0))
+                    update_computed_bounds("Z", float(position["Z"] or 0.0))
+
+                if end_phase:
+                    y_value = self._gcode_param(command_upper, "Y")
+                    if y_value is not None and not relative_xyz:
+                        if y_value >= 90.0:
+                            info["end_has_y95"] = True
+                        if y_value <= 1.0:
+                            info["end_has_y0"] = True
+
+            if word in {"M104", "M109"}:
+                target = self._gcode_param(command_upper, "S")
+                if target is not None and target > 0:
+                    if not info["has_hotend_target"]:
+                        info["hotend_target"] = target
+                        info["hotend_target_line"] = line_number
+                    info["has_hotend_target"] = True
+                    if word == "M109":
+                        info["has_blocking_m109"] = True
+
+            if word in {"M140", "M190"}:
+                target = self._gcode_param(command_upper, "S")
+                if target is not None and target > 0:
+                    info["has_bed_heat"] = True
+                    info["bed_heat_line"] = info["bed_heat_line"] or line_number
+                    info["bed_target"] = target
+
+            if word in {"M106", "M107"}:
                 info["has_slicer_fan_commands"] = True
+                info["fan_command_count"] = int(info["fan_command_count"]) + 1
+
+            if word in {"M18", "M84"}:
+                info["has_motor_disable"] = True
+                info["motor_disable_line"] = info["motor_disable_line"] or line_number
+
+            if word == "M204":
+                p_value = self._gcode_param(command_upper, "P")
+                t_value = self._gcode_param(command_upper, "T")
+                s_value = self._gcode_param(command_upper, "S")
+                print_value = max([value for value in (p_value, s_value) if value is not None], default=None)
+                travel_value = max([value for value in (t_value, s_value) if value is not None], default=None)
+                if end_phase:
+                    if travel_value is not None and (
+                        info["end_max_travel_accel"] is None or travel_value > float(info["end_max_travel_accel"])
+                    ):
+                        info["end_max_travel_accel"] = travel_value
+                        info["end_max_travel_accel_line"] = line_number
+                else:
+                    if travel_value is not None and (
+                        info["body_max_travel_accel"] is None or travel_value > float(info["body_max_travel_accel"])
+                    ):
+                        info["body_max_travel_accel"] = travel_value
+                        info["body_max_travel_accel_line"] = line_number
+                    if print_value is not None and (
+                        info["body_max_print_accel"] is None or print_value > float(info["body_max_print_accel"])
+                    ):
+                        info["body_max_print_accel"] = print_value
+                        info["body_max_print_accel_line"] = line_number
+
         suspicious: list[str] = []
         if filament_m is not None and filament_m <= 0.0:
             suspicious.append("Cura записала 'Filament used: 0m'")
-        required_bounds = {"MINX", "MINY", "MINZ", "MAXX", "MAXY", "MAXZ"}
         if required_bounds.issubset(bounds):
             if any(abs(value) > 1000 for value in bounds.values()):
                 suspicious.append("Cura записала невозможные границы модели")
@@ -2954,54 +3152,207 @@ class K9ControlCenter:
                     break
         info["filament_m"] = filament_m
         info["bounds"] = bounds
+        info["computed_bounds"] = computed_bounds
         info["suspicious"] = suspicious
         return info
 
-    def _warn_if_gcode_looks_wrong(self, source: Path) -> None:
+    def _gcode_validation_report(self, source: Path) -> tuple[list[str], list[str], dict[str, object]]:
         info = self._inspect_gcode_file(source)
-        if info.get("has_g28"):
-            self.log(
-                "Предупреждение: выбранный G-code содержит G28. Для K9 с Little Hands такой файл опасен: "
-                "принтер после 'К старту' не должен делать обычный home."
-            )
-        elif info.get("target_machine_unknown"):
-            self.log(
-                "Предупреждение: G-code выглядит старым или слайсился не на машине 'lilHands K9 warm mat' "
-                "(TARGET_MACHINE.NAME:Unknown)."
-            )
-        for reason in info.get("suspicious", []):
-            self.log(f"Предупреждение: G-code выглядит подозрительно: {reason}.")
+        errors: list[str] = []
+        warnings: list[str] = []
+        if info.get("read_error"):
+            return [f"Не удалось прочитать файл: {info['read_error']}"], warnings, info
 
-    def _validate_gcode_for_current_k9(self, source: Path) -> tuple[bool, str]:
-        info = self._inspect_gcode_file(source)
+        if source.name.lower().endswith("_k9xz.gcode"):
+            errors.append("Файл похож на старый `_k9xz.gcode` с ремапом плоскости. Для текущей LH-v4 нужен обычный Cura G-code.")
         if info.get("has_g28"):
-            return (
-                False,
-                "Этот G-code содержит G28 в стартовых командах. Для текущего K9 это неверно: "
-                "принтер уже ставится в старт через 'К старту', а обычный home потом ломает запуск. "
-                "Переслайсь модель на машине 'lilHands K9 warm mat' и профиле 'codex - K9 warm mat cautious'.",
+            errors.append(
+                "Найден `G28`"
+                + self._format_gcode_line(info.get("first_g28_line"))
+                + ". Для K9 без концевиков это опасно: старт задаётся вручную через `Запомнить старт` и `G92 X0 Y0 Z0`."
             )
-        suspicious = list(info.get("suspicious", []))
-        if suspicious:
-            return (
-                False,
-                "Этот G-code выглядит битым или неполным: "
-                + "; ".join(str(reason) for reason in suspicious)
-                + ". Переслайсь модель заново в Cura и проверь Preview перед записью на карту.",
-            )
+        if not info.get("has_manual_zero"):
+            errors.append("Не найден `G92 X0 Y0 Z0`. Этот K9 должен печатать от сохранённой стартовой позы, а не от обычного home.")
         if not info.get("has_hotend_target"):
-            return (
-                False,
-                "В начале G-code не найдено команды нагрева хотенда M104/M109. "
-                "Такой файл может выбраться на SD, но печать не начнётся. Переслайсь модель заново в Cura.",
+            errors.append("Не найдена положительная цель hotend `M104 S...` или `M109 S...`; такой файл может выбраться на SD, но не начать печать.")
+        else:
+            target = float(info.get("hotend_target") or 0.0)
+            if target < K9_HOTEND_MIN_TARGET_C or target > K9_HOTEND_MAX_TARGET_C:
+                errors.append(
+                    f"Цель hotend {target:g}C"
+                    + self._format_gcode_line(info.get("hotend_target_line"))
+                    + f" вне безопасного диапазона {K9_HOTEND_MIN_TARGET_C:g}-{K9_HOTEND_MAX_TARGET_C:g}C."
+                )
+            elif target < K9_HOTEND_WARN_LOW_C or target > K9_HOTEND_WARN_HIGH_C:
+                warnings.append(f"Цель hotend {target:g}C необычна для текущего PLA-профиля; проверь материал и профиль Cura.")
+        if info.get("has_bed_heat"):
+            errors.append(
+                "Найден нагрев стола `M140/M190`"
+                + self._format_gcode_line(info.get("bed_heat_line"))
+                + ". У нашего K9 стол внешний, в G-code температура стола должна быть 0C."
+            )
+        if info.get("has_motor_disable"):
+            errors.append(
+                "Найдено отключение моторов `M18/M84`"
+                + self._format_gcode_line(info.get("motor_disable_line"))
+                + ". После печати Little Hands должен сохранить возможность recovery-движений."
             )
         if info.get("target_machine_unknown") and not info.get("has_little_hands_start"):
-            return (
-                False,
-                "Этот G-code выглядит старым или был слайсен не на 'lilHands K9 warm mat' "
-                "(TARGET_MACHINE.NAME:Unknown). Переслайсь модель заново и залей новый файл.",
+            errors.append("`TARGET_MACHINE.NAME:Unknown` без Little Hands start-комментария: файл похож на старый или слайсился не на `lilHands K9 warm mat`.")
+        elif info.get("target_machine_unknown"):
+            warnings.append("Cura пишет `TARGET_MACHINE.NAME:Unknown`, но Little Hands start найден; это допустимо для текущего custom-профиля.")
+        if not info.get("has_little_hands_start"):
+            warnings.append("Не найден комментарий `Little Hands manual-zero workflow`; если файл сделан другим слайсером, особенно внимательно проверь start/end G-code.")
+
+        for reason in info.get("suspicious", []):
+            errors.append(str(reason) + "; переслайсь заново и проверь Preview перед записью на SD.")
+
+        header_bounds = dict(info.get("bounds") or {})
+        computed_bounds = dict(info.get("computed_bounds") or {})
+        required_bounds = {"MINX", "MINY", "MINZ", "MAXX", "MAXY", "MAXZ"}
+        bounds = header_bounds if required_bounds.issubset(header_bounds) else computed_bounds
+        bounds_source = "Cura header" if bounds is header_bounds else "расчёт по extrusion moves"
+        if not required_bounds.issubset(bounds):
+            errors.append("Не удалось определить печатные XY/Z bounds. Это похоже не на полноценный sliced G-code для печати.")
+        else:
+            min_x = float(bounds["MINX"])
+            max_x = float(bounds["MAXX"])
+            min_y = float(bounds["MINY"])
+            max_y = float(bounds["MAXY"])
+            min_z = float(bounds["MINZ"])
+            max_z = float(bounds["MAXZ"])
+            if max_x <= min_x or max_y <= min_y or max_z < min_z:
+                errors.append(f"Некорректные bounds ({bounds_source}): min/max перепутаны или размер модели нулевой.")
+            if min_x < -K9_GCODE_BOUNDS_TOLERANCE_MM or max_x > K9_PRINT_BED_SIZE_MM + K9_GCODE_BOUNDS_TOLERANCE_MM:
+                errors.append(f"X bounds {min_x:.2f}..{max_x:.2f} выходят за стол {K9_PRINT_BED_SIZE_MM:g} mm.")
+            if min_y < -K9_GCODE_BOUNDS_TOLERANCE_MM or max_y > K9_PRINT_BED_SIZE_MM + K9_GCODE_BOUNDS_TOLERANCE_MM:
+                errors.append(f"Y bounds {min_y:.2f}..{max_y:.2f} выходят за стол {K9_PRINT_BED_SIZE_MM:g} mm.")
+            if min_z < -K9_GCODE_BOUNDS_TOLERANCE_MM or max_z > K9_MAX_PRINT_Z_MM + K9_GCODE_BOUNDS_TOLERANCE_MM:
+                errors.append(f"Z bounds {min_z:.2f}..{max_z:.2f} выходят за высоту {K9_MAX_PRINT_Z_MM:g} mm.")
+            info["validated_bounds_source"] = bounds_source
+            info["validated_bounds"] = bounds
+
+        if int(info.get("extrusion_move_count") or 0) <= 0:
+            errors.append("Не найдено печатных extrusion-движений `G1 ... E...` с XY/Z координатами. Это не похоже на модель для печати.")
+
+        body_travel = info.get("body_max_travel_accel")
+        if isinstance(body_travel, (int, float)):
+            if body_travel > K9_MAX_BODY_TRAVEL_ACCEL:
+                errors.append(
+                    f"`M204 T{body_travel:g}`"
+                    + self._format_gcode_line(info.get("body_max_travel_accel_line"))
+                    + " слишком резкий для стола K9; это может снова выглядеть как 'сломанный' Y-канал."
+                )
+            elif body_travel > K9_WARN_TRAVEL_ACCEL:
+                warnings.append(f"Travel acceleration `M204 T{body_travel:g}` выше осторожного baseline; если стол трещит или пропускает шаги, переслайсь мягче.")
+        body_print = info.get("body_max_print_accel")
+        if isinstance(body_print, (int, float)):
+            if body_print > K9_MAX_BODY_PRINT_ACCEL:
+                errors.append(
+                    f"`M204 P{body_print:g}`"
+                    + self._format_gcode_line(info.get("body_max_print_accel_line"))
+                    + " слишком резкий для текущего K9 baseline."
+                )
+            elif body_print > K9_WARN_PRINT_ACCEL:
+                warnings.append(f"Print acceleration `M204 P{body_print:g}` выше осторожного baseline; это может усилить резонанс.")
+
+        if info.get("has_blocking_m109"):
+            warnings.append("Есть блокирующий `M109`; при заливке через Little Hands ранний `M109` будет заменён на `M104`, а приложение прогреет hotend перед SD-стартом.")
+        if info.get("has_slicer_fan_commands"):
+            warnings.append(
+                f"Есть slicer-команды вентилятора `M106/M107` ({info.get('fan_command_count')}); при заливке через Little Hands они будут удалены, потому что вентилятор у K9 firmware-managed."
             )
-        return True, ""
+        if info.get("end_has_y0"):
+            warnings.append("В конце найден `G1 Y0`: старые файлы могут уводить стол не к пользователю. Лучше переслайсить на текущем профиле.")
+        if not info.get("end_has_y95"):
+            warnings.append("В конце не найдено предъявление стола `G1 Y95`. Печать может завершиться без удобного выезда стола к пользователю.")
+        end_travel = info.get("end_max_travel_accel")
+        if isinstance(end_travel, (int, float)) and end_travel > K9_MAX_BODY_TRAVEL_ACCEL:
+            warnings.append("В финальном хвосте Cura есть высокий `M204 T...`; это допустимо только если end-gcode затем задаёт мягкое `M204` перед движением стола.")
+
+        return errors, warnings, info
+
+    def _format_gcode_validation_report(
+        self,
+        source: Path,
+        errors: list[str],
+        warnings: list[str],
+        info: dict[str, object],
+    ) -> str:
+        size = int(info.get("file_size") or 0)
+        size_label = f"{size / 1024 / 1024:.2f} MiB" if size else "unknown"
+        lines = [
+            f"Файл: {source.name}",
+            f"Строк: {info.get('line_count') or 0}; размер: {size_label}",
+        ]
+        target = info.get("hotend_target")
+        if isinstance(target, (int, float)):
+            lines.append(f"Hotend target: {target:g}C")
+        bounds = info.get("validated_bounds")
+        if isinstance(bounds, dict):
+            lines.append(
+                "Bounds: "
+                f"X {float(bounds['MINX']):.2f}..{float(bounds['MAXX']):.2f}, "
+                f"Y {float(bounds['MINY']):.2f}..{float(bounds['MAXY']):.2f}, "
+                f"Z {float(bounds['MINZ']):.2f}..{float(bounds['MAXZ']):.2f}"
+            )
+        if info.get("manual_zero_line"):
+            lines.append(f"Manual zero: G92 X0 Y0 Z0 на строке {info['manual_zero_line']}")
+        if errors:
+            lines.append("")
+            lines.append("Блокирующие ошибки:")
+            lines.extend(f"- {item}" for item in errors)
+        if warnings:
+            lines.append("")
+            lines.append("Предупреждения:")
+            lines.extend(f"- {item}" for item in warnings)
+        if not errors and not warnings:
+            lines.append("")
+            lines.append("Проверка пройдена: G-code выглядит подходящим для текущего K9 / Little Hands workflow.")
+        return "\n".join(lines)
+
+    def check_gcode_validity(self) -> None:
+        source = Path(self.local_gcode_var.get().strip()).expanduser()
+        if not source.is_file():
+            messagebox.showerror("Little Hands", "Выбери существующий G-code файл.")
+            return
+        errors, warnings, info = self._gcode_validation_report(source)
+        report = self._format_gcode_validation_report(source, errors, warnings, info)
+        if errors:
+            self.files_status_var.set(f"G-code не прошёл проверку: {errors[0]}")
+            self.log("G-code не прошёл проверку:\n" + report)
+            messagebox.showerror("Little Hands — проверка G-code", report)
+        elif warnings:
+            self.files_status_var.set(f"G-code прошёл проверку с предупреждениями: {warnings[0]}")
+            self.log("G-code прошёл проверку с предупреждениями:\n" + report)
+            messagebox.showwarning("Little Hands — проверка G-code", report)
+        else:
+            self.files_status_var.set(f"G-code проверен: {source.name}")
+            self.log("G-code проверен:\n" + report)
+            messagebox.showinfo("Little Hands — проверка G-code", report)
+
+    def _warn_if_gcode_looks_wrong(self, source: Path) -> None:
+        errors, warnings, info = self._gcode_validation_report(source)
+        if errors:
+            self.files_status_var.set(f"G-code не прошёл проверку: {errors[0]}")
+            for reason in errors[:6]:
+                self.log(f"G-code: блокирующая проблема: {reason}")
+        elif warnings:
+            self.files_status_var.set(f"G-code выбран с предупреждениями: {warnings[0]}")
+            for reason in warnings[:6]:
+                self.log(f"G-code: предупреждение: {reason}")
+        else:
+            target = info.get("hotend_target")
+            target_text = f", hotend {float(target):g}C" if isinstance(target, (int, float)) else ""
+            self.files_status_var.set(f"G-code проверен: {source.name}{target_text}")
+
+    def _validate_gcode_for_current_k9(self, source: Path) -> tuple[bool, str]:
+        errors, warnings, info = self._gcode_validation_report(source)
+        if errors:
+            return False, self._format_gcode_validation_report(source, errors, warnings, info)
+        if warnings:
+            return True, self._format_gcode_validation_report(source, errors, warnings, info)
+        return True, f"G-code проверен: {source.name}"
 
     def _prepare_k9_gcode_for_sd(self, source: Path, target: Path) -> tuple[bool, float | None, int]:
         lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -3239,6 +3590,8 @@ class K9ControlCenter:
             messagebox.showerror("Little Hands", reason)
             self.log(reason)
             return
+        if reason:
+            self.log(reason)
         dest = self.dest_name_var.get().strip() or source.name
 
         def task() -> None:
@@ -3281,6 +3634,8 @@ class K9ControlCenter:
             messagebox.showerror("Little Hands", reason)
             self.log(reason)
             return
+        if reason:
+            self.log(reason)
         dest = (self.dest_name_var.get().strip() or sdtool.make_sd_name(source.name))
         self.dest_name_var.set(dest)
 

@@ -165,7 +165,8 @@ G92 X0 Y0 Z0
 - start G-code 必须使用 Little Hands 的 manual-zero `G92 X0 Y0 Z0` 流程
 - 生成的文件必须包含热端目标温度命令，例如 `M104` / `M109`
 - 通过 Little Hands 上传时，早期阻塞式 `M109` 会自动改写为 `M104`；应用会在 SD 启动前预热热端
-- 如果文件出现 `Filament used: 0m`、不可能的 Cura bounds，或缺少热端目标温度，请重新切片
+- 上传前可以使用 `Check G-code`；同一套校验也会在 `Upload G-code` 和 `Upload & start` 前自动运行
+- 如果文件出现 `Filament used: 0m`、不可能的 bounds、超出 `100 x 100 x 100 mm`、热床加热 `M140/M190 S>0`、`M18/M84`、缺少热端目标温度，或 body `M204` 过激，请重新切片
 - 自动热端预热流程确认后，`12 mm` brim 现在是默认值；旧的启动失败与加热 / SD 启动顺序有关，不是 brim 宽度本身造成的
 
 当前 end-gcode 规则：

@@ -168,7 +168,9 @@ G1 Y95 F600 ;Move bed toward the operator
 - 如果文件通过 Little Hands 上传或由 slicing helper 生成，早期 `M109` 会改写为 `M104`，热端会在 SD 启动前预热
 - bed target 保持 `0C`
 - slicer bounds 正常，并位于 `100 x 100 mm` 平台内
+- 高度位于 `100 mm` 内
 - 不出现 `Filament used: 0m`
+- 没有 `M18/M84`、没有热床加热 `M140/M190 S>0`，body `M204` 不超过安全的 K9 baseline
 - preview 中在模型需要的位置显示支撑
 
 如果有任何一项不满足，请重新切片。不要手工修改 G-code，除非你有意创建一个新文件，并明确标记为 modified。

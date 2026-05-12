@@ -173,7 +173,8 @@ Important G-code rules:
 - the start G-code must use the Little Hands manual-zero `G92 X0 Y0 Z0` workflow
 - the generated file must contain a hotend target command such as `M104` / `M109`
 - when a file is uploaded through Little Hands, early blocking `M109` is rewritten to `M104`; the app preheats the hotend before the SD start
-- reject or re-slice files with `Filament used: 0m`, impossible Cura bounds, or missing hotend target
+- use `Check G-code` before upload; the same validation also runs automatically before `Upload G-code` and `Upload & start`
+- reject or re-slice files with `Filament used: 0m`, impossible bounds, motion outside `100 x 100 x 100 mm`, bed heat `M140/M190 S>0`, `M18/M84`, missing hotend target, or aggressive body `M204`
 - `12 mm` brim is now the current default after the automatic hotend-preheat workflow was confirmed; the old start failure was tied to heat / SD-start sequencing, not to brim width itself
 
 Current end-G-code rule:

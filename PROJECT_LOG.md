@@ -2336,3 +2336,23 @@ After each test print, append:
   - next firmware rebuild should apply that patch: `DEFAULT_MAX_ACCELERATION {300,200,100,1000}`, `DEFAULT_ACCELERATION 250`, and `DEFAULT_TRAVEL_ACCELERATION 200`
   - treat the bed/logical `Y` axis as the limiting axis when calculating print speeds, travel acceleration, service moves, and post-print presentation
   - after idle, the safe workflow is to establish the physical start pose again and press `Save start`
+
+## 2026-05-12 K9 G-code Validation
+
+- Added a first-class G-code validation path in the Little Hands Files & Firmware window:
+  - new `Check G-code` button
+  - the same validator runs before `Upload G-code` and `Upload & start`
+- The validator blocks files that are unsafe or structurally wrong for the current K9 workflow:
+  - old `_k9xz.gcode` plane-remap files
+  - real `G28`
+  - missing `G92 X0 Y0 Z0`
+  - missing positive hotend target
+  - bed heat `M140/M190 S>0` because the warm bed is external
+  - `M18/M84`, because post-print recovery must keep steppers usable
+  - missing extrusion moves or bounds outside `100 x 100 x 100 mm`
+  - aggressive body `M204` values that can make the small Y-bed skip steps
+- The validator warns, but does not block, cases that Little Hands can handle:
+  - `TARGET_MACHINE.NAME:Unknown` when Little Hands start-gcode is present
+  - early blocking `M109`, which is rewritten to `M104` during upload
+  - slicer `M106/M107`, which is stripped because the single fan is firmware-managed hotend cooling
+  - high Cura acceleration reset in the final tail when the validated end-gcode softens presentation moves afterward
