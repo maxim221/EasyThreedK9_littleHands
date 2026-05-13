@@ -44,7 +44,7 @@ SOFT_TRAVEL_ACCEL = 80
 RESTORE_TRAVEL_ACCEL = 1000
 SAFE_BED_FEEDRATE = 600
 SAFE_VERTICAL_FEEDRATE = 600
-SAFE_X_FEEDRATE = 1800
+SAFE_X_FEEDRATE = 900
 POSITION_RE = re.compile(r"X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)")
 
 
@@ -584,7 +584,7 @@ def pseudo_home_to_zero(port: str, baud: int) -> str:
             "M204 T80",
             "G1 Z15 F600",
             "M400",
-            "G1 X-130 F1800",
+            f"G1 X-130 F{SAFE_X_FEEDRATE}",
             "M400",
             "G1 Y-130 F600",
             "M400",
@@ -679,7 +679,7 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
             "M204 T80",
             "G1 Z15 F600",
             "M400",
-            "G1 X-130 F1800",
+            f"G1 X-130 F{SAFE_X_FEEDRATE}",
             "M400",
             "G1 Y-130 F600",
             "M400",

@@ -2453,3 +2453,13 @@ After each test print, append:
 - Rationale:
   - this keeps the successful no-crack wall settings and support settings
   - it strengthens bed grip and floor closure without jumping to raft or emergency `18 mm` brim
+
+## 2026-05-13 X Head Service-Motion Softening
+
+- Observed follow-up: the same speed / skipped-step risk applies to `Head left`, especially during post-print recovery back to the start pose.
+- Fix:
+  - manual X jog now uses `F900` instead of `F2400`
+  - manual X jog now temporarily lowers travel acceleration with `M204 T80`, like the bed / vertical axes
+  - SD recovery / pseudo-home X service moves now use `SAFE_X_FEEDRATE = 900` instead of `1800`
+  - Cura end-gcode presentation move `G1 X95` now uses `F900`
+- Rule: if the head buzzes, skips, or moves weakly, treat it first as a service-motion speed / acceleration problem, not as a dead X motor or driver.

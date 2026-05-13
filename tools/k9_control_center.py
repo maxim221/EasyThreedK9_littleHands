@@ -85,12 +85,14 @@ HOTEND_TARGET_RE = re.compile(r"\bS([-+]?\d+(?:\.\d+)?)\b", re.IGNORECASE)
 PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
 JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
 JOG_DEFAULT_STEP_MM = 5.0
+SERVICE_X_FEEDRATE = 900
 JOG_FEEDRATES = {
-    "X": 2400,
+    "X": SERVICE_X_FEEDRATE,
     "Y": 600,
     "Z": 600,
 }
 JOG_TRAVEL_ACCEL = {
+    "X": 80,
     "Y": 80,
     "Z": 80,
 }
@@ -4800,7 +4802,7 @@ class K9ControlCenter:
                     "M211 S0",
                     "M204 T80",
                     "G1 Z10 F600",
-                    f"G1 X{x:.2f} F1800",
+                    f"G1 X{x:.2f} F{SERVICE_X_FEEDRATE}",
                     f"G1 Y{y:.2f} F600",
                     "G1 Z0 F600",
                     "M400",
