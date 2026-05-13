@@ -107,7 +107,8 @@ Where the bad speed/dynamics came from:
 Current rule:
 
 - treat the small X head carriage and Y bed as limiting service-motion axes when choosing print speeds and acceleration
-- Little Hands now leaves service/manual motion in the soft `M204 T80` service-idle state, moves the bed around `F600`, and moves the head left/right around `F900`
+- Little Hands now leaves service/manual motion in the soft `M204 T80` service-idle state, moves long bed service/recovery paths around `F240`, uses `F300` for manual bed jogs, and moves the head left/right around `F900`
+- short diagnostic bed moves up to `F600` worked over `5 mm`, but the public workflow keeps the lower `F240/F300` limits so large moves do not regress into buzzing / skipped-step behavior
 - the Cura baseline keeps travel acceleration at or below `200 mm/s^2`
 - for the next firmware rebuild, apply the tracked patch: `docs/firmware/LH-v4-safe-motion.patch`
 - if the bed or head buzzes, skips, or barely moves, check speed/acceleration first, before blaming the motor or driver
@@ -132,6 +133,8 @@ So:
 - this is practical and field-tested
 - but it is not yet a guaranteed absolute home after arbitrary external movement
 - after a failed start or suspicious state, re-establish the start pose and zero again
+- Little Hands now tracks home as `trusted`, `uncertain`, or `invalid`; SD start and `Go to start` are blocked unless home is trusted or the app is showing an explicit post-print recovery prompt
+- changing / disconnecting the USB port, disabling motors, hard-stopping, a failed jog, or a failed recovery invalidates that trust because the printer has no physical endstops to re-discover zero
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 
@@ -179,7 +182,7 @@ Important G-code rules:
 
 Current end-G-code rule:
 
-- present the finished part with raw Marlin `G1 Y95`, which moves the bed toward the operator on the validated setup
+- present the finished part with raw Marlin `G1 Y95 F240`, which moves the bed toward the operator gently on the validated setup
 - do not add `M84` to Cura end-G-code; `Little Hands` explicitly enables steppers before recovery moves and before SD print start
 - if an older file ends with `G1 Y0` or `M84`, re-slice it before judging completion behavior
 

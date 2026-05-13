@@ -41,7 +41,7 @@ G1 E-1 F1800
 G1 Z10 F1200
 G90
 G1 X95 F900
-G1 Y95 F600 ;Move bed toward the operator
+G1 Y95 F240 ;Move bed toward the operator
 ```
 
 Не добавляй в конец `M84`. Little Hands оставляет моторы доступными для послепечатного recovery workflow.
@@ -111,7 +111,7 @@ G1 Y95 F600 ;Move bed toward the operator
 - Ironing acceleration: `120 mm/s^2`
 - Jerk control: `off`
 - Примечание: пока не включай Cura jerk control для этого RepRap-flavor профиля; наша Marlin-прошивка использует `M205`, а Cura в этом режиме генерирует `M566`.
-- Ограничение сервисных движений K9: verified `LH-v4` сейчас хранит в EEPROM/Marlin `M201 X1000 Y1000` и `M204 T1000`, что слишком резко для ручных и recovery-движений маленькой механики. Для печати держи travel acceleration не выше `200 mm/s^2`; для ручного управления и возвратов Little Hands оставляет мягкий service-idle режим `M204 T80`, ведёт стол примерно `F600`, а голову влево/вправо примерно `F900`.
+- Ограничение сервисных движений K9: verified `LH-v4` сейчас хранит в EEPROM/Marlin `M201 X1000 Y1000` и `M204 T1000`, что слишком резко для ручных и recovery-движений маленькой механики. Для печати держи travel acceleration не выше `200 mm/s^2`; для длинных service/recovery-движений Little Hands оставляет мягкий service-idle режим `M204 T80` и ведёт стол примерно `F240`, для ручного jog стола использует `F300`, а голову влево/вправо ведёт примерно `F900`.
 
 ## Адгезия
 

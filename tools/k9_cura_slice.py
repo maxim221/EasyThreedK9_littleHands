@@ -123,7 +123,7 @@ G1 E-1 F1800
 G1 Z10 F1200
 G90
 G1 X95 F900
-G1 Y95 F600 ;Move bed toward the operator"""
+G1 Y95 F240 ;Move bed toward the operator"""
 
     global_settings = {
         "machine_name": "lilHands K9 warm mat",

@@ -104,7 +104,8 @@
 当前规则：
 
 - 计算打印速度和加速度时，把小型 X 喷头滑车和 Y 平台都当作 service-motion 限制轴
-- Little Hands 对手动 / service moves 保持柔和的 `M204 T80` service-idle 状态，平台约 `F600`，喷头左右约 `F900`
+- Little Hands 对手动 / service moves 保持柔和的 `M204 T80` service-idle 状态，长距离平台 service/recovery 移动约 `F240`，手动平台 jog 使用 `F300`，喷头左右约 `F900`
+- `5 mm` 短距离诊断移动中，平台到 `F600` 也可工作，但公开工作流保持更保守的 `F240/F300`，避免长距离移动再次出现嗡嗡响和丢步
 - Cura baseline 将 travel acceleration 保持在 `200 mm/s^2` 或更低
 - 下一次重新构建固件时，应用已跟踪的补丁：`docs/firmware/LH-v4-safe-motion.patch`
 - 如果平台或喷头嗡嗡响、丢步或几乎不动，先检查速度/加速度，再怀疑电机或驱动
@@ -129,6 +130,8 @@ G92 X0 Y0 Z0
 - 这是一种实用并且已经经过现场验证的工作流
 - 但它还不是在任意外部移动后的绝对 home
 - 如果启动失败或状态可疑，应重新建立起始姿态并重新设零
+- Little Hands 现在把 home 状态分为 `trusted`、`uncertain` 和 `invalid`；除非 home 可信，或应用正在显示明确的打印后 recovery 确认流程，否则会阻止 SD 启动和 `Go to start`
+- 更换 / 断开 USB 端口、关闭电机、硬停止、jog 失败或 recovery 失败都会清除 home 信任，因为这台机器没有物理限位开关来重新寻找绝对零点
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 
@@ -171,7 +174,7 @@ G92 X0 Y0 Z0
 
 当前 end-gcode 规则：
 
-- 使用 raw Marlin `G1 Y95` 展示完成的模型；在验证过的机器上它会把平台推向操作者
+- 使用 raw Marlin `G1 Y95 F240` 展示完成的模型；在验证过的机器上它会柔和地把平台推向操作者
 - 不要在 Cura end-gcode 里加入 `M84`；`Little Hands` 会在恢复移动和 SD 打印开始前主动启用步进电机
 - 如果旧文件以 `G1 Y0` 或 `M84` 结尾，请先重新切片，再判断打印完成动作是否正确
 

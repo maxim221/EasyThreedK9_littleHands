@@ -39,11 +39,16 @@ def main() -> int:
         "Service moves must not restore aggressive M204 T1000.",
         failures,
     )
-    require("SAFE_BED_FEEDRATE = 600" in marlin, "Bed service feedrate must remain F600.", failures)
+    require("SAFE_BED_FEEDRATE = 240" in marlin, "Long bed service/recovery feedrate must remain F240.", failures)
     require("SAFE_X_FEEDRATE = 900" in marlin, "Head X service feedrate must remain F900.", failures)
     require('"M204 T1000"' not in marlin, "k9_marlin_sd.py must not hard-code M204 T1000.", failures)
     require('"M204 T1000"' not in app, "k9_control_center.py must not hard-code M204 T1000.", failures)
     require("JOG_RESTORE_TRAVEL_ACCEL = 80" in app, "Manual jog must leave service travel acceleration at T80.", failures)
+    require("SERVICE_BED_FEEDRATE = 240" in app, "App long bed service moves must remain F240.", failures)
+    require("JOG_BED_FEEDRATE = 300" in app, "App manual bed jog must remain F300.", failures)
+    require('"Y": JOG_BED_FEEDRATE' in app, "Manual bed jog must use the named conservative bed feedrate.", failures)
+    require("HOME_TRUST_TRUSTED" in app and "HOME_TRUST_UNCERTAIN" in app, "Home trust state machine is missing.", failures)
+    require("_home_is_trusted()" in app, "Home-sensitive actions must use the explicit home trust guard.", failures)
 
     require("run_commands_wait_ok" in marlin, "Long service moves must use the ok-waiting command helper.", failures)
     require_regex(
@@ -58,9 +63,22 @@ def main() -> int:
         "Predicted/post-print recovery must wait for service moves to complete.",
         failures,
     )
+    require("send_line_wait_ok" in marlin, "Start-from-home serial service moves must wait for ok.", failures)
+    require_regex(
+        marlin,
+        r"def _start_sd_print_from_home_once\(.*?send_line_wait_ok",
+        "Start-from-home movement must wait for each move before selecting and starting SD print.",
+        failures,
+    )
+    require("sdtool.run_commands_wait_ok" in app, "App jog/level service moves must use ok-waiting serial commands.", failures)
     require(
-        "elif self._can_return_from_known_post_print_pose() and not self.session_zero_defined:" in app,
+        "elif self._can_return_from_known_post_print_pose() and not self._home_is_trusted():" in app,
         "Post-print M114 recovery must not override a still-trusted live session zero.",
+        failures,
+    )
+    require(
+        'sdtool.run_commands(self._port(), self._baud(), ["G90", "G28"]' not in app,
+        "The app must not send G28 for this no-endstop K9 workflow.",
         failures,
     )
 
@@ -71,7 +89,7 @@ def main() -> int:
     require(re.search(r"^\s*G28\b", emitted_gcode, re.MULTILINE) is None, "Slicing helper must not emit G28.", failures)
     require("M204 P250 T120" in slicer, "End G-code must start with gentle presentation M204.", failures)
     require("G1 X95 F900" in slicer, "End G-code must keep gentle X presentation move.", failures)
-    require("G1 Y95 F600" in slicer, "End G-code must present bed toward the operator at F600.", failures)
+    require("G1 Y95 F240" in slicer, "End G-code must present bed toward the operator at F240.", failures)
     require("M84" not in slicer and "M18" not in slicer, "Slicing helper must not disable steppers at print end.", failures)
 
     require("is_unvalidated_modulebot_stl" in slicer, "Raw moduleBot STL orientation guard is missing.", failures)
@@ -88,7 +106,7 @@ def main() -> int:
     require("initial_layer_line_width_factor = 155" in cura_extruder, "Initial layer width must remain 155%.", failures)
     require("material_print_temperature_layer_0 = 226" in cura_extruder, "First-layer PLA target must remain 226C.", failures)
     require("cool_fan_enabled = False" in cura_extruder, "K9 part-cooling must remain disabled.", failures)
-    require("G1 Y95 F600" in cura_machine, "Tracked Cura machine end G-code must present bed toward operator.", failures)
+    require("G1 Y95 F240" in cura_machine, "Tracked Cura machine end G-code must present bed toward operator at F240.", failures)
     require("M84" not in cura_machine and "M18" not in cura_machine, "Tracked Cura machine end G-code must not disable steppers.", failures)
 
     if failures:

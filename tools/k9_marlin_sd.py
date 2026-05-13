@@ -42,7 +42,7 @@ TRANSIENT_SERIAL_ERROR_MARKERS = (
 )
 SOFT_TRAVEL_ACCEL = 80
 RESTORE_TRAVEL_ACCEL = SOFT_TRAVEL_ACCEL
-SAFE_BED_FEEDRATE = 600
+SAFE_BED_FEEDRATE = 240
 SAFE_VERTICAL_FEEDRATE = 600
 SAFE_X_FEEDRATE = 900
 POSITION_RE = re.compile(r"X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)")
@@ -318,6 +318,20 @@ def run_commands(
         return read_for(ser, read_seconds)
 
 
+def send_line_wait_ok(ser: serial.Serial, command: str, *, timeout_s: float = 35.0) -> str:
+    send_line(ser, command)
+    reply = read_until_tokens(ser, ("ok", "Error:", "Resend:"), timeout_s=timeout_s)
+    lowered = reply.lower()
+    if "error:" in lowered or "resend:" in lowered:
+        raise RuntimeError(f"Printer rejected `{command}`: {reply.strip() or '<no response>'}")
+    if not reply.strip():
+        raise RuntimeError(f"Printer did not acknowledge `{command}`")
+    acknowledged = "ok" in lowered or (command.upper().startswith("M114") and "x:" in lowered)
+    if not acknowledged:
+        raise RuntimeError(f"Printer did not finish `{command}` cleanly: {reply.strip()}")
+    return reply
+
+
 def run_commands_wait_ok(
     port: str,
     baud: int,
@@ -330,17 +344,8 @@ def run_commands_wait_ok(
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         for command in commands:
-            send_line(ser, command)
-            reply = read_until_tokens(ser, ("ok", "Error:", "Resend:"), timeout_s=per_command_timeout)
+            reply = send_line_wait_ok(ser, command, timeout_s=per_command_timeout)
             chunks.append(reply)
-            lowered = reply.lower()
-            if "error:" in lowered or "resend:" in lowered:
-                raise RuntimeError(f"Printer rejected `{command}`: {reply.strip() or '<no response>'}")
-            if not reply.strip():
-                raise RuntimeError(f"Printer did not acknowledge `{command}`")
-            acknowledged = "ok" in lowered or (command.upper().startswith("M114") and "x:" in lowered)
-            if not acknowledged:
-                raise RuntimeError(f"Printer did not finish `{command}` cleanly: {reply.strip()}")
             time.sleep(settle_after_each)
         chunks.append(read_for(ser, 0.4))
     return "".join(chunks)
@@ -554,6 +559,7 @@ def _start_sd_print_from_home_once(port: str, baud: int, target: str) -> str:
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
+        move_chunks: list[str] = []
         for line in (
             "M17",
             "G90",
@@ -565,14 +571,14 @@ def _start_sd_print_from_home_once(port: str, baud: int, target: str) -> str:
                 f"G1 Z0 F{SAFE_VERTICAL_FEEDRATE}",
             ]),
         ):
-            send_line(ser, line)
-            time.sleep(0.5)
-        _ = read_for(ser, 2.0)
+            move_chunks.append(send_line_wait_ok(ser, line, timeout_s=45.0))
+            time.sleep(0.05)
+        move_out = "".join(move_chunks) + read_for(ser, 0.4)
         select_out = _select_sd_file_for_print(ser, target)
         send_line(ser, "M24")
         time.sleep(0.8)
         try:
-            out = select_out + read_for(ser, 2.5)
+            out = move_out + select_out + read_for(ser, 2.5)
         except Exception as exc:
             if is_transient_serial_error(exc):
                 return f"M24 sent for {target} after start-pose move; USB read ended early: {exc}"
@@ -614,7 +620,7 @@ def pseudo_home_to_zero(port: str, baud: int) -> str:
             "M400",
             f"G1 X-130 F{SAFE_X_FEEDRATE}",
             "M400",
-            "G1 Y-130 F600",
+            f"G1 Y-130 F{SAFE_BED_FEEDRATE}",
             "M400",
             "G1 Z-120 F300",
             "M400",
@@ -696,6 +702,7 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
         ensure_sd_ready(ser)
+        move_chunks: list[str] = []
         for line in (
             "M17",
             "G90",
@@ -706,7 +713,7 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
             "M400",
             f"G1 X-130 F{SAFE_X_FEEDRATE}",
             "M400",
-            "G1 Y-130 F600",
+            f"G1 Y-130 F{SAFE_BED_FEEDRATE}",
             "M400",
             "G1 Z-120 F300",
             "M400",
@@ -714,14 +721,14 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
             "G90",
             "G92 X0 Y0 Z0",
         ):
-            send_line(ser, line)
-            time.sleep(0.5)
-        _ = read_for(ser, 5.0)
+            move_chunks.append(send_line_wait_ok(ser, line, timeout_s=60.0))
+            time.sleep(0.05)
+        move_out = "".join(move_chunks) + read_for(ser, 0.4)
         select_out = _select_sd_file_for_print(ser, target)
         send_line(ser, "M24")
         time.sleep(0.8)
         try:
-            out = select_out + read_for(ser, 2.5)
+            out = move_out + select_out + read_for(ser, 2.5)
         except Exception as exc:
             if is_transient_serial_error(exc):
                 return f"M24 sent for {target} after pseudo-home; USB read ended early: {exc}"

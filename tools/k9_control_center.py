@@ -83,12 +83,17 @@ HEATER_RE = re.compile(r"@:(\d+)")
 SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 HOTEND_TARGET_RE = re.compile(r"\bS([-+]?\d+(?:\.\d+)?)\b", re.IGNORECASE)
 PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
+HOME_TRUST_TRUSTED = "trusted"
+HOME_TRUST_UNCERTAIN = "uncertain"
+HOME_TRUST_INVALID = "invalid"
 JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
 JOG_DEFAULT_STEP_MM = 5.0
 SERVICE_X_FEEDRATE = 900
+SERVICE_BED_FEEDRATE = 240
+JOG_BED_FEEDRATE = 300
 JOG_FEEDRATES = {
     "X": SERVICE_X_FEEDRATE,
-    "Y": 600,
+    "Y": JOG_BED_FEEDRATE,
     "Z": 600,
 }
 JOG_TRAVEL_ACCEL = {
@@ -359,6 +364,8 @@ class K9ControlCenter:
         self.first_sd_progress_ts: float | None = None
         self.last_sd_progress_ts: float | None = None
         self.suppress_next_completion_chime = False
+        self.home_trust = HOME_TRUST_INVALID
+        self.home_trust_reason = "start pose not saved in this app session"
         self.session_zero_defined = False
         self.at_saved_start_pose = False
         self.post_print_pose_known = False
@@ -432,6 +439,7 @@ class K9ControlCenter:
         self._restore_persistent_print_state()
 
         self._build_ui()
+        self._sync_home_controls()
         self.step_var.trace_add("write", self._on_jog_step_changed)
         if self.pending_flash_finalize:
             source_name = str(self.pending_flash_finalize.get("source_name", "mksLite.bin"))
@@ -1050,6 +1058,63 @@ class K9ControlCenter:
 
     def _on_jog_step_changed(self, *_args) -> None:
         self._save_ui_state()
+
+    def _home_trust_label(self) -> str:
+        lang = self.lang_var.get().strip() or "ru"
+        labels = {
+            HOME_TRUST_TRUSTED: {"ru": "доверенный", "en": "trusted", "zh": "可信"},
+            HOME_TRUST_UNCERTAIN: {"ru": "сомнительный", "en": "uncertain", "zh": "不确定"},
+            HOME_TRUST_INVALID: {"ru": "не задан", "en": "invalid", "zh": "无效"},
+        }
+        return labels.get(self.home_trust, labels[HOME_TRUST_INVALID]).get(lang, labels[HOME_TRUST_INVALID]["ru"])
+
+    def _home_is_trusted(self) -> bool:
+        return bool(self.home_trust == HOME_TRUST_TRUSTED and self.session_zero_defined)
+
+    def _sync_home_controls(self) -> None:
+        trusted = self._home_is_trusted()
+        go_state = "normal" if trusted and not self.user_task_pending else "disabled"
+        start_state = "normal" if trusted and not self.user_task_pending else "disabled"
+        guarded_buttons = (
+            ("go_start_button", go_state),
+            ("start_print_button", start_state),
+            ("upload_and_start_button", start_state),
+        )
+        for name, state in guarded_buttons:
+            widget = getattr(self, name, None)
+            if widget is not None:
+                try:
+                    widget.configure(state=state)
+                except Exception:
+                    pass
+
+    def _apply_home_trust(self, state: str, reason: str = "", *, log_change: bool = False) -> None:
+        if state not in {HOME_TRUST_TRUSTED, HOME_TRUST_UNCERTAIN, HOME_TRUST_INVALID}:
+            state = HOME_TRUST_INVALID
+        previous = getattr(self, "home_trust", HOME_TRUST_INVALID)
+        self.home_trust = state
+        self.home_trust_reason = reason
+        self.session_zero_defined = state == HOME_TRUST_TRUSTED
+        if state != HOME_TRUST_TRUSTED:
+            self.at_saved_start_pose = False
+        self._sync_home_controls()
+        if log_change and (previous != state or reason):
+            label = self._home_trust_label()
+            detail = f": {reason}" if reason else ""
+            self.log(f"Home trust: {label}{detail}")
+
+    def _set_home_trust(self, state: str, reason: str = "", *, log_change: bool = False) -> None:
+        if threading.current_thread() is threading.main_thread():
+            self._apply_home_trust(state, reason, log_change=log_change)
+            return
+        if state not in {HOME_TRUST_TRUSTED, HOME_TRUST_UNCERTAIN, HOME_TRUST_INVALID}:
+            state = HOME_TRUST_INVALID
+        self.home_trust = state
+        self.home_trust_reason = reason
+        self.session_zero_defined = state == HOME_TRUST_TRUSTED
+        if state != HOME_TRUST_TRUSTED:
+            self.at_saved_start_pose = False
+        self._post("home-trust", (state, reason, log_change))
 
     def _save_ui_state(self) -> None:
         state: dict[str, object] = {"geometry": self.root.winfo_geometry()}
@@ -2072,6 +2137,8 @@ class K9ControlCenter:
         heater_line = f"Heater PWM @: {self.last_heater_power if self.last_heater_power is not None else '?'}"
         pos_line = self.last_position_line
         zero_line = {"ru": ("да" if self.session_zero_defined else "нет"), "en": ("yes" if self.session_zero_defined else "no"), "zh": ("是" if self.session_zero_defined else "否")}[lang]
+        home_reason = f" ({self.home_trust_reason})" if self.home_trust_reason else ""
+        home_line = f"{ {'ru': 'Home', 'en': 'Home', 'zh': 'Home'}[lang] }: {self._home_trust_label()}{home_reason}"
         fw_line = self.last_fw_identity or "-"
         if self.current_print_start_ts:
             self.print_start_var.set(self._format_label_value("start_time", time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))))
@@ -2087,6 +2154,7 @@ class K9ControlCenter:
             self.progress_var.get(),
             f"{ {'ru': 'Файл', 'en': 'File', 'zh': '文件'}[lang] }: {self.current_print_display if self.current_print_display != '-' else self.current_print_file}",
             f"{ {'ru': 'Позиция', 'en': 'Position', 'zh': '位置'}[lang] }: {pos_line}",
+            home_line,
             f"{ {'ru': 'Старт сохранён', 'en': 'Start saved', 'zh': '起点已保存'}[lang] }: {zero_line}",
             f"{ {'ru': 'Прошивка', 'en': 'Firmware', 'zh': '固件'}[lang] }: {fw_line}",
             age_line,
@@ -2177,6 +2245,7 @@ class K9ControlCenter:
         frame = ttk.LabelFrame(win, text=self._t("files_and_firmware"), padding=10)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
         self._populate_files_firmware_container(frame)
+        self._sync_home_controls()
 
         def _on_close() -> None:
             self.files_window = None
@@ -2240,6 +2309,8 @@ class K9ControlCenter:
                 widget.configure(state=state)
             except Exception:
                 pass
+        if not busy:
+            self._sync_home_controls()
         if busy and label and "g-code" in label.lower():
             self.progress_var.set("Upload: writing to SD...")
             self.progress_bar.configure(mode="indeterminate")
@@ -2362,6 +2433,9 @@ class K9ControlCenter:
             elif kind == "find-port-ui":
                 active = bool(payload)
                 self._set_find_port_busy(active)
+            elif kind == "home-trust":
+                state, reason, log_change = payload  # type: ignore[misc]
+                self._apply_home_trust(str(state), str(reason), log_change=bool(log_change))
             elif kind == "post-print-recovery":
                 reason = str(payload or "completion")
                 self.post_print_recovery_required = True
@@ -2618,8 +2692,7 @@ class K9ControlCenter:
         selected_device = preferred or self.port_var.get().strip()
         if not selected_device:
             if previous_device:
-                self.session_zero_defined = False
-                self.at_saved_start_pose = False
+                self._set_home_trust(HOME_TRUST_INVALID, "printer port disconnected", log_change=True)
                 self.post_print_pose_known = False
                 self.post_print_pose = None
             self.port_display_var.set(disconnected_label)
@@ -2629,8 +2702,7 @@ class K9ControlCenter:
             for meta in safe_ports:
                 if meta.get("device") == selected_device:
                     if previous_device and selected_device != previous_device:
-                        self.session_zero_defined = False
-                        self.at_saved_start_pose = False
+                        self._set_home_trust(HOME_TRUST_INVALID, "printer port changed", log_change=True)
                         self.post_print_pose_known = False
                         self.post_print_pose = None
                     self.port_display_var.set(self._port_label(meta))
@@ -2644,8 +2716,7 @@ class K9ControlCenter:
                 "Команды на него отправляться не будут."
             )
         if previous_device:
-            self.session_zero_defined = False
-            self.at_saved_start_pose = False
+            self._set_home_trust(HOME_TRUST_INVALID, "printer port is not available", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
         self.port_display_var.set(disconnected_label)
@@ -2659,8 +2730,7 @@ class K9ControlCenter:
         device = text.split(" — ", 1)[0].strip() if text else ""
         if device:
             if self.port_var.get().strip() and self.port_var.get().strip() != device:
-                self.session_zero_defined = False
-                self.at_saved_start_pose = False
+                self._set_home_trust(HOME_TRUST_INVALID, "printer port changed", log_change=True)
                 self.post_print_pose_known = False
                 self.post_print_pose = None
             self.port_var.set(device)
@@ -2675,8 +2745,7 @@ class K9ControlCenter:
         self.auto_sd_refresh_after_port = None
         self.busy_var.set("USB: отключен")
         if had_port:
-            self.session_zero_defined = False
-            self.at_saved_start_pose = False
+            self._set_home_trust(HOME_TRUST_INVALID, "printer port disconnected", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
         if log_change:
@@ -3117,7 +3186,7 @@ class K9ControlCenter:
             "G91",
             "G1 Z20 F600",
             "G90",
-            "G1 Y95 F600",
+            f"G1 Y95 F{SERVICE_BED_FEEDRATE}",
             "M400",
             f"M204 T{JOG_RESTORE_TRAVEL_ACCEL}",
             "M114",
@@ -3751,7 +3820,7 @@ class K9ControlCenter:
             self._post("sd", sd.strip() or "SD: unknown")
             self._post("metrics", ("m115", caps))
             self._post("log", caps.strip())
-            if self.session_zero_defined:
+            if self._home_is_trusted():
                 self._post("log", "Статус снят: сохранённая стартовая поза в приложении оставлена активной.")
             else:
                 self._post("log", "Статус снят. Если был power cycle или перезапуск приложения, выставь стартовую позу и нажми 'Запомнить старт'.")
@@ -3942,7 +4011,7 @@ class K9ControlCenter:
     def upload_and_start_gcode(self) -> None:
         if not self._guard_post_print_recovery():
             return
-        if not self.session_zero_defined:
+        if not self._home_is_trusted():
             self._show_missing_start_zero()
             return
         source = Path(self.local_gcode_var.get().strip()).expanduser().resolve()
@@ -4002,6 +4071,7 @@ class K9ControlCenter:
                     self.at_saved_start_pose = True
             except Exception:
                 self._clear_predicted_print_end()
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "upload-and-start failed after motion/start attempt", log_change=True)
                 raise
             self._mark_sd_start_sent(dest, source.name)
             self._post("log", out.strip() or f"Печать запущена от сохранённого старта: {source.name}")
@@ -4102,6 +4172,9 @@ class K9ControlCenter:
         if not path:
             messagebox.showerror("K9 Control Center", "Выбери файл в секции 'Файлы для печати'.")
             return
+        if not self._home_is_trusted():
+            self._show_missing_start_zero()
+            return
 
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
@@ -4131,7 +4204,7 @@ class K9ControlCenter:
         if not path:
             messagebox.showerror("Little Hands", "Выбери файл в секции 'Файлы для печати'.")
             return
-        if not self.session_zero_defined:
+        if not self._home_is_trusted():
             self._show_missing_start_zero()
             return
 
@@ -4150,6 +4223,7 @@ class K9ControlCenter:
                     start_note = "Печать с SD запущена от сохранённого старта"
             except Exception:
                 self._clear_predicted_print_end()
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD print start failed after motion/start attempt", log_change=True)
                 raise
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"{start_note}: {display}")
@@ -4265,8 +4339,11 @@ class K9ControlCenter:
             finally:
                 self._clear_print_session_state("Печать: остановлена", 0.0)
                 self.bed_clear_before_go_start_required = True
-                self.session_zero_defined = False
-                self.at_saved_start_pose = False
+                self._set_home_trust(
+                    HOME_TRUST_UNCERTAIN if stop_pose is not None else HOME_TRUST_INVALID,
+                    "print stopped; physical position must be recovered or start must be re-saved",
+                    log_change=True,
+                )
                 self.stopped_print_pose = stop_pose
                 self.stopped_print_display = stopped_display or "-"
             if out.strip():
@@ -4320,8 +4397,7 @@ class K9ControlCenter:
             finally:
                 self._clear_print_session_state("Печать: жёсткий стоп", 0.0)
                 self.bed_clear_before_go_start_required = True
-                self.session_zero_defined = False
-                self.at_saved_start_pose = False
+                self._set_home_trust(HOME_TRUST_INVALID, "hard stop disabled steppers", log_change=True)
                 self.stopped_print_pose = None
                 self.stopped_print_display = "-"
             if out.strip():
@@ -4351,20 +4427,22 @@ class K9ControlCenter:
 
     def home_all(self) -> None:
         def task() -> None:
-            self.session_zero_defined = False
-            self.at_saved_start_pose = False
+            self._set_home_trust(HOME_TRUST_INVALID, "G28 is disabled for this K9 workflow", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
             self._clear_predicted_print_end()
-            out = sdtool.run_commands(self._port(), self._baud(), ["G90", "G28"], final_wait=1.2, read_seconds=2.0)
-            self._post("log", out.strip() or "Home выполнен")
+            self._post(
+                "log",
+                "Обычный G28 отключён: у текущего K9 нет надёжного home по концевикам. "
+                "Выставь стартовую позу вручную и нажми 'Запомнить старт'.",
+            )
 
         self._run_task("Home всех осей", task)
 
     def set_current_home_zero(self) -> None:
         def task() -> None:
             out = sdtool.set_current_home_zero(self._port(), self._baud())
-            self.session_zero_defined = True
+            self._set_home_trust(HOME_TRUST_TRUSTED, "operator saved current physical start", log_change=True)
             self.at_saved_start_pose = True
             self.bed_clear_before_go_start_required = False
             self.stopped_print_pose = None
@@ -4429,7 +4507,7 @@ class K9ControlCenter:
     def _can_return_from_predicted_print_end_pose(self) -> bool:
         return bool(
             self._port()
-            and not self.session_zero_defined
+            and not self._home_is_trusted()
             and self.predicted_print_end_valid
             and self.predicted_print_end_file != "-"
             and self.predicted_print_end_contract == PRINT_END_CONTRACT
@@ -4439,7 +4517,7 @@ class K9ControlCenter:
     def _has_unusable_predicted_print_end(self) -> bool:
         return bool(
             self._port()
-            and not self.session_zero_defined
+            and not self._home_is_trusted()
             and self.predicted_print_end_valid
             and self.predicted_print_end_file != "-"
             and self.predicted_print_end_z is None
@@ -4600,7 +4678,7 @@ class K9ControlCenter:
             return
         use_stopped_print_pose = False
         stopped_pose = self.stopped_print_pose
-        if not self.session_zero_defined and self.bed_clear_before_go_start_required and stopped_pose is not None:
+        if not self._home_is_trusted() and self.bed_clear_before_go_start_required and stopped_pose is not None:
             if not self._confirm_aborted_print_recovery(stopped_pose):
                 return
             use_stopped_print_pose = True
@@ -4619,14 +4697,14 @@ class K9ControlCenter:
                 "Выполняю recovery к старту после остановленной печати: использую позицию, "
                 "снятую до M524, затем возвращаюсь в X0 Y0 Z0."
             )
-        elif self._can_return_from_known_post_print_pose() and not self.session_zero_defined:
+        elif self._can_return_from_known_post_print_pose() and not self._home_is_trusted():
             post_print_pose = self.post_print_pose
             use_post_print_pose = True
             self.log(
                 "Использую реальную послепечатную позу M114: Little Hands видел завершение печати. "
                 "Возврат к старту допустим только после снятия модели со стола."
             )
-        elif not self.session_zero_defined and self._can_return_from_predicted_print_end_pose():
+        elif not self._home_is_trusted() and self._can_return_from_predicted_print_end_pose():
             choice = self._confirm_predicted_print_return()
             if choice is None:
                 return
@@ -4639,12 +4717,12 @@ class K9ControlCenter:
                 "Пробую recovery-возврат по сохранённой модели print-end. "
                 "Оператор подтвердил: печать закончилась, модель снята, физическая конечная поза не сбита."
             )
-        elif not self.session_zero_defined and self._has_unusable_predicted_print_end():
+        elif not self._home_is_trusted() and self._has_unusable_predicted_print_end():
             if self._confirm_clear_unusable_predicted_print_end():
                 self._clear_print_session_state("Печать: неполный print-end удалён", 0.0)
                 self.log("Неполный print-end удалён. Выставь стартовую позу вручную и нажми 'Запомнить старт'.")
             return
-        elif (self.post_print_recovery_required or self.bed_clear_before_go_start_required) and not self.session_zero_defined:
+        elif (self.post_print_recovery_required or self.bed_clear_before_go_start_required) and not self._home_is_trusted():
             msg = (
                 "После завершения или остановки печати нет надёжной сохранённой позы для автоматического 'К старту'. "
                 "Чтобы не увести сопло в модель или за край, выставь стартовую позу ручными кнопками и нажми 'Запомнить старт'."
@@ -4657,42 +4735,48 @@ class K9ControlCenter:
                 "Текущая Marlin-сессия ещё хранит сохранённый ноль: возвращаюсь обычным G1 X0 Y0 Z0 "
                 "без переобъявления координат через послепечатный M114."
             )
-        elif not self.session_zero_defined:
+        elif not self._home_is_trusted():
             self._show_missing_start_zero()
             return
 
         def task() -> None:
-            if use_stopped_print_pose:
-                assert stopped_pose is not None
-                out = sdtool.goto_print_home_from_predicted_end(
-                    self._port(),
-                    self._baud(),
-                    end_x=stopped_pose[0],
-                    end_y=stopped_pose[1],
-                    end_z=stopped_pose[2],
-                )
-            elif use_predicted_print_end_pose:
-                assert self.predicted_print_end_z is not None
-                out = sdtool.goto_print_home_from_predicted_end(
-                    self._port(),
-                    self._baud(),
-                    end_x=self.predicted_print_end_x,
-                    end_y=self.predicted_print_end_y,
-                    end_z=self.predicted_print_end_z,
-                )
-            elif use_post_print_pose:
-                assert post_print_pose is not None
-                out = sdtool.goto_print_home_from_predicted_end(
-                    self._port(),
-                    self._baud(),
-                    end_x=post_print_pose[0],
-                    end_y=post_print_pose[1],
-                    end_z=post_print_pose[2],
-                )
-            else:
-                out = sdtool.goto_print_home(self._port(), self._baud())
+            try:
+                if use_stopped_print_pose:
+                    assert stopped_pose is not None
+                    out = sdtool.goto_print_home_from_predicted_end(
+                        self._port(),
+                        self._baud(),
+                        end_x=stopped_pose[0],
+                        end_y=stopped_pose[1],
+                        end_z=stopped_pose[2],
+                    )
+                elif use_predicted_print_end_pose:
+                    assert self.predicted_print_end_z is not None
+                    out = sdtool.goto_print_home_from_predicted_end(
+                        self._port(),
+                        self._baud(),
+                        end_x=self.predicted_print_end_x,
+                        end_y=self.predicted_print_end_y,
+                        end_z=self.predicted_print_end_z,
+                    )
+                elif use_post_print_pose:
+                    assert post_print_pose is not None
+                    out = sdtool.goto_print_home_from_predicted_end(
+                        self._port(),
+                        self._baud(),
+                        end_x=post_print_pose[0],
+                        end_y=post_print_pose[1],
+                        end_z=post_print_pose[2],
+                    )
+                else:
+                    out = sdtool.goto_print_home(self._port(), self._baud())
+            except Exception:
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "go-to-start failed; physical position is not trusted", log_change=True)
+                raise
             if use_stopped_print_pose or use_post_print_pose or use_predicted_print_end_pose:
-                self.session_zero_defined = True
+                self._set_home_trust(HOME_TRUST_TRUSTED, "recovered to saved start", log_change=True)
+            elif self._home_is_trusted():
+                self._set_home_trust(HOME_TRUST_TRUSTED, "returned to saved start", log_change=False)
             self.at_saved_start_pose = True
             self.bed_clear_before_go_start_required = False
             self.stopped_print_pose = None
@@ -4752,8 +4836,7 @@ class K9ControlCenter:
 
     def motor_off(self) -> None:
         def task() -> None:
-            self.session_zero_defined = False
-            self.at_saved_start_pose = False
+            self._set_home_trust(HOME_TRUST_INVALID, "motors were disabled", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
             self._clear_predicted_print_end()
@@ -4788,13 +4871,16 @@ class K9ControlCenter:
             if travel_accel is not None:
                 commands.append(f"M204 T{JOG_RESTORE_TRAVEL_ACCEL}")
             commands.append("G90")
-            out = sdtool.run_commands(
-                self._port(),
-                self._baud(),
-                commands,
-                final_wait=0.8,
-                read_seconds=1.5,
-            )
+            try:
+                out = sdtool.run_commands_wait_ok(
+                    self._port(),
+                    self._baud(),
+                    commands,
+                    per_command_timeout=45.0,
+                )
+            except Exception:
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "manual jog failed; app position model is not trusted", log_change=True)
+                raise
             useful_lines = [
                 line.strip()
                 for line in out.splitlines()
@@ -4811,23 +4897,26 @@ class K9ControlCenter:
             self.post_print_pose_known = False
             self.post_print_pose = None
             self._clear_predicted_print_end()
-            out = sdtool.run_commands(
-                self._port(),
-                self._baud(),
-                [
-                    "G90",
-                    "M211 S0",
-                    "M204 T80",
-                    "G1 Z10 F600",
-                    f"G1 X{x:.2f} F{SERVICE_X_FEEDRATE}",
-                    f"G1 Y{y:.2f} F600",
-                    "G1 Z0 F600",
-                    "M400",
-                    f"M204 T{JOG_RESTORE_TRAVEL_ACCEL}",
-                ],
-                final_wait=0.8,
-                read_seconds=2.0,
-            )
+            try:
+                out = sdtool.run_commands_wait_ok(
+                    self._port(),
+                    self._baud(),
+                    [
+                        "G90",
+                        "M211 S0",
+                        "M204 T80",
+                        "G1 Z10 F600",
+                        f"G1 X{x:.2f} F{SERVICE_X_FEEDRATE}",
+                        f"G1 Y{y:.2f} F{SERVICE_BED_FEEDRATE}",
+                        "G1 Z0 F600",
+                        "M400",
+                        f"M204 T{JOG_RESTORE_TRAVEL_ACCEL}",
+                    ],
+                    per_command_timeout=45.0,
+                )
+            except Exception:
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "bed-level move failed; app position model is not trusted", log_change=True)
+                raise
             self._post("log", out.strip() or f"Переход к точке X{x:.0f} Y{y:.0f}")
 
         self._run_task(f"Переход к точке X{x:.0f} Y{y:.0f}", task)

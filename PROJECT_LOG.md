@@ -2325,8 +2325,8 @@ After each test print, append:
   - Little Hands now persists the selected manual jog step in `little_hands_ui_state.json`
   - manual jog log messages now include the physical hint, commanded distance, raw G-code axis, and feedrate
   - stale active-print state from logs / persisted print state expires after 30 minutes, so the app should not rebuild a trusted post-print coordinate model after a long idle
-  - manual jog feedrates are explicit: `X F2400`, bed/logical `Y F600`, head vertical/logical `Z F600`
-  - bed/logical `Y` and head vertical/logical `Z` jogs temporarily lower travel acceleration with `M204 T80`, wait for `M400`, then restore `M204 T1000`
+  - manual jog feedrates are explicit: `X F900`, bed/logical `Y F300`, head vertical/logical `Z F600`
+  - bed/logical `Y` and head vertical/logical `Z` jogs temporarily lower travel acceleration with `M204 T80`, wait for `M400`, then keep the soft service-idle acceleration instead of restoring aggressive EEPROM travel acceleration
 - Rationale:
   - the dangerous case was not a bad `M92`, but trusting old print/position state after the printer may have been power-cycled or left idle
   - the confirmed slow `Y +/-5 mm F300` test moved the bed both ways, so the channel and motor were not treated as failed hardware
@@ -2503,3 +2503,27 @@ After each test print, append:
   - print G-code remains responsible for setting its own conservative print/travel accelerations
 - Regression coverage added:
   - `tools/regression_checks.py` checks the protected motion constants, no hard-coded service `M204 T1000`, wait-for-ok recovery paths, ModuleBot orientation guards, K9 end-gcode, and tracked Cura baseline settings
+
+## 2026-05-13 Explicit Home Trust And Bed Speed Bounds
+
+- Field correction:
+  - the latest bed "buzzes but does not move" episode was reproduced as an application/control-path problem, not a proven dead motor or driver
+  - direct console tests using the ok-waiting command helper moved the bed successfully in both directions
+  - `F60`, `F120`, `F180`, `F240`, `F300`, `F420`, and `F600` all worked for short `5 mm` diagnostic bed moves with `M204 T80`
+  - `F300` worked for longer `20 mm` diagnostic bed moves
+  - a `30 mm` bed-away move at `F300` also completed normally after the user confirmed the previous "near edge" interpretation was wrong
+- App fix:
+  - Little Hands now treats home as an explicit trust state: `trusted`, `uncertain`, or `invalid`
+  - `Save start` is the normal way to create trusted home
+  - confirmed `Go to start` / recovery can restore trusted home
+  - port changes, disconnects, motor-off, hard stop, failed jog, failed recovery, failed start, and stopped prints mark home uncertain or invalid
+  - SD start, upload-and-start, and `Go to start` are blocked unless home is trusted or the operator confirms a dedicated post-print recovery path
+- Motion rule:
+  - manual bed jog uses `F300`
+  - long bed service/recovery/completion presentation moves use `F240`
+  - short `F600` bed moves are allowed only as explicit diagnostics until long-distance `F600` is separately validated
+  - app jog and bed-level moves now use `run_commands_wait_ok`, not the older fire-and-read command batch
+  - SD start-from-home movement now waits for each service move to be acknowledged before selecting the SD file and sending `M24`
+- Cura rule:
+  - end-gcode now presents the bed with `G1 Y95 F240`
+  - the tracked Cura profile, slicing helper, project rules, and regression checks were updated to match that lower long-motion limit
