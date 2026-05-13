@@ -119,7 +119,7 @@ python3 tools/k9_control_center.py
 4. В Cura выбери:
    - машина: `lilHands K9 warm mat`
    - профиль: `codex - K9 warm mat cautious`
-   - brim: `6 mm`
+   - brim: `14 mm`
    - поддержки для `mainFlasherTop.STL`: everywhere, interface / roof включены, support angle `35`
 
 Публичная зафиксированная копия Cura baseline лежит в [docs/cura/](docs/cura/).

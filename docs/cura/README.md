@@ -5,7 +5,7 @@ This directory contains the current tracked Cura baseline for the validated Easy
 - Cura version used during testing: `5.11`
 - Machine: `lilHands K9 warm mat`
 - Profile: `codex - K9 warm mat cautious`
-- Brim: `12 mm`
+- Brim: `14 mm`
 - PLA temperature: `225C` first layer, `224C` after that
 - Bed temperature in G-code: `0C`, because the warm bed is external
 - Part cooling: `off`; the single K9 fan is the firmware-managed hotend fan, not an independent part-cooling fan

@@ -3463,6 +3463,13 @@ class K9ControlCenter:
 
         if source.name.lower().endswith("_k9xz.gcode"):
             errors.append("Файл похож на старый `_k9xz.gcode` с ремапом плоскости. Для текущей LH-v4 нужен обычный Cura G-code.")
+        filament_m = info.get("filament_m")
+        if "modulebot" in source.name.lower() and isinstance(filament_m, (int, float)) and filament_m > 15.0:
+            errors.append(
+                f"`moduleBot` выглядит подозрительно: Cura оценила пластик как {filament_m:.1f} m. "
+                "Для проверенной ориентации этой модели ожидается примерно 9-11 m; "
+                "такой файл похож на случайный upside-down/support-heavy slice."
+            )
         if info.get("has_g28"):
             errors.append(
                 "Найден `G28`"

@@ -146,6 +146,12 @@ G1 Y95 F600 ;Move bed toward the operator
 
 如果 preview 没有在问题底面下方显示支撑，不要打印。调整 support placement / threshold，直到 preview 中确实出现所需支撑。
 
+## 模型方向检查
+
+对于 `moduleBot.STL`，在 Cura Preview 确认方向之前，不要直接打印新的切片。在 2026-05 测试中，直接切片原始 `moduleBot.STL` 曾生成一个倒置且支撑很多的文件。
+
+这个模型的实用检查方法：已验证方向通常约为 `9-11 m` 耗材。如果小型 `moduleBot` 切片突然显示约 `20 m+` 耗材，或出现大量支撑，请不要写入 SD；先在 Preview 中重新检查方向并重新切片。
+
 ## 回抽和桥接
 
 - Retraction：`on`

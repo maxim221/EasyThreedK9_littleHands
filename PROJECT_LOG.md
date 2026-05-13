@@ -2463,3 +2463,16 @@ After each test print, append:
   - SD recovery / pseudo-home X service moves now use `SAFE_X_FEEDRATE = 900` instead of `1800`
   - Cura end-gcode presentation move `G1 X95` now uses `F900`
 - Rule: if the head buzzes, skips, or moves weakly, treat it first as a service-motion speed / acceleration problem, not as a dead X motor or driver.
+
+## 2026-05-13 ModuleBot Upside-Down Slice Guard
+
+- Field failure:
+  - `exports/moduleBot_k9_warmmat_v6_antiwarp_floor.gcode` was generated from raw `moduleBot.STL` and printed upside down
+  - the bad slice was visibly support-heavy and reported about `22.3 m` filament instead of the expected `9-11 m` range for the intended broad-face-down orientation
+- Fix:
+  - the slicing helper now blocks direct raw `moduleBot.STL` slicing unless `--allow-unvalidated-modulebot-orientation` is passed explicitly
+  - Little Hands G-code validation blocks local `moduleBot` files whose filament estimate is above `15 m`, because that is a strong sign of the accidental upside-down/support-heavy slice
+  - the bad local export was removed from the top-level `exports/` workflow
+- Operator rule:
+  - for `moduleBot`, confirm orientation in Cura Preview before saving to SD
+  - if the slicer estimate jumps to about `20 m+` filament or shows a forest of supports, stop and re-check orientation before printing

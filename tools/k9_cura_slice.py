@@ -25,6 +25,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_APPIMAGE = Path("~/Applications/UltiMaker-Cura-5.11.0-linux-X64.AppImage").expanduser()
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "exports"
+VALIDATED_MODULEBOT_ORIENTED_STL = DEFAULT_OUTPUT_DIR / "mbnorm01_moduleBot_normal_orientation.stl"
+
+
+def is_unvalidated_modulebot_stl(path: Path) -> bool:
+    return path.name.lower() == "modulebot.stl"
 
 
 def parse_binary_stl_bounds(path: Path) -> tuple[float, float, float, float, float, float]:
@@ -486,12 +491,33 @@ def main() -> int:
     parser.add_argument("--bed-size", type=float, default=100.0, help="Validated square bed size in mm")
     parser.add_argument("--sd-mount", type=Path, default=None, help="Optional mounted SD card path to copy to")
     parser.add_argument("--sd-name", default=None, help="Optional filename to use on SD")
+    parser.add_argument(
+        "--allow-unvalidated-modulebot-orientation",
+        action="store_true",
+        help="Allow direct slicing of raw moduleBot.STL. This is blocked by default because it produced an upside-down K9 test print.",
+    )
     args = parser.parse_args()
 
     stl = args.stl.expanduser().resolve()
     if not stl.is_file():
         print(f"Error: STL not found: {stl}", file=sys.stderr)
         return 1
+    if is_unvalidated_modulebot_stl(stl) and not args.allow_unvalidated_modulebot_orientation:
+        print(
+            "Error: direct slicing of raw moduleBot.STL is blocked for this K9 workflow. "
+            "It previously produced an upside-down, support-heavy print.",
+            file=sys.stderr,
+        )
+        if VALIDATED_MODULEBOT_ORIENTED_STL.is_file():
+            print(
+                "Use the validated oriented STL instead, for example:\n"
+                f"  python3 tools/k9_cura_slice.py {VALIDATED_MODULEBOT_ORIENTED_STL} "
+                "--output exports/mbnorm02_moduleBot_broadface_v6_antiwarp_floor.gcode",
+                file=sys.stderr,
+            )
+        else:
+            print("Open the STL in Cura Preview first and confirm the intended broad-face-down orientation.", file=sys.stderr)
+        return 2
     appimage = args.appimage.expanduser().resolve()
     if not appimage.is_file():
         print(f"Error: Cura AppImage not found: {appimage}", file=sys.stderr)

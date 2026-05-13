@@ -146,6 +146,12 @@ If supports grip too hard, try these `easy-release` values first. Keep Z distanc
 
 If the slicer preview does not show supports under the problematic underside, do not print yet. Change support placement / threshold until the preview actually shows support where needed.
 
+## Model Orientation Sanity Check
+
+For `moduleBot.STL`, do not print a fresh slice until Cura Preview confirms the intended orientation. During 2026-05 testing, directly slicing the raw `moduleBot.STL` produced an upside-down, support-heavy file.
+
+A practical sanity check for this model: the validated orientation is usually around `9-11 m` of filament. If a small `moduleBot` slice suddenly shows about `20 m+` of filament or a forest of supports, do not save it to SD; re-check orientation in Preview and re-slice.
+
 ## Retraction And Bridges
 
 - Retraction: `on`
