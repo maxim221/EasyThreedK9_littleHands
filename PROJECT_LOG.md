@@ -2391,3 +2391,18 @@ After each test print, append:
   - if the hotend target is not accepted, no temperature data arrives, or temperature does not rise, the app sends `M104 S0` before reporting failure
 - Operator rule:
   - after this specific failure mode, power-cycle the printer before retrying, because the K9 USB/Marlin state may remain half-alive while still exposing the serial port
+
+## 2026-05-13 ModuleBot Supported Orientation Result
+
+- Field result:
+  - the latest `moduleBot` print completed successfully
+  - the model is intact
+  - support removal is now better than the earlier supported-orientation attempt
+- Working conclusion:
+  - the current supported orientation is a reliable baseline
+  - a normal-orientation test is now reasonable, but it should be treated as an A/B experiment against this successful baseline rather than a replacement profile yet
+- Next test file:
+  - generated a flipped broad-face-down STL copy at `exports/mbnorm01_moduleBot_normal_orientation.stl`
+  - sliced it with the same K9 warm-mat cautious profile as `exports/mbnorm01_moduleBot_normal_orientation.gcode`
+  - the filename intentionally starts with `mbnorm01`, so Little Hands / Marlin 8.3 naming should show it as `MBNORM01.GCO` instead of colliding with the previous `MODULEBO.GCO`
+  - validation result: no blocking K9 workflow errors; bounds `X 9.56..90.45`, `Y 11.98..88.02`, `Z 0.20..25.00`; hotend target `225C`
