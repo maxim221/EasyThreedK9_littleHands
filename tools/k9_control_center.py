@@ -3122,13 +3122,11 @@ class K9ControlCenter:
             "M204 T1000",
             "M114",
         ]
-        return sdtool.run_commands(
+        return sdtool.run_commands_wait_ok(
             self._port(),
             self._baud(),
             commands,
-            settle_after_each=0.15,
-            final_wait=0.6,
-            read_seconds=2.5,
+            per_command_timeout=45.0,
         )
 
     def _run_task(self, label: str, func, *, require_port: bool = True) -> None:
@@ -4621,7 +4619,7 @@ class K9ControlCenter:
                 "Выполняю recovery к старту после остановленной печати: использую позицию, "
                 "снятую до M524, затем возвращаюсь в X0 Y0 Z0."
             )
-        elif self._can_return_from_known_post_print_pose():
+        elif self._can_return_from_known_post_print_pose() and not self.session_zero_defined:
             post_print_pose = self.post_print_pose
             use_post_print_pose = True
             self.log(
@@ -4646,7 +4644,7 @@ class K9ControlCenter:
                 self._clear_print_session_state("Печать: неполный print-end удалён", 0.0)
                 self.log("Неполный print-end удалён. Выставь стартовую позу вручную и нажми 'Запомнить старт'.")
             return
-        elif self.post_print_recovery_required or self.bed_clear_before_go_start_required:
+        elif (self.post_print_recovery_required or self.bed_clear_before_go_start_required) and not self.session_zero_defined:
             msg = (
                 "После завершения или остановки печати нет надёжной сохранённой позы для автоматического 'К старту'. "
                 "Чтобы не увести сопло в модель или за край, выставь стартовую позу ручными кнопками и нажми 'Запомнить старт'."
@@ -4654,6 +4652,11 @@ class K9ControlCenter:
             self.log(msg)
             messagebox.showerror("Little Hands", msg)
             return
+        elif self.post_print_recovery_required or self.bed_clear_before_go_start_required:
+            self.log(
+                "Текущая Marlin-сессия ещё хранит сохранённый ноль: возвращаюсь обычным G1 X0 Y0 Z0 "
+                "без переобъявления координат через послепечатный M114."
+            )
         elif not self.session_zero_defined:
             self._show_missing_start_zero()
             return
@@ -4736,7 +4739,14 @@ class K9ControlCenter:
                 )
                 self._post("post-print-recovery", "completion")
             else:
+                self._save_print_state("returned-to-start", force=True)
                 self._post("log", out.strip() or "Принтер возвращён к стартовой позе")
+                if self.post_print_recovery_required:
+                    self._post(
+                        "log",
+                        "Если принтер физически стоит в старте, сделай power cycle перед следующей печатью и нажми 'Запомнить старт'. "
+                        "Если физически это не старт, выставь стартовую позу вручную.",
+                    )
 
         self._run_task("Переход к сохранённому 0", task)
 

@@ -318,6 +318,34 @@ def run_commands(
         return read_for(ser, read_seconds)
 
 
+def run_commands_wait_ok(
+    port: str,
+    baud: int,
+    commands: list[str],
+    *,
+    per_command_timeout: float = 35.0,
+    settle_after_each: float = 0.05,
+) -> str:
+    chunks: list[str] = []
+    with open_serial(port, baud) as ser:
+        sync_ascii(ser)
+        for command in commands:
+            send_line(ser, command)
+            reply = read_until_tokens(ser, ("ok", "Error:", "Resend:"), timeout_s=per_command_timeout)
+            chunks.append(reply)
+            lowered = reply.lower()
+            if "error:" in lowered or "resend:" in lowered:
+                raise RuntimeError(f"Printer rejected `{command}`: {reply.strip() or '<no response>'}")
+            if not reply.strip():
+                raise RuntimeError(f"Printer did not acknowledge `{command}`")
+            acknowledged = "ok" in lowered or (command.upper().startswith("M114") and "x:" in lowered)
+            if not acknowledged:
+                raise RuntimeError(f"Printer did not finish `{command}` cleanly: {reply.strip()}")
+            time.sleep(settle_after_each)
+        chunks.append(read_for(ser, 0.4))
+    return "".join(chunks)
+
+
 def parse_m20_listing(text: str) -> list[str]:
     files: list[str] = []
     in_list = False
@@ -602,7 +630,7 @@ def pseudo_home_to_zero(port: str, baud: int) -> str:
 
 
 def goto_print_home(port: str, baud: int) -> str:
-    return run_commands(
+    return run_commands_wait_ok(
         port,
         baud,
         [
@@ -617,8 +645,7 @@ def goto_print_home(port: str, baud: int) -> str:
             ]),
             "M114",
         ],
-        final_wait=0.8,
-        read_seconds=2.0,
+        per_command_timeout=45.0,
     )
 
 
@@ -647,13 +674,11 @@ def goto_print_home_from_predicted_end(
         ])
     )
     commands.extend(["G92 X0 Y0 Z0", "M114"])
-    return run_commands(
+    return run_commands_wait_ok(
         port,
         baud,
         commands,
-        settle_after_each=0.2,
-        final_wait=0.8,
-        read_seconds=2.5,
+        per_command_timeout=60.0,
     )
 
 

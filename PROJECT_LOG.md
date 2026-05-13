@@ -2476,3 +2476,15 @@ After each test print, append:
 - Operator rule:
   - for `moduleBot`, confirm orientation in Cura Preview before saving to SD
   - if the slicer estimate jumps to about `20 m+` filament or shows a forest of supports, stop and re-check orientation before printing
+
+## 2026-05-13 Post-Print Go-To-Start Correction
+
+- Field failure:
+  - after a completed print, `Go to start` reported recovery success but physically moved to the left/far bed corner instead of the operator's saved start pose
+  - the log showed Little Hands using the saved post-print `M114` pose (`X95 Y95 Z55`) even though the live Marlin session still had the print-start `G92` coordinate model
+- Fix:
+  - while the current Marlin session still has a trusted saved zero, `Go to start` now uses the live `G1 X0 Y0 Z0` path and does not re-declare coordinates from the post-print `M114`
+  - post-print / predicted recovery through `G92 end_x/end_y/end_z` is kept only for cases where the live session zero is no longer trusted
+  - home/recovery/presentation service moves now use an ok-waiting command path, so long moves and `M400` finish before the app accepts the operation as complete
+- Operator rule:
+  - if a post-print return lands anywhere except the expected start pose, do not press `Save start`; manually restore the start pose first
