@@ -96,7 +96,7 @@ JOG_TRAVEL_ACCEL = {
     "Y": 80,
     "Z": 80,
 }
-JOG_RESTORE_TRAVEL_ACCEL = 1000
+JOG_RESTORE_TRAVEL_ACCEL = 80
 MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
 LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
 M92_RE = re.compile(r"M92\s+X([-\d.]+)\s+Y([-\d.]+)\s+Z([-\d.]+)\s+E([-\d.]+)")
@@ -3119,7 +3119,7 @@ class K9ControlCenter:
             "G90",
             "G1 Y95 F600",
             "M400",
-            "M204 T1000",
+            f"M204 T{JOG_RESTORE_TRAVEL_ACCEL}",
             "M114",
         ]
         return sdtool.run_commands_wait_ok(
@@ -4823,7 +4823,7 @@ class K9ControlCenter:
                     f"G1 Y{y:.2f} F600",
                     "G1 Z0 F600",
                     "M400",
-                    "M204 T1000",
+                    f"M204 T{JOG_RESTORE_TRAVEL_ACCEL}",
                 ],
                 final_wait=0.8,
                 read_seconds=2.0,

@@ -107,7 +107,7 @@ Where the bad speed/dynamics came from:
 Current rule:
 
 - treat the small X head carriage and Y bed as limiting service-motion axes when choosing print speeds and acceleration
-- Little Hands now lowers service/manual moves to `M204 T80`, moves the bed around `F600`, and moves the head left/right around `F900`
+- Little Hands now leaves service/manual motion in the soft `M204 T80` service-idle state, moves the bed around `F600`, and moves the head left/right around `F900`
 - the Cura baseline keeps travel acceleration at or below `200 mm/s^2`
 - for the next firmware rebuild, apply the tracked patch: `docs/firmware/LH-v4-safe-motion.patch`
 - if the bed or head buzzes, skips, or barely moves, check speed/acceleration first, before blaming the motor or driver

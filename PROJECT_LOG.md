@@ -2488,3 +2488,18 @@ After each test print, append:
   - home/recovery/presentation service moves now use an ok-waiting command path, so long moves and `M400` finish before the app accepts the operation as complete
 - Operator rule:
   - if a post-print return lands anywhere except the expected start pose, do not press `Save start`; manually restore the start pose first
+
+## 2026-05-13 Regression Rules And Bed Motion Guard
+
+- Field correction:
+  - the bed / logical `Y` service-motion problem has now recurred multiple times after nearby recovery changes
+  - this must be treated as a regression risk, not as a new isolated hardware suspicion
+- Project rule:
+  - future changes touching motion, SD print start, completion, recovery, Cura settings, firmware assumptions, or G-code validation must run `python3 tools/regression_checks.py` before commit
+  - future agent work must follow `AGENTS.md`
+- App fix:
+  - Little Hands no longer restores service/manual/recovery motion to `M204 T1000`
+  - service/manual/recovery motion now leaves the printer in the soft `M204 T80` service-idle state
+  - print G-code remains responsible for setting its own conservative print/travel accelerations
+- Regression coverage added:
+  - `tools/regression_checks.py` checks the protected motion constants, no hard-coded service `M204 T1000`, wait-for-ok recovery paths, ModuleBot orientation guards, K9 end-gcode, and tracked Cura baseline settings

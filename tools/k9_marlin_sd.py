@@ -41,7 +41,7 @@ TRANSIENT_SERIAL_ERROR_MARKERS = (
     "errno 5",
 )
 SOFT_TRAVEL_ACCEL = 80
-RESTORE_TRAVEL_ACCEL = 1000
+RESTORE_TRAVEL_ACCEL = SOFT_TRAVEL_ACCEL
 SAFE_BED_FEEDRATE = 600
 SAFE_VERTICAL_FEEDRATE = 600
 SAFE_X_FEEDRATE = 900
@@ -618,7 +618,7 @@ def pseudo_home_to_zero(port: str, baud: int) -> str:
             "M400",
             "G1 Z-120 F300",
             "M400",
-            "M204 T1000",
+            f"M204 T{RESTORE_TRAVEL_ACCEL}",
             "G90",
             "G92 X0 Y0 Z0",
             "M114",
@@ -710,7 +710,7 @@ def _start_sd_print_from_pseudo_home_once(port: str, baud: int, target: str) -> 
             "M400",
             "G1 Z-120 F300",
             "M400",
-            "M204 T1000",
+            f"M204 T{RESTORE_TRAVEL_ACCEL}",
             "G90",
             "G92 X0 Y0 Z0",
         ):

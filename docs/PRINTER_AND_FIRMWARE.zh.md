@@ -104,7 +104,7 @@
 当前规则：
 
 - 计算打印速度和加速度时，把小型 X 喷头滑车和 Y 平台都当作 service-motion 限制轴
-- Little Hands 对手动 / service moves 临时降到 `M204 T80`，平台约 `F600`，喷头左右约 `F900`
+- Little Hands 对手动 / service moves 保持柔和的 `M204 T80` service-idle 状态，平台约 `F600`，喷头左右约 `F900`
 - Cura baseline 将 travel acceleration 保持在 `200 mm/s^2` 或更低
 - 下一次重新构建固件时，应用已跟踪的补丁：`docs/firmware/LH-v4-safe-motion.patch`
 - 如果平台或喷头嗡嗡响、丢步或几乎不动，先检查速度/加速度，再怀疑电机或驱动
