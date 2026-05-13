@@ -17,8 +17,8 @@ If a physical printer test is needed, ask the operator before moving axes or sta
 
 - Do not use `G28` for this K9 workflow. The printer has no reliable endstop-based home in the current baseline.
 - Do not leave service/manual/recovery moves at `M204 T1000`. The safe Little Hands service state is `M204 T80`; print G-code may set its own conservative print accelerations.
-- Bed/logical `Y` service motion is the limiting axis. Keep long bed service/recovery moves at `F240`; keep manual bed jog at `F120`, capped to `2 mm` per click, split into `2 mm` chunks, with `M204 P40 T40`. Short diagnostic moves up to `F600` were physically OK over 5 mm, but do not use them as the default UI workflow without a new explicit physical test.
-- Manual bed jog must precheck raw `M114 Y` and refuse moves farther into the raw `Y0..Y95` bed edge; this prevents the UI from silently pressing the bed into a hard stop while reporting success.
+- Bed/logical `Y` service motion is the limiting axis. Keep long bed service/recovery moves at `F240`; keep manual bed jog at the validated working UI/manual context `F600` with `M204 P80 T80`, honoring the selected UI step as one move.
+- Manual bed jog may log raw `M114 Y` as context, but must not treat raw Y as a physical edge unless a trusted physical home model exists. This K9 has no endstops, so raw negative coordinates can be valid after manual-zero / recovery experiments.
 - Head left/right service motion should stay around `F900`.
 - All manual jog, bed-level, SD start-from-home, `Go to start`, recovery, and presentation service moves must use the ok-waiting serial helper plus `M400`/soft `M204 T80` where appropriate. Do not go back to fire-and-read command batches for axes.
 - Post-print `Go to start` must not re-declare coordinates from saved `M114` while the live Marlin session still has a trusted saved zero.

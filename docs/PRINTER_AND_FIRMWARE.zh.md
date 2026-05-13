@@ -104,8 +104,8 @@
 当前规则：
 
 - 计算打印速度和加速度时，把小型 X 喷头滑车和 Y 平台都当作 service-motion 限制轴
-- Little Hands 对 recovery 移动保持柔和的 `M204 T80` service-idle 状态，长距离平台 service/recovery 移动约 `F240`，手动平台 jog 使用更慢的分段 `F120` / `M204 P40 T40`，并限制为每次点击 `2 mm`，喷头左右约 `F900`
-- `5 mm` 短距离诊断移动中，平台到 `F600` 也可工作，但公开 UI 工作流保持更保守的分段 jog，避免手动移动再次出现嗡嗡响和丢步
+- Little Hands 对 recovery 移动保持柔和的 `M204 T80` service-idle 状态，长距离平台 service/recovery 移动约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右约 `F900`
+- `5 mm` 短距离诊断移动中，平台到 `F600` 也可工作，现在 UI 会遵循已验证的手动移动上下文，而不是过度放慢移动
 - Cura baseline 将 travel acceleration 保持在 `200 mm/s^2` 或更低
 - 下一次重新构建固件时，应用已跟踪的补丁：`docs/firmware/LH-v4-safe-motion.patch`
 - 如果平台或喷头嗡嗡响、丢步或几乎不动，先检查速度/加速度，再怀疑电机或驱动

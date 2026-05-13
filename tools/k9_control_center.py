@@ -90,11 +90,7 @@ JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
 JOG_DEFAULT_STEP_MM = 5.0
 SERVICE_X_FEEDRATE = 900
 SERVICE_BED_FEEDRATE = 240
-JOG_BED_FEEDRATE = 120
-BED_JOG_SEGMENT_MM = 2.0
-MAX_MANUAL_BED_JOG_MM = 2.0
-BED_RAW_MIN_MM = 0.0
-BED_RAW_MAX_MM = 95.0
+JOG_BED_FEEDRATE = 600
 JOG_FEEDRATES = {
     "X": SERVICE_X_FEEDRATE,
     "Y": JOG_BED_FEEDRATE,
@@ -102,7 +98,7 @@ JOG_FEEDRATES = {
 }
 JOG_TRAVEL_ACCEL = {
     "X": 80,
-    "Y": 40,
+    "Y": 80,
     "Z": 80,
 }
 JOG_RESTORE_TRAVEL_ACCEL = 80
@@ -4854,21 +4850,7 @@ class K9ControlCenter:
         feedrate = JOG_FEEDRATES.get(axis, 1200)
         travel_accel = JOG_TRAVEL_ACCEL.get(axis)
         display_hint = self._operator_axis_hint(axis)
-        requested_distance = distance
-        distance_was_limited = False
-        if axis == "Y" and abs(distance) > MAX_MANUAL_BED_JOG_MM:
-            distance = (1.0 if distance > 0 else -1.0) * MAX_MANUAL_BED_JOG_MM
-            distance_was_limited = True
         signed_distance = f"{distance:+g}"
-        segments: list[float] = [distance]
-        if axis == "Y" and abs(distance) > BED_JOG_SEGMENT_MM:
-            sign = 1.0 if distance > 0 else -1.0
-            remaining = abs(distance)
-            segments = []
-            while remaining > 1e-6:
-                step = min(BED_JOG_SEGMENT_MM, remaining)
-                segments.append(sign * step)
-                remaining -= step
 
         def task() -> None:
             self.at_saved_start_pose = False
@@ -4880,8 +4862,6 @@ class K9ControlCenter:
             self._post(
                 "log",
                 f"Jog: {display_hint} {signed_distance} мм; G-code {axis}{distance:.3f} F{feedrate}"
-                + (f", limited from requested {requested_distance:+g}mm" if distance_was_limited else "")
-                + (f", segments {len(segments)}x<= {BED_JOG_SEGMENT_MM:g}mm" if len(segments) > 1 else "")
                 + (f", M204 P{travel_accel} T{travel_accel}" if travel_accel is not None else ""),
             )
             commands = ["M17", "G90", "M211 S0"]
@@ -4892,26 +4872,13 @@ class K9ControlCenter:
                 parsed = sdtool.parse_position(raw_pos)
                 if parsed is not None:
                     _x_raw, y_raw, _z_raw = parsed
-                    if distance < 0 and y_raw <= BED_RAW_MIN_MM:
-                        msg = (
-                            f"Стол уже у отрицательного края raw Y={y_raw:.2f}. "
-                            "Не жму дальше в упор; используй 'Стол к себе' или сдвинь стол вручную от края."
-                        )
-                        self._post("log", msg)
-                        self._post("info", msg)
-                        return
-                    if distance > 0 and y_raw >= BED_RAW_MAX_MM:
-                        msg = (
-                            f"Стол уже у положительного края raw Y={y_raw:.2f}. "
-                            "Не жму дальше в упор; используй 'Стол от себя' или сдвинь стол вручную от края."
-                        )
-                        self._post("log", msg)
-                        self._post("info", msg)
-                        return
-                    self._post("log", f"Bed jog precheck: raw Y={y_raw:.2f}, command Y{distance:+.3f}")
+                    self._post(
+                        "log",
+                        f"Bed jog context: raw Y={y_raw:.2f}, command Y{distance:+.3f}; "
+                        "raw Y is informational only without trusted physical home",
+                    )
             commands.append("G91")
-            for segment in segments:
-                commands.extend([f"G1 {axis}{segment:.3f} F{feedrate}", "M400"])
+            commands.extend([f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])
             if travel_accel is not None:
                 commands.append(f"M204 P{JOG_RESTORE_TRAVEL_ACCEL} T{JOG_RESTORE_TRAVEL_ACCEL}")
             commands.append("G90")

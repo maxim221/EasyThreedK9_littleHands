@@ -2519,7 +2519,7 @@ After each test print, append:
   - port changes, disconnects, motor-off, hard stop, failed jog, failed recovery, failed start, and stopped prints mark home uncertain or invalid
   - SD start, upload-and-start, and `Go to start` are blocked unless home is trusted or the operator confirms a dedicated post-print recovery path
 - Motion rule:
-  - manual bed jog uses `F300`
+  - superseded on 2026-05-14: manual bed jog now uses the validated one-move `F600` context
   - long bed service/recovery/completion presentation moves use `F240`
   - short `F600` bed moves are allowed only as explicit diagnostics until long-distance `F600` is separately validated
   - app jog and bed-level moves now use `run_commands_wait_ok`, not the older fire-and-read command batch
@@ -2534,22 +2534,31 @@ After each test print, append:
   - after the first bed-speed guard, manual bed jog from the app could still make the bed motor buzz instead of visibly moving
   - the runtime log showed the app sent the command and Marlin processed it, so this is treated as a service-motion / resonance / skipped-step UI regression, not as proven hardware failure
 - Fix:
-  - manual bed jog now uses `F120` instead of `F300`
-  - manual bed jog uses very soft `M204 P40 T40`
-  - manual bed jog is capped to `2 mm` per click even if the global UI step is larger
-  - bed jog commands larger than `2 mm` are split into `2 mm` chunks, each followed by `M400`
+  - superseded below: this over-softened the app compared with the manually validated motion context
   - long recovery / end-presentation bed moves remain at `F240`, because this change targets manual UI jog reliability first
 - Regression rule:
-  - keep this segmented jog behavior protected in `tools/regression_checks.py`
-  - do not raise manual bed jog speed again just because a short diagnostic command works once
+  - keep the validated one-move `F600` manual jog behavior protected in `tools/regression_checks.py`
+  - do not reintroduce hidden caps or segmentation unless a new physical test proves the app needs it
 
-## 2026-05-14 Manual Bed Jog Edge Precheck
+## 2026-05-14 Manual Bed Jog Raw-Y Context
 
 - Comparison against direct manual control:
   - direct raw `Y+2` with `M204 P80 T80` moved the Marlin model from `Y:-92.00` to `Y:-90.00`
   - exact app-style raw `Y+2` with `M204 P40 T40`, `F120`, and `M400` moved the Marlin model from `Y:-90.00` to `Y:-88.00`
-  - the failing UI attempts were raw `Y-` while the printer already reported a strongly negative raw `Y` position, i.e. the app was pressing the bed farther into the back/away hard stop and then accepting Marlin's queued `ok`
+  - the user confirmed the bed was not physically at the hard stop during the failing attempts, so raw negative `Y` cannot be treated as a physical edge in this no-endstop workflow
 - Fix:
-  - manual bed jog now reads raw `M114` before raw `Y` moves
-  - moves farther below raw `Y0` or above raw `Y95` are blocked with a user message and log entry
+  - manual bed jog now reads raw `M114` before raw `Y` moves and logs it as context
+  - raw `Y` is not used as a hard-stop guard unless a future trusted physical home model exists
   - manual jog now sets both acceleration fields (`M204 P... T...`) to match the diagnostic context instead of changing only `T`
+
+## 2026-05-14 Restore Manual Bed Jog To Working F600 Context
+
+- Field correction:
+  - the user confirmed the bed was not physically at the hard stop
+  - direct/manual control moved the bed normally at `F600`
+  - the app should not use a different over-softened motion profile for the same manual bed jog
+- Fix:
+  - manual bed jog now honors the selected UI step as one raw `G1 Y...` move
+  - manual bed jog uses `F600`
+  - manual bed jog sets both acceleration fields as `M204 P80 T80`
+  - raw `M114 Y` remains a log context line only, not a blocking physical-edge model
