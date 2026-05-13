@@ -52,7 +52,8 @@ def main() -> int:
     require('"Y": JOG_BED_FEEDRATE' in app, "Manual bed jog must use the named conservative bed feedrate.", failures)
     require('"Y": 80' in app, "Manual bed jog acceleration must match the validated manual M204 P80 T80 test.", failures)
     require("M204 P{travel_accel} T{travel_accel}" in app, "Manual jog must soften both print and travel acceleration.", failures)
-    require("raw Y is informational only without trusted physical home" in app, "Manual bed jog must log raw Y as context only.", failures)
+    require('commands.extend([f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])' in app, "Manual jog must send the selected UI step as one waited move.", failures)
+    require("Bed jog context: raw Y=" not in app, "Manual bed jog must not open a separate M114 query before movement.", failures)
     require("HOME_TRUST_TRUSTED" in app and "HOME_TRUST_UNCERTAIN" in app, "Home trust state machine is missing.", failures)
     require("_home_is_trusted()" in app, "Home-sensitive actions must use the explicit home trust guard.", failures)
 

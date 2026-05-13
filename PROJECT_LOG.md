@@ -2562,3 +2562,14 @@ After each test print, append:
   - manual bed jog uses `F600`
   - manual bed jog sets both acceleration fields as `M204 P80 T80`
   - raw `M114 Y` remains a log context line only, not a blocking physical-edge model
+
+## 2026-05-14 Remove Manual Bed Jog Pre-Query
+
+- Field correction:
+  - the direct command that moved the bed did not query `M114` before moving
+  - the app still opened a separate `M114` query/session before the manual bed jog, then opened the movement session
+  - on this K9/USB stack that extra pre-query can change the timing/context enough that the motor only buzzes instead of moving
+- Fix:
+  - manual bed jog no longer sends a separate pre-move `M114`
+  - the UI now sends the same core sequence as the validated direct movement: enable steppers, absolute setup, soft acceleration, relative single `G1 Y... F600`, `M400`, restore soft acceleration, absolute mode
+  - regression checks now block reintroducing manual bed jog segmentation, caps, raw-edge guards, and the separate pre-move `M114`

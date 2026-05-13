@@ -4867,16 +4867,6 @@ class K9ControlCenter:
             commands = ["M17", "G90", "M211 S0"]
             if travel_accel is not None:
                 commands.append(f"M204 P{travel_accel} T{travel_accel}")
-            if axis == "Y":
-                raw_pos = sdtool.query_command(self._port(), self._baud(), "M114", wait_before_read=0.3, read_seconds=1.0)
-                parsed = sdtool.parse_position(raw_pos)
-                if parsed is not None:
-                    _x_raw, y_raw, _z_raw = parsed
-                    self._post(
-                        "log",
-                        f"Bed jog context: raw Y={y_raw:.2f}, command Y{distance:+.3f}; "
-                        "raw Y is informational only without trusted physical home",
-                    )
             commands.append("G91")
             commands.extend([f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])
             if travel_accel is not None:
