@@ -62,16 +62,18 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Layer height: `0.16 mm`
 - First layer height: `0.20 mm`
 - Wall line count: `5`
-- Top layers: `6`
-- Bottom layers: `6`
+- Top layers: `7`
+- Bottom layers: `7`
 - Infill density: `20%`
 - Infill pattern: `lines`
 - Print infill before walls: `off`
 - Flow: `103%`
 - Wall flow: `103%`
 - Outer wall flow: `102%`
-- Top / bottom flow: `102%`
+- Top / bottom flow: `104%`
 - Infill flow: `101%`
+- Initial layer flow: `103%`
+- Skin overlap: `10%`
 - Top / bottom pattern: `lines`
 - Initial bottom pattern: `concentric`
 - Ironing: `on`
@@ -114,9 +116,9 @@ These limits are intentionally gentle for the small K9 mechanics and help reduce
 ## Adhesion
 
 - Build plate adhesion: `brim`
-- Brim width: `12 mm`
+- Brim width: `14 mm`
 
-If corners still lift, first check bed cleanliness, external bed warm-up, and first-layer squish; then temporarily try `14 mm` brim. Keep `18 mm` as a rescue setting because it adds significant footprint and time.
+If corners still lift, first check bed cleanliness, external bed warm-up, and first-layer squish; then temporarily try `16 mm` brim. Keep `18 mm` as a rescue setting because it adds significant footprint and time.
 
 For the repeatable crack in one physical corner, use a physical draft wall / wind shield near the printer. Do not enable Cura Draft Shield by default: a real wall is simpler and does not add extra printed plastic to the G-code.
 
@@ -154,9 +156,9 @@ If the slicer preview does not show supports under the problematic underside, do
 - Bridge fan speed: `0%`
 - Bridge skin speed: `10 mm/s`
 - Bridge wall speed: `10 mm/s`
-- Bridge skin flow: `90%`
-- Bridge wall flow: `90%`
-- Initial layer line width: about `150%`
+- Bridge skin flow: `100%`
+- Bridge wall flow: `100%`
+- Initial layer line width: about `155%`
 
 ## Before Saving To SD
 

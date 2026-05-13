@@ -62,16 +62,18 @@ G1 Y95 F600 ;Move bed toward the operator
 - Layer height：`0.16 mm`
 - Initial layer height：`0.20 mm`
 - Wall line count：`5`
-- Top layers：`6`
-- Bottom layers：`6`
+- Top layers：`7`
+- Bottom layers：`7`
 - Infill density：`20%`
 - Infill pattern：`lines`
 - Print infill before walls：`off`
 - Flow：`103%`
 - Wall flow：`103%`
 - Outer wall flow：`102%`
-- Top / bottom flow：`102%`
+- Top / bottom flow：`104%`
 - Infill flow：`101%`
+- Initial layer flow：`103%`
+- Skin overlap：`10%`
 - Top / bottom pattern：`lines`
 - Initial bottom pattern：`concentric`
 - Ironing / 熨平：`on`
@@ -114,9 +116,9 @@ G1 Y95 F600 ;Move bed toward the operator
 ## 平台附着
 
 - Build plate adhesion：`brim`
-- Brim width：`12 mm`
+- Brim width：`14 mm`
 
-如果四角仍然翘起，请先检查平台清洁、外部热床预热和首层压实；然后可以临时尝试 `14 mm` brim。`18 mm` 作为救急设置保留，因为它会明显增加占地和打印时间。
+如果四角仍然翘起，请先检查平台清洁、外部热床预热和首层压实；然后可以临时尝试 `16 mm` brim。`18 mm` 作为救急设置保留，因为它会明显增加占地和打印时间。
 
 对于同一个物理角上反复出现的裂纹，请在打印机旁边放置实体挡风墙。默认不要启用 Cura Draft Shield：实体挡风墙更简单，也不会在 G-code 中增加额外打印塑料。
 
@@ -154,9 +156,9 @@ G1 Y95 F600 ;Move bed toward the operator
 - Bridge fan speed：`0%`
 - Bridge skin speed：`10 mm/s`
 - Bridge wall speed：`10 mm/s`
-- Bridge skin flow：`90%`
-- Bridge wall flow：`90%`
-- Initial layer line width：约 `150%`
+- Bridge skin flow：`100%`
+- Bridge wall flow：`100%`
+- Initial layer line width：约 `155%`
 
 ## 写入 SD 前检查
 

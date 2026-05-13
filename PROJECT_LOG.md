@@ -2422,3 +2422,34 @@ After each test print, append:
   - this overrides Cura's final `M204 P4000` / `M204 T4000` reset before any final lift or bed presentation move
   - the G-code validator no longer warns about the high Cura tail reset if a later gentle `M204` is present before `G1 Y95`
   - regenerated local `exports/mbnorm01_moduleBot_normal_orientation.gcode`; validation now passes without warnings
+
+## 2026-05-13 Post-Print Home Recovery Fix
+
+- Observed issue: after a completed print, pressing `Go to start` could still use the plain saved-zero path (`G1 X0/Y0/Z0`) instead of the safer post-print recovery path.
+- Root cause:
+  - the completion path marked `post_print_pose_known`, but did not store or use the real final `M114` pose
+  - `Go to start` only considered the known post-print path when `session_zero_defined` was already false, so a completed print could bypass recovery
+- Fix:
+  - the completion sequence now asks `M114` after presenting the part
+  - Little Hands stores the real post-print pose and persists it in the local print-state file
+  - `Go to start` now prefers the saved real post-print pose whenever post-print recovery is required, even if the old session-zero flag is still true
+  - if no reliable post-print / stopped-print pose exists, automatic `Go to start` is blocked and the user must jog manually and press `Save start`
+
+## 2026-05-13 ModuleBot Next Anti-Warp / Floor Test
+
+- Latest observed result:
+  - walls are straight and have no cracks
+  - corner lift still exists but is smaller, about `1-2 mm`
+  - bottom / floor still has large gaps
+- Next controlled profile change:
+  - brim width `12 mm -> 14 mm`
+  - initial layer line width `150% -> 155%`
+  - initial nozzle temperature `225C -> 226C`
+  - top / bottom layers `6 -> 7`
+  - top / bottom flow `102% -> 104%`
+  - initial layer flow `103%`
+  - skin overlap `10%`
+  - bridge skin / wall flow `90% -> 100%`
+- Rationale:
+  - this keeps the successful no-crack wall settings and support settings
+  - it strengthens bed grip and floor closure without jumping to raft or emergency `18 mm` brim

@@ -132,7 +132,7 @@ G1 Y95 F600 ;Move bed toward the operator"""
         "extruders_enabled_count": "1",
         "adhesion_type": "brim",
         "brim_width": f"{brim_width:g}",
-        "bottom_layers": "6",
+        "bottom_layers": "7",
         "infill_pattern": "lines",
         "infill_before_walls": "False",
         "infill_sparse_density": "20",
@@ -185,9 +185,10 @@ G1 Y95 F600 ;Move bed toward the operator"""
         "support_type": "everywhere",
         "support_xy_distance": "0.3",
         "support_z_distance": "0.16",
+        "skin_overlap": "10",
         "top_bottom_pattern": "lines",
         "top_bottom_pattern_0": "concentric",
-        "top_layers": "6",
+        "top_layers": "7",
         "wall_line_count": "5",
         # Cura GUI normally resolves these defaults; direct CuraEngine needs them.
         "roofing_layer_count": "0",
@@ -198,13 +199,14 @@ G1 Y95 F600 ;Move bed toward the operator"""
     extruder_settings = {
         "material_diameter": "1.75",
         "material_print_temperature": "224",
-        "material_print_temperature_layer_0": "225",
+        "material_print_temperature_layer_0": "226",
         "material_flow": "103",
         "wall_material_flow": "103",
         "wall_0_material_flow": "102",
         "wall_x_material_flow": "103",
-        "skin_material_flow": "102",
+        "skin_material_flow": "104",
         "infill_material_flow": "101",
+        "material_flow_layer_0": "103",
         "material_bed_temperature": "0",
         "retraction_amount": "6.5",
         "retraction_enable": "True",
@@ -218,11 +220,11 @@ G1 Y95 F600 ;Move bed toward the operator"""
         "cool_min_layer_time": "10",
         "bridge_settings_enabled": "True",
         "bridge_fan_speed": "0",
-        "bridge_skin_material_flow": "90",
+        "bridge_skin_material_flow": "100",
         "bridge_skin_speed": "10",
-        "bridge_wall_material_flow": "90",
+        "bridge_wall_material_flow": "100",
         "bridge_wall_speed": "10",
-        "initial_layer_line_width_factor": "150",
+        "initial_layer_line_width_factor": "155",
         "acceleration_enabled": "True",
         "acceleration_infill": "250",
         "acceleration_ironing": "120",
@@ -433,6 +435,7 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
         ';SETTING_3 {"global_quality": "[values]\\n'
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
         'layer_height = 0.16\\nlayer_height_0 = 0.2\\nspeed_layer_0 = 6\\n'
+        'bottom_layers = 7\\ntop_layers = 7\\nskin_overlap = 10\\n'
         'wall_line_count = 5\\n'
         'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = 35\\n'
         'support_infill_rate = 10\\nsupport_xy_distance = 0.3\\n'
@@ -441,10 +444,13 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
         'support_roof_density = 65\\nsupport_roof_height = 0.48\\n'
         'z_seam_type = random\\n", '
         '"extruder_quality": ["[values]\\nmaterial_print_temperature = 224\\n'
-        'material_print_temperature_layer_0 = 225\\nretraction_enable = True\\n'
+        'material_print_temperature_layer_0 = 226\\nretraction_enable = True\\n'
         'retraction_amount = 6.5\\nmaterial_flow = 103\\nwall_material_flow = 103\\n'
+        'skin_material_flow = 104\\nmaterial_flow_layer_0 = 103\\n'
         'cool_fan_enabled = False\\n'
-        'cool_fan_speed = 0\\nbridge_fan_speed = 0\\n"]}'
+        'cool_fan_speed = 0\\nbridge_fan_speed = 0\\n'
+        'bridge_skin_material_flow = 100\\nbridge_wall_material_flow = 100\\n'
+        'initial_layer_line_width_factor = 155\\n"]}'
     )
     if not any(line.startswith(";SETTING_3") for line in lines[-80:]):
         lines.append(footer)
@@ -476,7 +482,7 @@ def main() -> int:
     parser.add_argument("stl", type=Path, help="Input STL file")
     parser.add_argument("--output", type=Path, default=None, help="Output G-code path")
     parser.add_argument("--appimage", type=Path, default=DEFAULT_APPIMAGE, help="UltiMaker Cura 5.11 AppImage")
-    parser.add_argument("--brim-width", type=float, default=12.0, help="Brim width in mm")
+    parser.add_argument("--brim-width", type=float, default=14.0, help="Brim width in mm")
     parser.add_argument("--bed-size", type=float, default=100.0, help="Validated square bed size in mm")
     parser.add_argument("--sd-mount", type=Path, default=None, help="Optional mounted SD card path to copy to")
     parser.add_argument("--sd-name", default=None, help="Optional filename to use on SD")

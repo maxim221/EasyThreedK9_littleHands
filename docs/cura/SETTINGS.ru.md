@@ -62,16 +62,18 @@ G1 Y95 F600 ;Move bed toward the operator
 - Layer height: `0.16 mm`
 - Initial layer height: `0.20 mm`
 - Wall line count: `5`
-- Top layers: `6`
-- Bottom layers: `6`
+- Top layers: `7`
+- Bottom layers: `7`
 - Infill density: `20%`
 - Infill pattern: `lines`
 - Print infill before walls: `off`
 - Flow: `103%`
 - Wall flow: `103%`
 - Outer wall flow: `102%`
-- Top / bottom flow: `102%`
+- Top / bottom flow: `104%`
 - Infill flow: `101%`
+- Initial layer flow: `103%`
+- Skin overlap: `10%`
 - Top / bottom pattern: `lines`
 - Initial bottom pattern: `concentric`
 - Ironing / выглаживание: `on`
@@ -114,9 +116,9 @@ G1 Y95 F600 ;Move bed toward the operator
 ## Адгезия
 
 - Build plate adhesion: `brim`
-- Brim width: `12 mm`
+- Brim width: `14 mm`
 
-Если снова отрывает углы, сначала проверь чистоту/прогрев стола и первый слой, затем можно временно поднять brim до `14 mm`. `18 mm` оставляем как аварийный вариант, потому что он заметно увеличивает площадь и время печати.
+Если снова отрывает углы, сначала проверь чистоту/прогрев стола и первый слой, затем можно временно поднять brim до `16 mm`. `18 mm` оставляем как аварийный вариант, потому что он заметно увеличивает площадь и время печати.
 
 Для повторяемой трещины в одном углу используй физическую защитную стенку от сквозняка рядом с принтером. Не включай Cura Draft Shield по умолчанию: физическая стенка проще и не добавляет пластик в G-code.
 
@@ -154,9 +156,9 @@ G1 Y95 F600 ;Move bed toward the operator
 - Bridge fan speed: `0%`
 - Bridge skin speed: `10 mm/s`
 - Bridge wall speed: `10 mm/s`
-- Bridge skin flow: `90%`
-- Bridge wall flow: `90%`
-- Initial layer line width: около `150%`
+- Bridge skin flow: `100%`
+- Bridge wall flow: `100%`
+- Initial layer line width: около `155%`
 
 ## Перед Записью На SD
 
