@@ -92,6 +92,7 @@ SERVICE_X_FEEDRATE = 900
 SERVICE_BED_FEEDRATE = 240
 JOG_BED_FEEDRATE = 120
 BED_JOG_SEGMENT_MM = 2.0
+MAX_MANUAL_BED_JOG_MM = 2.0
 JOG_FEEDRATES = {
     "X": SERVICE_X_FEEDRATE,
     "Y": JOG_BED_FEEDRATE,
@@ -4851,6 +4852,11 @@ class K9ControlCenter:
         feedrate = JOG_FEEDRATES.get(axis, 1200)
         travel_accel = JOG_TRAVEL_ACCEL.get(axis)
         display_hint = self._operator_axis_hint(axis)
+        requested_distance = distance
+        distance_was_limited = False
+        if axis == "Y" and abs(distance) > MAX_MANUAL_BED_JOG_MM:
+            distance = (1.0 if distance > 0 else -1.0) * MAX_MANUAL_BED_JOG_MM
+            distance_was_limited = True
         signed_distance = f"{distance:+g}"
         segments: list[float] = [distance]
         if axis == "Y" and abs(distance) > BED_JOG_SEGMENT_MM:
@@ -4872,6 +4878,7 @@ class K9ControlCenter:
             self._post(
                 "log",
                 f"Jog: {display_hint} {signed_distance} мм; G-code {axis}{distance:.3f} F{feedrate}"
+                + (f", limited from requested {requested_distance:+g}mm" if distance_was_limited else "")
                 + (f", segments {len(segments)}x<= {BED_JOG_SEGMENT_MM:g}mm" if len(segments) > 1 else "")
                 + (f", M204 T{travel_accel}" if travel_accel is not None else ""),
             )

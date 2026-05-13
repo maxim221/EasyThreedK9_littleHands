@@ -2536,6 +2536,7 @@ After each test print, append:
 - Fix:
   - manual bed jog now uses `F120` instead of `F300`
   - manual bed jog uses very soft `M204 T40`
+  - manual bed jog is capped to `2 mm` per click even if the global UI step is larger
   - bed jog commands larger than `2 mm` are split into `2 mm` chunks, each followed by `M400`
   - long recovery / end-presentation bed moves remain at `F240`, because this change targets manual UI jog reliability first
 - Regression rule:

@@ -47,6 +47,7 @@ def main() -> int:
     require("SERVICE_BED_FEEDRATE = 240" in app, "App long bed service moves must remain F240.", failures)
     require("JOG_BED_FEEDRATE = 120" in app, "App manual bed jog must remain F120.", failures)
     require("BED_JOG_SEGMENT_MM = 2.0" in app, "App manual bed jog must remain segmented into 2 mm chunks.", failures)
+    require("MAX_MANUAL_BED_JOG_MM = 2.0" in app, "App manual bed jog must be capped to 2 mm per click.", failures)
     require('"Y": JOG_BED_FEEDRATE' in app, "Manual bed jog must use the named conservative bed feedrate.", failures)
     require('"Y": 40' in app, "Manual bed jog acceleration must remain very soft at M204 T40.", failures)
     require("HOME_TRUST_TRUSTED" in app and "HOME_TRUST_UNCERTAIN" in app, "Home trust state machine is missing.", failures)

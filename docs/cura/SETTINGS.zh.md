@@ -111,7 +111,7 @@ G1 Y95 F240 ;Move bed toward the operator
 - Ironing acceleration：`120 mm/s^2`
 - Jerk control：`off`
 - 注意：暂时不要为这个 RepRap-flavor 配置启用 Cura jerk control；我们的 Marlin 固件使用 `M205`，而 Cura 在此模式下会生成 `M566`。
-- K9 维护移动限制：当前验证的 `LH-v4` 在 EEPROM/Marlin 中保存了 `M201 X1000 Y1000` 和 `M204 T1000`，这对小型机械结构的手动和 recovery 移动过于激进。打印时把 travel acceleration 保持在 `200 mm/s^2` 或更低；Little Hands 对长距离 service / recovery 平台移动保持柔和的 `M204 T80` service-idle 状态并使用约 `F240`，手动平台 jog 使用更慢的分段 `F120` / `M204 T40`，喷头左右约 `F900`。
+- K9 维护移动限制：当前验证的 `LH-v4` 在 EEPROM/Marlin 中保存了 `M201 X1000 Y1000` 和 `M204 T1000`，这对小型机械结构的手动和 recovery 移动过于激进。打印时把 travel acceleration 保持在 `200 mm/s^2` 或更低；Little Hands 对长距离 service / recovery 平台移动保持柔和的 `M204 T80` service-idle 状态并使用约 `F240`，手动平台 jog 使用更慢的分段 `F120` / `M204 T40`，并限制为每次点击 `2 mm`，喷头左右约 `F900`。
 
 ## 平台附着
 
