@@ -48,6 +48,10 @@ SAFE_X_FEEDRATE = 1800
 POSITION_RE = re.compile(r"X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)")
 
 
+class UploadCancelled(RuntimeError):
+    """Raised by a progress callback to stop an in-flight SD upload."""
+
+
 def soft_service_travel_commands(commands: list[str]) -> list[str]:
     return ["M204 T%d" % SOFT_TRAVEL_ACCEL, *commands, "M400", "M204 T%d" % RESTORE_TRAVEL_ACCEL]
 
@@ -760,9 +764,12 @@ def upload_binary(
 ) -> None:
     mbp = load_mbp()
 
+    def report(stage: str, percent: float) -> None:
+        if progress_cb:
+            progress_cb(stage, percent)
+
     caps, _sd = preflight(port, baud)
-    if progress_cb:
-        progress_cb("Upload (binary connect)", 0.0)
+    report("Upload (binary connect)", 0.0)
     if "Cap:BINARY_FILE_TRANSFER:1" not in caps:
         print("Warning: M115 did not clearly advertise BINARY_FILE_TRANSFER; trying binary protocol anyway.", file=sys.stderr)
     if "Cap:SD_WRITE:1" not in caps:
@@ -773,8 +780,7 @@ def upload_binary(
         protocol = mbp.Protocol(port, baud, 512, 0.0, 3000)
         protocol.connect()
         ftp = mbp.FileTransferProtocol(protocol)
-        if progress_cb:
-            progress_cb("Upload (binary open)", 0.0)
+        report("Upload (binary open)", 0.0)
         if progress_cb:
             original_write = ftp.write
 
@@ -785,7 +791,7 @@ def upload_binary(
                 result = original_write(data)
                 sent["bytes"] += len(data)
                 pct = max(0.0, min(100.0, (sent["bytes"] / total_bytes) * 100.0))
-                progress_cb("Upload (binary)", pct)
+                report("Upload (binary)", pct)
                 return result
 
             ftp.write = wrapped_write
@@ -861,8 +867,11 @@ def upload_gcode_text(
     upload_lines = [sanitize_gcode_line(raw) for raw in text]
     upload_lines = [line for line in upload_lines if line]
     total_lines = max(len(upload_lines), 1)
-    if progress_cb:
-        progress_cb("Upload (text prepare)", 0.0)
+    def report(stage: str, percent: float) -> None:
+        if progress_cb:
+            progress_cb(stage, percent)
+
+    report("Upload (text prepare)", 0.0)
 
     with serial.Serial(port, baud, timeout=0.4) as ser:
         time.sleep(1.2)
@@ -885,27 +894,31 @@ def upload_gcode_text(
         if "Error:" in m28_reply or "Resend:" in m28_reply:
             raise RuntimeError(f"Failed to open SD file for writing: {m28_reply.strip()}")
         line_no += 1
-        if progress_cb:
-            progress_cb("Upload (text)", 0.0)
+        report("Upload (text)", 0.0)
 
-        for line in upload_lines:
-            packet = marlin_line(line_no, line)
-            ser.write((packet + "\n").encode("ascii"))
-            ser.flush()
-            reply = read_until_tokens(ser, ("ok", "Error:", "Resend:"), timeout_s=5.0)
-            if "Error:" in reply or "Resend:" in reply:
-                raise RuntimeError(f"Printer rejected line {line_no}: {line}")
-            if progress_cb:
+        try:
+            for line in upload_lines:
+                packet = marlin_line(line_no, line)
+                ser.write((packet + "\n").encode("ascii"))
+                ser.flush()
+                reply = read_until_tokens(ser, ("ok", "Error:", "Resend:"), timeout_s=5.0)
+                if "Error:" in reply or "Resend:" in reply:
+                    raise RuntimeError(f"Printer rejected line {line_no}: {line}")
                 done = line_no - 3
                 pct = max(0.0, min(100.0, (done / total_lines) * 100.0))
-                progress_cb("Upload (text)", pct)
-            line_no += 1
+                report("Upload (text)", pct)
+                line_no += 1
+        except UploadCancelled:
+            try:
+                send_numbered(ser, line_no, "M29", wait=0.5)
+            except Exception:
+                pass
+            raise
 
         m29_reply = send_numbered(ser, line_no, "M29", wait=1.0)
         if "Error:" in m29_reply or "Resend:" in m29_reply:
             raise RuntimeError(f"Failed to finalize SD file: {m29_reply.strip()}")
-        if progress_cb:
-            progress_cb("Upload (verify SD)", 100.0)
+        report("Upload (verify SD)", 100.0)
 
 
 def upload_gcode_auto(
@@ -922,11 +935,16 @@ def upload_gcode_auto(
     try:
         upload_binary(port, baud, source, dest_name, compression=False, progress_cb=progress_cb)
         method = "binary"
+    except UploadCancelled:
+        raise
     except Exception as exc:
         transfer_error = exc
         if progress_cb:
             progress_cb("Upload (fallback)", 0.0)
-        upload_gcode_text(port, baud, source, dest_name, progress_cb=progress_cb)
+        try:
+            upload_gcode_text(port, baud, source, dest_name, progress_cb=progress_cb)
+        except UploadCancelled:
+            raise
         method = f"text-fallback ({exc})"
 
     visible = "\n".join(list_files(port, baud))

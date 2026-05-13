@@ -33,13 +33,13 @@ G92 E0
 这里使用的是 raw Marlin 轴，不是 UI 中面向操作者的文字说明。在已验证的 K9 上，它会抬起喷头并把平台推向操作者。
 
 ```gcode
+M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 M104 S0 ;Hotend off
 M140 S0 ;Bed off in G-code even though bed is external
 G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 G1 X95 F1800
 G1 Y95 F600 ;Move bed toward the operator
 ```

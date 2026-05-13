@@ -2406,3 +2406,15 @@ After each test print, append:
   - sliced it with the same K9 warm-mat cautious profile as `exports/mbnorm01_moduleBot_normal_orientation.gcode`
   - the filename intentionally starts with `mbnorm01`, so Little Hands / Marlin 8.3 naming should show it as `MBNORM01.GCO` instead of colliding with the previous `MODULEBO.GCO`
   - validation result: no blocking K9 workflow errors; bounds `X 9.56..90.45`, `Y 11.98..88.02`, `Z 0.20..25.00`; hotend target `225C`
+
+## 2026-05-13 Upload UI And End-G-Code Cleanup
+
+- UI workflow:
+  - after a valid `Upload G-code` or `Upload & start`, the Files & Firmware window closes automatically
+  - the main progress area now exposes a cancel button only while a file upload progress label is active
+  - pressing cancel requests upload cancellation; the transfer stops at the next progress callback and no SD print start is attempted
+- Cura / validation cleanup:
+  - the K9 end-gcode now applies the gentle `M204 P250 T120` immediately at the start of the end sequence
+  - this overrides Cura's final `M204 P4000` / `M204 T4000` reset before any final lift or bed presentation move
+  - the G-code validator no longer warns about the high Cura tail reset if a later gentle `M204` is present before `G1 Y95`
+  - regenerated local `exports/mbnorm01_moduleBot_normal_orientation.gcode`; validation now passes without warnings

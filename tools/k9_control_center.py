@@ -318,6 +318,7 @@ class K9ControlCenter:
         self.serial_lock = threading.Lock()
         self.monitor_enabled = True
         self.user_task_pending = False
+        self.upload_cancel_requested = False
 
         self.preferred_port = str(self.ui_state.get("last_port", "")).strip()
         self.port_var = tk.StringVar(value="")
@@ -415,6 +416,7 @@ class K9ControlCenter:
         self.flash_finalize_last_attempt_ts = 0.0
         self.files_window_content: ttk.LabelFrame | None = None
         self.files_window_status_label: tk.Label | None = None
+        self.cancel_upload_button: ttk.Button | None = None
         self.manual_window: tk.Toplevel | None = None
         self.manual_text_widget: ScrolledText | None = None
         self.post_print_window: tk.Toplevel | None = None
@@ -1034,6 +1036,8 @@ class K9ControlCenter:
             "check_gcode": {"ru": "Проверить G-code", "en": "Check G-code", "zh": "检查 G-code"},
             "upload_gcode": {"ru": "Залить G-code", "en": "Upload G-code", "zh": "上传 G-code"},
             "upload_and_start": {"ru": "Залить и старт", "en": "Upload & start", "zh": "上传并开始"},
+            "cancel_upload": {"ru": "Отменить", "en": "Cancel", "zh": "取消"},
+            "cancel_uploading": {"ru": "Отменяю...", "en": "Cancelling...", "zh": "正在取消..."},
             "firmware": {"ru": "Прошивка", "en": "Firmware", "zh": "固件"},
             "create_eeprom": {"ru": "Создать EEPROM.DAT", "en": "Create EEPROM.DAT", "zh": "创建 EEPROM.DAT"},
             "flash_firmware": {"ru": "Залить прошивку", "en": "Flash firmware", "zh": "写入固件"},
@@ -1560,8 +1564,9 @@ class K9ControlCenter:
         substatus = ttk.Frame(top_left)
         substatus.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         substatus.columnconfigure(0, weight=1)
+        substatus.columnconfigure(1, weight=0)
         toggles = ttk.Frame(substatus)
-        toggles.grid(row=0, column=0, sticky="ew")
+        toggles.grid(row=0, column=0, columnspan=2, sticky="ew")
         self.pc_sound_check = ttk.Checkbutton(toggles, text="Звук окончания печати ПК", variable=self.computer_melody_on_complete_var)
         self.pc_sound_check.pack(side="left")
         self.progress_wrap = tk.Frame(substatus, bd=0, highlightthickness=0)
@@ -1572,6 +1577,9 @@ class K9ControlCenter:
         self.progress_bar.grid(row=0, column=0, sticky="ew")
         self.progress_label = tk.Label(self.progress_wrap, textvariable=self.progress_var, anchor="center", bd=0, padx=6)
         self.progress_label.place(relx=0.5, rely=0.5, anchor="center")
+        self.cancel_upload_button = ttk.Button(substatus, text="Отменить", command=self.cancel_upload)
+        self.cancel_upload_button.grid(row=1, column=1, sticky="e", padx=(8, 0), pady=(8, 0))
+        self.cancel_upload_button.grid_remove()
 
         self.hands_canvas = tk.Canvas(top, width=108, height=64, bd=0, highlightthickness=0)
         self.hands_canvas.grid(row=0, column=1, sticky="ne", padx=(8, 0))
@@ -1769,6 +1777,8 @@ class K9ControlCenter:
         self.export_cura_button.configure(text=self._t("export_cura"))
         self.pc_sound_button.configure(text=self._t("sound_pc_short"))
         self.pc_sound_check.configure(text=self._t("sound_pc_complete"))
+        if self.cancel_upload_button is not None:
+            self.cancel_upload_button.configure(text=self._t("cancel_upload"))
         self.temp_graph_label.configure(text=self._t("temp_graph"))
         self.live_frame.configure(text=self._t("live_params"))
         self.sd_frame.configure(text=self._t("sd_files"))
@@ -2057,6 +2067,30 @@ class K9ControlCenter:
 
         win.protocol("WM_DELETE_WINDOW", _on_close)
 
+    def _close_files_firmware_window(self) -> None:
+        if self.files_window and self.files_window.winfo_exists():
+            self.files_window.destroy()
+        self.files_window = None
+
+    def _set_upload_cancel_visible(self, visible: bool, *, cancelling: bool = False) -> None:
+        if self.cancel_upload_button is None:
+            return
+        if visible:
+            self.cancel_upload_button.configure(
+                text=self._t("cancel_uploading") if cancelling else self._t("cancel_upload"),
+                state="disabled" if cancelling else "normal",
+            )
+            self.cancel_upload_button.grid()
+        else:
+            self.cancel_upload_button.configure(text=self._t("cancel_upload"), state="normal")
+            self.cancel_upload_button.grid_remove()
+
+    def cancel_upload(self) -> None:
+        self.upload_cancel_requested = True
+        self._set_upload_cancel_visible(True, cancelling=True)
+        self.progress_var.set("Upload: отмена...")
+        self.log("Загрузка: запрошена отмена. Остановлю передачу на ближайшем безопасном шаге.")
+
     def _set_busy_ui(self, busy: bool, label: str | None = None) -> None:
         self.busy_var.set(label or ("USB: busy" if busy else "USB: idle"))
         state = "disabled" if busy else "normal"
@@ -2072,6 +2106,7 @@ class K9ControlCenter:
         elif not busy:
             self.progress_bar.stop()
             self.progress_bar.configure(mode="determinate")
+            self._set_upload_cancel_visible(False)
 
     def _post(self, kind: str, payload: object) -> None:
         self.events.put((kind, payload))
@@ -2123,10 +2158,18 @@ class K9ControlCenter:
                 self.last_position_sample_ts = time.time()
             elif kind == "progress":
                 label, value = payload  # type: ignore[misc]
-                if str(label).startswith("Upload"):
+                label_text = str(label)
+                label_lower = label_text.lower()
+                if label_text.startswith("Upload"):
                     self.progress_bar.stop()
                     self.progress_bar.configure(mode="determinate")
-                self.progress_var.set(str(label))
+                    self._set_upload_cancel_visible(
+                        "complete" not in label_lower and "cancel" not in label_lower,
+                        cancelling=self.upload_cancel_requested,
+                    )
+                else:
+                    self._set_upload_cancel_visible(False)
+                self.progress_var.set(label_text)
                 self.progress_bar["value"] = float(value)
             elif kind == "melody":
                 self._play_completion_melody()
@@ -2169,6 +2212,11 @@ class K9ControlCenter:
                     )
             elif kind == "files-status":
                 self.files_status_var.set(str(payload))
+            elif kind == "close-files-window":
+                self._close_files_firmware_window()
+            elif kind == "upload-cancel-visible":
+                visible, cancelling = payload  # type: ignore[misc]
+                self._set_upload_cancel_visible(bool(visible), cancelling=bool(cancelling))
             elif kind == "find-port-ui":
                 active = bool(payload)
                 self._set_find_port_busy(active)
@@ -2955,6 +3003,10 @@ class K9ControlCenter:
                 self._post("log", f"{label}...")
                 func()
                 self._post("log", f"{label}: готово")
+            except sdtool.UploadCancelled as exc:
+                self._post("log", str(exc))
+                self._post("files-status", str(exc))
+                self._post("progress", ("Upload cancelled", 0.0))
             except Exception as exc:
                 self._post("error", exc)
             finally:
@@ -3038,6 +3090,7 @@ class K9ControlCenter:
             "motor_disable_line": None,
             "end_has_y95": False,
             "end_has_y0": False,
+            "end_soft_travel_before_y95": False,
             "extrusion_move_count": 0,
             "body_max_travel_accel": None,
             "body_max_travel_accel_line": None,
@@ -3067,6 +3120,7 @@ class K9ControlCenter:
         relative_xyz = False
         relative_e = False
         end_phase = False
+        end_travel_is_soft = False
 
         def update_computed_bounds(axis: str, value: float) -> None:
             low = f"MIN{axis}"
@@ -3176,6 +3230,8 @@ class K9ControlCenter:
                     if y_value is not None and not relative_xyz:
                         if y_value >= 90.0:
                             info["end_has_y95"] = True
+                            if end_travel_is_soft:
+                                info["end_soft_travel_before_y95"] = True
                         if y_value <= 1.0:
                             info["end_has_y0"] = True
 
@@ -3216,6 +3272,8 @@ class K9ControlCenter:
                     ):
                         info["end_max_travel_accel"] = travel_value
                         info["end_max_travel_accel_line"] = line_number
+                    if travel_value is not None:
+                        end_travel_is_soft = travel_value <= K9_WARN_TRAVEL_ACCEL
                 else:
                     if travel_value is not None and (
                         info["body_max_travel_accel"] is None or travel_value > float(info["body_max_travel_accel"])
@@ -3355,7 +3413,11 @@ class K9ControlCenter:
         if not info.get("end_has_y95"):
             warnings.append("В конце не найдено предъявление стола `G1 Y95`. Печать может завершиться без удобного выезда стола к пользователю.")
         end_travel = info.get("end_max_travel_accel")
-        if isinstance(end_travel, (int, float)) and end_travel > K9_MAX_BODY_TRAVEL_ACCEL:
+        if (
+            isinstance(end_travel, (int, float))
+            and end_travel > K9_MAX_BODY_TRAVEL_ACCEL
+            and not info.get("end_soft_travel_before_y95")
+        ):
             warnings.append("В финальном хвосте Cura есть высокий `M204 T...`; это допустимо только если end-gcode затем задаёт мягкое `M204` перед движением стола.")
 
         return errors, warnings, info
@@ -3681,11 +3743,18 @@ class K9ControlCenter:
         if reason:
             self.log(reason)
         dest = self.dest_name_var.get().strip() or source.name
+        self.upload_cancel_requested = False
 
         def task() -> None:
+            self._post("close-files-window", None)
+            self._post("upload-cancel-visible", (True, False))
             last_stage = {"name": None}
 
             def on_progress(stage: str, percent: float) -> None:
+                if self.upload_cancel_requested:
+                    raise sdtool.UploadCancelled(
+                        "Загрузка G-code отменена пользователем. Если на SD появился частичный файл, удали его перед печатью."
+                    )
                 self._post("progress", (f"{stage}: {percent:.1f}%", percent))
                 self._post("files-status", f"Заливка G-code: {stage} {percent:.1f}%")
                 if last_stage["name"] != stage:
@@ -3707,6 +3776,7 @@ class K9ControlCenter:
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
+            self._post("upload-cancel-visible", (False, False))
 
         self._run_task("Заливка G-code на SD", task)
 
@@ -3729,11 +3799,19 @@ class K9ControlCenter:
             self.log(reason)
         dest = (self.dest_name_var.get().strip() or sdtool.make_sd_name(source.name))
         self.dest_name_var.set(dest)
+        self.upload_cancel_requested = False
 
         def task() -> None:
+            self._post("close-files-window", None)
+            self._post("upload-cancel-visible", (True, False))
             last_stage = {"name": None}
 
             def on_progress(stage: str, percent: float) -> None:
+                if self.upload_cancel_requested:
+                    raise sdtool.UploadCancelled(
+                        "Загрузка G-code отменена пользователем; печать не запускалась. "
+                        "Если на SD появился частичный файл, удали его перед печатью."
+                    )
                 self._post("progress", (f"{stage}: {percent:.1f}%", percent))
                 self._post("files-status", f"Заливка и старт: {stage} {percent:.1f}%")
                 if last_stage["name"] != stage:
@@ -3752,6 +3830,7 @@ class K9ControlCenter:
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
+            self._post("upload-cancel-visible", (False, False))
             target = self._hotend_target_for_print(dest, source.name, upload_source)
             self._preheat_hotend_for_sd_start(target)
             self._prime_print_end_contract(dest, source.name, upload_source)

@@ -33,13 +33,13 @@ G92 E0
 Use raw Marlin axes exactly as shown here. On the validated Little Hands K9 this presents the part by lifting the head and moving the bed toward the operator.
 
 ```gcode
+M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 M104 S0 ;Hotend off
 M140 S0 ;Bed off in G-code even though bed is external
 G91
 G1 E-1 F1800
 G1 Z10 F1200
 G90
-M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 G1 X95 F1800
 G1 Y95 F600 ;Move bed toward the operator
 ```
