@@ -2091,6 +2091,30 @@ class K9ControlCenter:
         self.progress_var.set("Upload: отмена...")
         self.log("Загрузка: запрошена отмена. Остановлю передачу на ближайшем безопасном шаге.")
 
+    def _cleanup_cancelled_upload(self, dest: str) -> tuple[bool, str]:
+        self._post("progress", ("Upload cancel cleanup", 0.0))
+        self._post("files-status", f"Загрузка отменена: удаляю частичный файл {dest} с SD...")
+        try:
+            out = sdtool.delete_file(self._port(), self._baud(), dest)
+        except Exception as exc:
+            msg = (
+                f"Загрузка отменена, но частичный файл {dest} удалить автоматически не удалось: {exc}. "
+                "Не запускай этот файл; удали его вручную после обновления списка SD."
+            )
+            self._post("log", msg)
+            self._post("files-status", msg)
+            return False, msg
+
+        self._post("log", out.strip() or f"Частичный файл {dest} удалён после отмены загрузки.")
+        try:
+            files = sdtool.list_files(self._port(), self._baud())
+            self._post("sd-files", files)
+        except Exception as exc:
+            self._post("log", f"Частичный файл удалён, но список SD обновить не удалось: {exc}")
+        msg = f"Загрузка отменена; частичный файл {dest} удалён с SD."
+        self._post("files-status", msg)
+        return True, msg
+
     def _set_busy_ui(self, busy: bool, label: str | None = None) -> None:
         self.busy_var.set(label or ("USB: busy" if busy else "USB: idle"))
         state = "disabled" if busy else "normal"
@@ -3752,9 +3776,7 @@ class K9ControlCenter:
 
             def on_progress(stage: str, percent: float) -> None:
                 if self.upload_cancel_requested:
-                    raise sdtool.UploadCancelled(
-                        "Загрузка G-code отменена пользователем. Если на SD появился частичный файл, удали его перед печатью."
-                    )
+                    raise sdtool.UploadCancelled("Загрузка G-code отменена пользователем.")
                 self._post("progress", (f"{stage}: {percent:.1f}%", percent))
                 self._post("files-status", f"Заливка G-code: {stage} {percent:.1f}%")
                 if last_stage["name"] != stage:
@@ -3769,7 +3791,11 @@ class K9ControlCenter:
             self._post("log", f"Размер файла: {size_mib:.2f} MiB. Большие G-code могут писаться 1-5 минут.")
             self._post("progress", ("Upload (preflight): 0.0%", 0.0))
             self._post("files-status", f"Заливка G-code: preflight 0.0%")
-            method = sdtool.upload_gcode_auto(self._port(), self._baud(), upload_source, dest, progress_cb=on_progress)
+            try:
+                method = sdtool.upload_gcode_auto(self._port(), self._baud(), upload_source, dest, progress_cb=on_progress)
+            except sdtool.UploadCancelled as exc:
+                _ok, msg = self._cleanup_cancelled_upload(dest)
+                raise sdtool.UploadCancelled(msg) from exc
             self._remember_gcode_profile(dest, source.name, upload_source)
             self._post("progress", ("Upload complete: 100.0%", 100.0))
             self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method})")
@@ -3808,10 +3834,7 @@ class K9ControlCenter:
 
             def on_progress(stage: str, percent: float) -> None:
                 if self.upload_cancel_requested:
-                    raise sdtool.UploadCancelled(
-                        "Загрузка G-code отменена пользователем; печать не запускалась. "
-                        "Если на SD появился частичный файл, удали его перед печатью."
-                    )
+                    raise sdtool.UploadCancelled("Загрузка G-code отменена пользователем; печать не запускалась.")
                 self._post("progress", (f"{stage}: {percent:.1f}%", percent))
                 self._post("files-status", f"Заливка и старт: {stage} {percent:.1f}%")
                 if last_stage["name"] != stage:
@@ -3825,7 +3848,11 @@ class K9ControlCenter:
                 self._post("log", f"На SD будет записана подготовленная копия: {upload_source}")
             self._post("log", f"Размер файла: {size_mib:.2f} MiB. Большие G-code могут писаться 1-5 минут.")
             self._post("files-status", "Заливка и старт: preflight 0.0%")
-            method = sdtool.upload_gcode_auto(self._port(), self._baud(), upload_source, dest, progress_cb=on_progress)
+            try:
+                method = sdtool.upload_gcode_auto(self._port(), self._baud(), upload_source, dest, progress_cb=on_progress)
+            except sdtool.UploadCancelled as exc:
+                _ok, msg = self._cleanup_cancelled_upload(dest)
+                raise sdtool.UploadCancelled(f"{msg} Печать не запускалась.") from exc
             self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method}). Запускаю печать...")
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
             files = sdtool.list_files(self._port(), self._baud())
