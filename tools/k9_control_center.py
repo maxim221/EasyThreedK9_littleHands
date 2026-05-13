@@ -333,6 +333,7 @@ class K9ControlCenter:
         self.fw_var = tk.StringVar(value="")
         self.progress_var = tk.StringVar(value="Печать: простой")
         self.print_start_var = tk.StringVar(value="Старт: -")
+        self.print_known_time_var = tk.StringVar(value="Известное время: -")
         self.busy_var = tk.StringVar(value="USB: idle")
         self.header_marquee_var = tk.StringVar(value="")
         self.selected_sd_var = tk.StringVar(value="Выбрано на SD: -")
@@ -726,10 +727,16 @@ class K9ControlCenter:
         if save:
             self._save_print_state("idle", force=True)
 
+    def _profile_key(self, sd_path: str) -> str:
+        return self._normalize_sd_key(sd_path)
+
     def _remember_gcode_profile(self, sd_path: str, display: str, source: Path) -> dict[str, object]:
         info = self._inspect_gcode_file(source)
         bounds = info.get("bounds") if isinstance(info.get("bounds"), dict) else {}
         max_z = bounds.get("MAXZ") if isinstance(bounds, dict) else None
+        key = self._profile_key(sd_path)
+        previous = self.sd_gcode_profiles.get(key)
+        previous_profile = previous if isinstance(previous, dict) else {}
         profile: dict[str, object] = {
             "sd_path": sd_path,
             "display": display,
@@ -740,7 +747,10 @@ class K9ControlCenter:
             "hotend_target": info.get("hotend_target"),
             "has_blocking_m109": bool(info.get("has_blocking_m109")),
         }
-        self.sd_gcode_profiles[self._normalize_sd_key(sd_path)] = profile
+        for field in ("last_duration_s", "last_started_at", "last_finished_at", "last_print_display"):
+            if field in previous_profile:
+                profile[field] = previous_profile[field]
+        self.sd_gcode_profiles[key] = profile
         if len(self.sd_gcode_profiles) > 40:
             items = sorted(
                 self.sd_gcode_profiles.items(),
@@ -754,8 +764,73 @@ class K9ControlCenter:
     def _profile_for_print(self, sd_path: str, display: str, source: Path | None = None) -> dict[str, object] | None:
         if source and source.is_file():
             return self._remember_gcode_profile(sd_path, display, source)
-        cached = self.sd_gcode_profiles.get(self._normalize_sd_key(sd_path))
+        cached = self.sd_gcode_profiles.get(self._profile_key(sd_path))
         return cached if isinstance(cached, dict) else None
+
+    def _remember_print_duration(self, sd_path: str, display: str, start_ts: float | None, finish_ts: float) -> None:
+        if not sd_path or sd_path == "-" or not start_ts:
+            return
+        duration_s = max(0, int(round(finish_ts - start_ts)))
+        key = self._profile_key(sd_path)
+        profile = self.sd_gcode_profiles.get(key)
+        if not isinstance(profile, dict):
+            profile = {
+                "sd_path": sd_path,
+                "display": display or sd_path,
+            }
+        profile.update(
+            {
+                "sd_path": sd_path,
+                "display": display or profile.get("display") or sd_path,
+                "updated_ts": finish_ts,
+                "last_duration_s": duration_s,
+                "last_started_at": start_ts,
+                "last_finished_at": finish_ts,
+                "last_print_display": display or sd_path,
+            }
+        )
+        self.sd_gcode_profiles[key] = profile
+
+    def _known_print_time_text(self, sd_path: str | None, display: str | None = None) -> str:
+        if not sd_path:
+            return "-"
+        profile = self._profile_for_print(sd_path, display or sd_path)
+        if not profile:
+            return "-"
+        duration = profile.get("last_duration_s")
+        try:
+            duration_s = float(duration) if duration is not None else None
+        except (TypeError, ValueError):
+            duration_s = None
+        if duration_s is None:
+            return "-"
+        finished = profile.get("last_finished_at")
+        try:
+            finished_text = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(finished))) if finished else ""
+        except (TypeError, ValueError, OSError):
+            finished_text = ""
+        base = self._format_duration_short(duration_s)
+        if not finished_text:
+            return base
+        suffix = {
+            "ru": "последняя",
+            "en": "last",
+            "zh": "上次",
+        }.get(self.lang_var.get().strip() or "ru", "последняя")
+        return f"{base} ({suffix}: {finished_text})"
+
+    def _update_known_print_time_label(self, sd_path: str | None = None, display: str | None = None) -> None:
+        if sd_path is None:
+            if self.current_print_file != "-":
+                sd_path = self.current_print_file
+                display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
+            else:
+                if not hasattr(self, "sd_print_listbox"):
+                    self.print_known_time_var.set(self._format_label_value("known_print_time", "-"))
+                    return
+                sd_path = self._selected_print_sd_path()
+                display = self._selected_sd_display() or sd_path
+        self.print_known_time_var.set(self._format_label_value("known_print_time", self._known_print_time_text(sd_path, display)))
 
     def _hotend_target_for_print(self, sd_path: str, display: str, source: Path | None = None) -> float:
         profile = self._profile_for_print(sd_path, display, source)
@@ -1047,6 +1122,7 @@ class K9ControlCenter:
             "selected_sd": {"ru": "Выбрано на SD", "en": "Selected on SD", "zh": "SD 已选择"},
             "active_sd": {"ru": "Печатается", "en": "Printing", "zh": "正在打印"},
             "start_time": {"ru": "Старт", "en": "Start", "zh": "开始时间"},
+            "known_print_time": {"ru": "Известное время", "en": "Known time", "zh": "已知耗时"},
             "choose_gcode_or_firmware": {"ru": "Выбери G-code или прошивку.", "en": "Choose a G-code file or firmware.", "zh": "请选择 G-code 或固件文件。"},
             "sd_empty": {"ru": "SD-карта читается, но список файлов пуст.", "en": "The SD card is readable, but the file list is empty.", "zh": "SD 卡可读取，但文件列表为空。"},
             "progress_idle": {"ru": "Печать: простой", "en": "Print: idle", "zh": "打印：空闲"},
@@ -1079,6 +1155,7 @@ class K9ControlCenter:
             self.print_start_var.set(self._format_label_value("start_time", time.strftime("%H:%M:%S", time.localtime(self.current_print_start_ts))))
         else:
             self.print_start_var.set(self._format_label_value("start_time", "-"))
+        self._update_known_print_time_label()
         if not self.files_status_var.get() or self.files_status_var.get() == "Выбери G-code или прошивку.":
             self.files_status_var.set(self._t("choose_gcode_or_firmware"))
         if self.pending_flash_finalize:
@@ -1627,11 +1704,12 @@ class K9ControlCenter:
         ttk.Label(sd_frame, textvariable=self.selected_sd_var).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(sd_frame, textvariable=self.active_sd_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         ttk.Label(sd_frame, textvariable=self.print_start_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        ttk.Label(sd_frame, textvariable=self.print_known_time_var).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.sd_notice_label = tk.Label(sd_frame, textvariable=self.sd_notice_var, anchor="w", justify="left", wraplength=320)
-        self.sd_notice_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.sd_notice_label.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         self.sd_printable_label = ttk.Label(sd_frame, text="Файлы для печати")
-        self.sd_printable_label.grid(row=4, column=0, sticky="w", pady=(6, 0))
+        self.sd_printable_label.grid(row=5, column=0, sticky="w", pady=(6, 0))
         self.sd_print_listbox = tk.Listbox(sd_frame, height=4, exportselection=False)
         self.sd_print_listbox.grid(row=6, column=0, sticky="nsew", pady=(4, 0))
         self.sd_print_listbox.bind("<Double-1>", lambda _event: self.start_selected_print_with_home())
@@ -1878,6 +1956,27 @@ class K9ControlCenter:
             with RUNTIME_LOG_PATH.open("wb") as fh:
                 fh.write(data)
 
+    def _format_local_datetime(self, stamp: float) -> str:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stamp))
+
+    def _format_duration_ru(self, seconds: float) -> str:
+        total = max(0, int(round(seconds)))
+        hours, remainder = divmod(total, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if hours:
+            return f"{hours} ч {minutes:02d} мин {secs:02d} с"
+        if minutes:
+            return f"{minutes} мин {secs:02d} с"
+        return f"{secs} с"
+
+    def _format_duration_short(self, seconds: float) -> str:
+        total = max(0, int(round(seconds)))
+        hours, remainder = divmod(total, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if hours:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}"
+
     def _record_temp_point(self, current: float, target: float) -> None:
         now = time.time()
         self.temp_history.append((now, current, target))
@@ -1961,6 +2060,7 @@ class K9ControlCenter:
             self.print_start_var.set(self._format_label_value("start_time", time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))))
         else:
             self.print_start_var.set(self._format_label_value("start_time", "-"))
+        self._update_known_print_time_label()
 
         lines = [
             temp_line,
@@ -2223,6 +2323,7 @@ class K9ControlCenter:
                 if ":" in text:
                     text = text.split(":", 1)[1].strip()
                 self.active_sd_var.set(self._format_label_value("active_sd", text or "-"))
+                self._update_known_print_time_label()
             elif kind == "ports":
                 ports, detected = payload  # type: ignore[misc]
                 self._set_port_choices(list(ports), str(detected) if detected else None)
@@ -2348,6 +2449,8 @@ class K9ControlCenter:
         if not files:
             self.sd_print_listbox.insert("end", "(empty)")
             self.selected_sd_var.set(self._format_label_value("selected_sd", "-"))
+            if self.current_print_file == "-":
+                self._update_known_print_time_label(None, None)
             self.sd_notice_var.set(self._t("sd_empty"))
             return
 
@@ -2404,6 +2507,8 @@ class K9ControlCenter:
     def _sync_selected_sd_label(self) -> None:
         display = self._selected_sd_display()
         self.selected_sd_var.set(self._format_label_value("selected_sd", display or "-"))
+        if self.current_print_file == "-":
+            self._update_known_print_time_label(self._selected_print_sd_path(), display)
 
     def _selected_sd_display(self) -> str | None:
         print_sel = self.sd_print_listbox.curselection()
@@ -4987,6 +5092,25 @@ class K9ControlCenter:
                     self._schedule_sd_refresh_after_port(self._port(), force=True)
                     return
                 if self.print_was_active and self.print_completion_armed:
+                    finish_ts = now
+                    finished_file = self.current_print_display if self.current_print_display != "-" else self.current_print_file
+                    start_ts = self.current_print_start_ts
+                    started_at_log = self._format_local_datetime(start_ts) if start_ts else "?"
+                    finished_at_log = self._format_local_datetime(finish_ts)
+                    if start_ts:
+                        duration_s = max(0, int(round(finish_ts - start_ts)))
+                        duration_text = self._format_duration_ru(duration_s)
+                        finish_message = (
+                            f"Финиш печати: {finished_file}; финиш {finished_at_log}; "
+                            f"старт {started_at_log}; фактическая длительность {duration_text}."
+                        )
+                    else:
+                        duration_s = None
+                        duration_text = "?"
+                        finish_message = (
+                            f"Финиш печати: {finished_file}; финиш {finished_at_log}; "
+                            "старт неизвестен, фактическую длительность посчитать не удалось."
+                        )
                     self.print_was_active = False
                     self.print_completion_armed = False
                     completion_move_result = ""
@@ -5015,9 +5139,15 @@ class K9ControlCenter:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята, проиграна мелодия на компьютере")
                         else:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята")
+                        self._post("log", finish_message)
                         self._post("post-print-recovery", "completion")
+                    duration_log = duration_s if duration_s is not None else "?"
+                    self._remember_print_duration(self.current_print_file, finished_file, start_ts, finish_ts)
                     self._append_ring_log(
-                        f"{time.strftime('%H:%M:%S')} PRINT_END file={self.current_print_file} temp={current_temp if current_temp is not None else '?'}"
+                        f"{time.strftime('%H:%M:%S', time.localtime(finish_ts))} PRINT_END file={self.current_print_file} "
+                        f"temp={current_temp if current_temp is not None else '?'} "
+                        f"started_at={started_at_log.replace(' ', 'T')} finished_at={finished_at_log.replace(' ', 'T')} "
+                        f"duration_s={duration_log} duration=\"{duration_text}\""
                     )
                     self.current_print_file = "-"
                     self.current_print_display = "-"

@@ -2414,6 +2414,9 @@ After each test print, append:
   - the main progress area now exposes a cancel button only while a file upload progress label is active
   - pressing cancel requests upload cancellation; the transfer stops at the next progress callback and no SD print start is attempted
   - after a cancelled upload, Little Hands automatically attempts to delete the partial target file from printer SD and refresh the SD list
+- Print timing:
+  - natural SD print completion now writes a human-readable finish line with local start, finish, and actual elapsed duration
+  - the actual elapsed duration is stored in the known SD G-code profile and shown as `Known time` under the `Start` line when that file is selected or active
 - Cura / validation cleanup:
   - the K9 end-gcode now applies the gentle `M204 P250 T120` immediately at the start of the end sequence
   - this overrides Cura's final `M204 P4000` / `M204 T4000` reset before any final lift or bed presentation move
