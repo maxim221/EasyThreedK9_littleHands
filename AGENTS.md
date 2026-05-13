@@ -22,6 +22,7 @@ If a physical printer test is needed, ask the operator before moving axes or sta
 - Head left/right service motion should stay around `F900`.
 - All manual jog, bed-level, SD start-from-home, `Go to start`, recovery, and presentation service moves must use the ok-waiting serial helper plus `M400`/soft `M204 T80` where appropriate. Do not go back to fire-and-read command batches for axes.
 - Post-print `Go to start` must not re-declare coordinates from saved `M114` while the live Marlin session still has a trusted saved zero.
+- Stopped-print recovery must preserve interrupted X/Y from the pre-`M524` print position, but account for the K9 head lift after stop by using the raised post-stop Z when available. Do not treat the reset-like post-stop `X0 Y0 Z5` as real X/Y home.
 - Home is trusted only after `Save start` or a confirmed Little Hands recovery/return. Port changes, disconnects, motor-off, hard stop, failed jog/recovery/start, and stopped prints must mark home uncertain or invalid and block SD start until the operator re-saves or confirms recovery.
 - End G-code should present the bed toward the operator with gentle motion: `M204 P250 T120`, `G1 X95 F900`, `G1 Y95 F240`.
 - Do not add `M18` / `M84` at the end of print files; Little Hands needs steppers available for recovery.

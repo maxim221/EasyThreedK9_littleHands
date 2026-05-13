@@ -647,6 +647,18 @@ class K9ControlCenter:
                 except (TypeError, ValueError):
                     self.post_print_pose = None
                     self.post_print_pose_known = False
+        if phase == "stopped" and data.get("bed_clear_before_go_start_required"):
+            pose = data.get("stopped_print_pose")
+            if isinstance(pose, list) and len(pose) == 3:
+                try:
+                    self.stopped_print_pose = (float(pose[0]), float(pose[1]), float(pose[2]))
+                    self.stopped_print_display = str(data.get("stopped_print_display") or "stopped print")
+                    self.bed_clear_before_go_start_required = True
+                    self.home_trust = HOME_TRUST_UNCERTAIN
+                    self.home_trust_reason = "stopped print recovery marker restored from persistent state"
+                except (TypeError, ValueError):
+                    self.stopped_print_pose = None
+                    self.stopped_print_display = "-"
         if (
             phase in {"prepared", "printing", "print_end_expected"}
             and updated_ts
@@ -724,6 +736,9 @@ class K9ControlCenter:
             "post_print_recovery_required": self.post_print_recovery_required,
             "post_print_pose_known": self.post_print_pose_known,
             "post_print_pose": list(self.post_print_pose) if self.post_print_pose is not None else None,
+            "bed_clear_before_go_start_required": self.bed_clear_before_go_start_required,
+            "stopped_print_pose": list(self.stopped_print_pose) if self.stopped_print_pose is not None else None,
+            "stopped_print_display": self.stopped_print_display,
             "sd_gcode_profiles": self.sd_gcode_profiles,
         }
 
@@ -4346,6 +4361,7 @@ class K9ControlCenter:
                 )
                 self.stopped_print_pose = stop_pose
                 self.stopped_print_display = stopped_display or "-"
+                self._save_print_state("stopped", force=True)
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
@@ -4356,12 +4372,13 @@ class K9ControlCenter:
                 "log",
                 "После остановки печати сохранённый старт сброшен: эта K9 может сообщать X0/Y0 после Stop, "
                 "даже если физически сопло осталось не в стартовой X/Y-позе. После удаления пластика со стола "
-                "можно нажать 'К старту': Little Hands попробует вернуться по позиции, снятой перед M524.",
+                "можно нажать 'К старту': Little Hands попробует вернуться по X/Y до M524 и поднятой Z после стопа.",
             )
             if stop_pose is not None:
                 self._post(
                     "log",
-                    f"Позиция остановки сохранена до M524: X{stop_pose[0]:.2f} Y{stop_pose[1]:.2f} Z{stop_pose[2]:.2f}.",
+                    f"Recovery-поза после стопа сохранена: X{stop_pose[0]:.2f} Y{stop_pose[1]:.2f} Z{stop_pose[2]:.2f} "
+                    "(X/Y из позиции прерывания, Z с учётом подъёма головы).",
                 )
             else:
                 self._post(
@@ -4633,7 +4650,8 @@ class K9ControlCenter:
         prompt = {
             "en": (
                 "Return to start after a stopped / failed print?\n\n"
-                f"Little Hands saved the interrupted position before M524:\n{file_text}\n{pose_text}\n\n"
+                f"Little Hands saved recovery coordinates for the stopped print:\n{file_text}\n{pose_text}\n\n"
+                "X/Y come from the interrupted print position; Z accounts for the head lift after stop.\n\n"
                 "It will not use any endstop-based homing. It will:\n"
                 "1. lift the nozzle\n"
                 "2. temporarily restore that interrupted coordinate model with G92\n"
@@ -4643,7 +4661,8 @@ class K9ControlCenter:
             ),
             "zh": (
                 "停止/失败打印后回到起点吗？\n\n"
-                f"Little Hands 在 M524 前保存了中断位置：\n{file_text}\n{pose_text}\n\n"
+                f"Little Hands 保存了停止打印的恢复坐标：\n{file_text}\n{pose_text}\n\n"
+                "X/Y 来自中断时的位置；Z 已考虑停止后喷头抬升。\n\n"
                 "它不会使用任何基于限位开关的 homing。它会：\n"
                 "1. 抬起喷嘴\n"
                 "2. 用 G92 临时恢复中断时的坐标模型\n"
@@ -4653,7 +4672,8 @@ class K9ControlCenter:
             ),
             "ru": (
                 "Вернуть к старту после остановленной / сорванной печати?\n\n"
-                f"Little Hands сохранил позицию прерывания до M524:\n{file_text}\n{pose_text}\n\n"
+                f"Little Hands сохранил recovery-координаты остановленной печати:\n{file_text}\n{pose_text}\n\n"
+                "X/Y взяты из позиции прерывания; Z учитывает подъём головы после стопа.\n\n"
                 "Он не будет использовать home по концевикам. Recovery будет таким:\n"
                 "1. поднимет сопло\n"
                 "2. временно восстановит координаты прерывания через G92\n"

@@ -2593,3 +2593,15 @@ After each test print, append:
   - update tracked Cura bundle under `docs/cura/`
   - update the direct slicing helper `tools/k9_cura_slice.py`
   - update local Cura 5.11 `codex - K9 warm mat cautious` profile files so the next GUI slice uses the slower baseline after Cura is reopened
+
+## 2026-05-14 Stopped-Print Recovery Pose Fix
+
+- Field observation:
+  - after stopping `MBNORM02.GCO`, the log contained the useful interrupted position before `M524`: `X74.35 Y73.43 Z0.36`
+  - the same stop response then contained a reset-like post-stop report: `X0.00 Y0.00 Z5.00`
+  - physically, the K9 raises the head after stop, so recovery must not use the low pre-stop `Z0.36` as the current Z
+- Fix:
+  - `stop_sd_print_with_position()` now parses the full stop response instead of only the first read window
+  - stopped-print recovery keeps interrupted X/Y from the real print position and uses the highest observed Z, so the automatic return accounts for the stop lift
+  - the app persists `stopped_print_pose` / `stopped_print_display`, so reopening Little Hands no longer loses the recovery marker
+  - regression checks now cover the exact noisy sample: useful `X74.35 Y73.43 Z0.36` followed by false `X0 Y0 Z5` must become recovery pose `X74.35 Y73.43 Z5.00`

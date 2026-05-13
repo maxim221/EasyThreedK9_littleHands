@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+import k9_marlin_sd as sdtool
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -120,6 +122,18 @@ def main() -> int:
     require("cool_fan_enabled = False" in cura_extruder, "K9 part-cooling must remain disabled.", failures)
     require("G1 Y95 F240" in cura_machine, "Tracked Cura machine end G-code must present bed toward operator at F240.", failures)
     require("M84" not in cura_machine and "M18" not in cura_machine, "Tracked Cura machine end G-code must not disable steppers.", failures)
+
+    stopped_sample = (
+        "echo:busy: processing\n"
+        "X:74.35 Y:73.43 Z:0.36 E:522.14 Count X:42025 Y:-51248 Z:-384\n"
+        "echo:busy: processing\n"
+        "X:0.00 Y:0.00 Z:5.00 E:522.16 Count X:0 Y:0 Z:2400\n"
+    )
+    require(
+        sdtool.parse_stopped_print_position(stopped_sample) == (74.35, 73.43, 5.0),
+        "Stopped-print recovery must keep interrupted X/Y and lifted post-stop Z.",
+        failures,
+    )
 
     if failures:
         print("Regression checks failed:")

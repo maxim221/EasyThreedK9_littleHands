@@ -45,7 +45,7 @@ RESTORE_TRAVEL_ACCEL = SOFT_TRAVEL_ACCEL
 SAFE_BED_FEEDRATE = 240
 SAFE_VERTICAL_FEEDRATE = 600
 SAFE_X_FEEDRATE = 900
-POSITION_RE = re.compile(r"X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)")
+POSITION_RE = re.compile(r"^\s*X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)", re.MULTILINE)
 
 
 class UploadCancelled(RuntimeError):
@@ -234,6 +234,38 @@ def parse_position(text: str) -> tuple[float, float, float] | None:
         return (float(match.group(1)), float(match.group(2)), float(match.group(3)))
     except ValueError:
         return None
+
+
+def parse_positions(text: str) -> list[tuple[float, float, float]]:
+    positions: list[tuple[float, float, float]] = []
+    for match in POSITION_RE.finditer(text):
+        try:
+            positions.append((float(match.group(1)), float(match.group(2)), float(match.group(3))))
+        except ValueError:
+            continue
+    return positions
+
+
+def _looks_like_post_stop_reset_position(position: tuple[float, float, float]) -> bool:
+    x, y, z = position
+    return abs(x) <= 0.05 and abs(y) <= 0.05 and z >= 3.0
+
+
+def parse_stopped_print_position(text: str) -> tuple[float, float, float] | None:
+    """Recover the physical stop pose from the noisy M25/M114/M524 response.
+
+    On this K9, M524 may raise the head and then report a reset-like X0 Y0 Z5
+    model even though physical X/Y stayed at the interrupted print location.
+    For recovery we need interrupted X/Y, but the safer raised Z.
+    """
+    positions = parse_positions(text)
+    if not positions:
+        return None
+    interrupted = next((pos for pos in positions if not _looks_like_post_stop_reset_position(pos)), None)
+    if interrupted is None:
+        return None
+    safe_z = max(pos[2] for pos in positions)
+    return (interrupted[0], interrupted[1], max(interrupted[2], safe_z))
 
 
 def sync_ascii(ser: serial.Serial) -> None:
@@ -774,12 +806,12 @@ def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float,
             send_line(ser, command)
             time.sleep(delay)
         pose_out = read_for(ser, 1.8)
-        pose = parse_position(pose_out)
         for command in ("M108", "M524", "M104 S0", "M140 S0", "M107", "M400"):
             send_line(ser, command)
             time.sleep(0.4)
         stop_out = read_for(ser, 2.5)
-    return pose_out + stop_out, pose
+    out = pose_out + stop_out
+    return out, parse_stopped_print_position(out)
 
 
 def resume_sd_print(port: str, baud: int) -> str:
