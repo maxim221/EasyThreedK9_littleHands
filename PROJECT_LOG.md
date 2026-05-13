@@ -2605,3 +2605,14 @@ After each test print, append:
   - stopped-print recovery keeps interrupted X/Y from the real print position and uses the highest observed Z, so the automatic return accounts for the stop lift
   - the app persists `stopped_print_pose` / `stopped_print_display`, so reopening Little Hands no longer loses the recovery marker
   - regression checks now cover the exact noisy sample: useful `X74.35 Y73.43 Z0.36` followed by false `X0 Y0 Z5` must become recovery pose `X74.35 Y73.43 Z5.00`
+
+## 2026-05-14 Block Automatic Completion Moves After Restart
+
+- Incident:
+  - after Little Hands was restarted, it restored an active print from logs and later detected `PRINT_END`
+  - the app then ran the normal completion sequence (`G1 Z20`, `G1 Y95`) even though this was no longer a trusted live session
+  - the bed moved toward the operator until the operator cut printer power
+- Fix:
+  - automatic post-print mechanical moves are now blocked when print state was restored from logs / app restart
+  - the completion sequence is also blocked when home is not trusted or the printer port is not connected
+  - restored completion may update logs/UI and play the PC sound, but it must not move axes; the operator must clear the bed, manually restore start, and press `Save start`

@@ -133,6 +133,7 @@ G92 X0 Y0 Z0
 - Little Hands 现在把 home 状态分为 `trusted`、`uncertain` 和 `invalid`；除非 home 可信，或应用正在显示明确的打印后 recovery 确认流程，否则会阻止 SD 启动和 `Go to start`
 - 更换 / 断开 USB 端口、关闭电机、硬停止、jog 失败或 recovery 失败都会清除 home 信任，因为这台机器没有物理限位开关来重新寻找绝对零点
 - 正常 `Stop` 后，Little Hands 会尽量保存 stopped-print recovery 标记：X/Y 来自 `M524` 前的中断打印位置，Z 会考虑停止后的喷头抬升；只有操作者确认平台已清空后，`Go to start` 才能使用它
+- 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

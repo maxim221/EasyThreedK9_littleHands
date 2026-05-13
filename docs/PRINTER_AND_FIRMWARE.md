@@ -136,6 +136,7 @@ So:
 - Little Hands now tracks home as `trusted`, `uncertain`, or `invalid`; SD start and `Go to start` are blocked unless home is trusted or the app is showing an explicit post-print recovery prompt
 - changing / disconnecting the USB port, disabling motors, hard-stopping, a failed jog, or a failed recovery invalidates that trust because the printer has no physical endstops to re-discover zero
 - after a normal `Stop`, Little Hands saves a stopped-print recovery marker when possible: X/Y come from the interrupted print position before `M524`, while Z accounts for the K9 head lift after stop; `Go to start` may use this only after the operator confirms the bed is clear
+- if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

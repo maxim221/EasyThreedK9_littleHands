@@ -3213,6 +3213,15 @@ class K9ControlCenter:
             per_command_timeout=45.0,
         )
 
+    def _can_run_automatic_completion_sequence(self) -> tuple[bool, str]:
+        if self.print_state_restored_from_log:
+            return False, "печать была восстановлена после перезапуска приложения"
+        if not self._home_is_trusted():
+            return False, "стартовая поза больше не доверенная"
+        if not self._port():
+            return False, "порт принтера не подключён"
+        return True, ""
+
     def _run_task(self, label: str, func, *, require_port: bool = True) -> None:
         if self.user_task_pending:
             self.log(f"Команда '{label}' не запущена: предыдущая USB-команда ещё выполняется.")
@@ -5300,13 +5309,22 @@ class K9ControlCenter:
                     completion_pose_known = False
                     completion_pose: tuple[float, float, float] | None = None
                     computer_melody_enabled = bool(self.computer_melody_on_complete_var.get())
+                    completion_sequence_allowed, completion_sequence_skip_reason = self._can_run_automatic_completion_sequence()
                     if not self.suppress_next_completion_chime:
-                        try:
-                            completion_move_result = self._run_printer_completion_sequence().strip()
-                            completion_pose = sdtool.parse_position(completion_move_result)
-                            completion_pose_known = completion_pose is not None
-                        except Exception as exc:
-                            self._post("log", f"Пост-обработка после печати не удалась: {exc}")
+                        if completion_sequence_allowed:
+                            try:
+                                completion_move_result = self._run_printer_completion_sequence().strip()
+                                completion_pose = sdtool.parse_position(completion_move_result)
+                                completion_pose_known = completion_pose is not None
+                            except Exception as exc:
+                                self._post("log", f"Пост-обработка после печати не удалась: {exc}")
+                        else:
+                            self._post(
+                                "log",
+                                "Автоматические послепечатные движения пропущены: "
+                                f"{completion_sequence_skip_reason}. Чтобы не увести оси в упор после рестарта, "
+                                "сними модель, выставь старт вручную и нажми 'Запомнить старт'.",
+                            )
                     if self.suppress_next_completion_chime:
                         self.suppress_next_completion_chime = False
                     else:
@@ -5326,10 +5344,12 @@ class K9ControlCenter:
                                 "log",
                                 "Послепечатная поза M114 не получена. Автоматический 'К старту' после power cycle может быть небезопасен; если сомневаешься, выставь старт вручную.",
                             )
-                        if computer_melody_enabled:
+                        if completion_sequence_allowed and computer_melody_enabled:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята, проиграна мелодия на компьютере")
-                        else:
+                        elif completion_sequence_allowed:
                             self._post("log", "Печать завершена: стол выдвинут, голова поднята")
+                        else:
+                            self._post("log", "Печать завершена: автоматические движения не выполнялись")
                         self._post("log", finish_message)
                         self.post_print_recovery_required = True
                         self._post("post-print-recovery", "completion")

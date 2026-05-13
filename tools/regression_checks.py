@@ -108,6 +108,9 @@ def main() -> int:
         failures,
     )
     require("filament_m > 15.0" in app and "moduleBot" in app, "moduleBot support-heavy G-code guard is missing.", failures)
+    require("_can_run_automatic_completion_sequence" in app, "Automatic post-print movement safety guard is missing.", failures)
+    require("if self.print_state_restored_from_log:" in app, "Restored print state must block automatic completion moves.", failures)
+    require("completion_sequence_allowed" in app and "_run_printer_completion_sequence().strip()" in app, "Completion moves must be explicitly guarded.", failures)
 
     require("brim_width = 14" in cura_quality, "Tracked Cura baseline must keep 14 mm brim.", failures)
     require("bottom_layers = 7" in cura_quality and "top_layers = 7" in cura_quality, "Tracked Cura baseline must keep 7 top/bottom layers.", failures)
