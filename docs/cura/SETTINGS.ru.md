@@ -85,13 +85,16 @@ G1 Y95 F240 ;Move bed toward the operator
 
 ## Скорости
 
-- Print speed: `15 mm/s`
-- Wall speed: `12 mm/s`
-- Top / bottom speed: `11 mm/s`
-- Infill speed: `15 mm/s`
-- Travel speed: `35 mm/s`
-- Initial layer speed: `6 mm/s`
-- Ironing speed: `8 mm/s`
+- Print speed: `11 mm/s`
+- Wall speed: `8 mm/s`
+- Top / bottom speed: `8 mm/s`
+- Infill speed: `11 mm/s`
+- Travel speed: `25 mm/s`
+- Initial layer speed: `4 mm/s`
+- Skirt / brim speed: `4 mm/s`
+- Support speed: `11 mm/s`
+- Support interface / roof speed: `8 mm/s`
+- Ironing speed: `6 mm/s`
 
 ## Сглаживание Движений
 
@@ -160,8 +163,8 @@ G1 Y95 F240 ;Move bed toward the operator
 - Prime speed: `25 mm/s`
 - Bridge settings: `on`
 - Bridge fan speed: `0%`
-- Bridge skin speed: `10 mm/s`
-- Bridge wall speed: `10 mm/s`
+- Bridge skin speed: `7 mm/s`
+- Bridge wall speed: `7 mm/s`
 - Bridge skin flow: `100%`
 - Bridge wall flow: `100%`
 - Initial layer line width: около `155%`

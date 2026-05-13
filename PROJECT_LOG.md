@@ -2573,3 +2573,23 @@ After each test print, append:
   - manual bed jog no longer sends a separate pre-move `M114`
   - the UI now sends the same core sequence as the validated direct movement: enable steppers, absolute setup, soft acceleration, relative single `G1 Y... F600`, `M400`, restore soft acceleration, absolute mode
   - regression checks now block reintroducing manual bed jog segmentation, caps, raw-edge guards, and the separate pre-move `M114`
+
+## 2026-05-14 Cura Slow Profile: 30% Speed Reduction
+
+- Field observation:
+  - during the active `MBNORM02.GCO` print the bed moved, but the brim / sharp direction changes sounded like small resonant slips
+  - inspecting the active G-code showed brim/skirt moves around `F1800` (`30 mm/s`) and travel around `F2100` (`35 mm/s`), too lively for this small K9 bed
+- Profile response:
+  - reduce the general Cura baseline by roughly `30%`
+  - `speed_print`: `15 -> 11 mm/s`
+  - `speed_wall`: `12 -> 8 mm/s`
+  - `speed_topbottom`: `11 -> 8 mm/s`
+  - `speed_infill`: `15 -> 11 mm/s`
+  - `speed_travel`: `35 -> 25 mm/s`
+  - `speed_layer_0`: `6 -> 4 mm/s`
+  - `skirt_brim_speed`: explicitly set to `4 mm/s` so brim does not inherit a fast default
+  - bridge skin/wall speed: `10 -> 7 mm/s`
+- Implementation:
+  - update tracked Cura bundle under `docs/cura/`
+  - update the direct slicing helper `tools/k9_cura_slice.py`
+  - update local Cura 5.11 `codex - K9 warm mat cautious` profile files so the next GUI slice uses the slower baseline after Cura is reopened

@@ -27,6 +27,7 @@ If a physical printer test is needed, ask the operator before moving axes or sta
 - Do not add `M18` / `M84` at the end of print files; Little Hands needs steppers available for recovery.
 - Do not let Cura control the single K9 fan as part cooling. Slicer `M106/M107` must be stripped or disabled.
 - Do not directly slice raw `moduleBot.STL` without checking orientation. Use the validated oriented STL or explicitly inspect Cura Preview.
+- Keep the current slow Cura baseline for this small K9 mechanics unless a new physical test proves a faster profile is safe: print/infill `11 mm/s`, wall/top-bottom `8 mm/s`, travel `25 mm/s`, first-layer and skirt/brim `4 mm/s`, bridge `7 mm/s`.
 
 ## Documentation
 

@@ -125,6 +125,27 @@ G90
 G1 X95 F900
 G1 Y95 F240 ;Move bed toward the operator"""
 
+    speed_settings = {
+        "speed": "11",
+        "speed_infill": "11",
+        "speed_ironing": "6",
+        "speed_layer_0": "4",
+        "speed_print": "11",
+        "speed_print_layer_0": "4",
+        "speed_support": "11",
+        "speed_support_bottom": "8",
+        "speed_support_infill": "11",
+        "speed_support_interface": "8",
+        "speed_support_roof": "8",
+        "speed_topbottom": "8",
+        "speed_travel": "25",
+        "speed_travel_layer_0": "25",
+        "speed_wall": "8",
+        "speed_wall_0": "8",
+        "speed_wall_x": "8",
+        "skirt_brim_speed": "4",
+    }
+
     global_settings = {
         "machine_name": "lilHands K9 warm mat",
         "machine_width": "100",
@@ -167,13 +188,7 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "layer_height_0": "0.2",
         "material_bed_temperature": "0",
         "relative_extrusion": "True",
-        "speed_infill": "15",
-        "speed_ironing": "8",
-        "speed_layer_0": "6",
-        "speed_print": "15",
-        "speed_topbottom": "11",
-        "speed_travel": "35",
-        "speed_wall": "12",
+        **speed_settings,
         "support_angle": "35",
         "support_enable": "True",
         "support_infill_rate": "10",
@@ -226,9 +241,9 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "bridge_settings_enabled": "True",
         "bridge_fan_speed": "0",
         "bridge_skin_material_flow": "100",
-        "bridge_skin_speed": "10",
+        "bridge_skin_speed": "7",
         "bridge_wall_material_flow": "100",
-        "bridge_wall_speed": "10",
+        "bridge_wall_speed": "7",
         "initial_layer_line_width_factor": "155",
         "acceleration_enabled": "True",
         "acceleration_infill": "250",
@@ -252,13 +267,7 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "ironing_line_spacing": "0.12",
         "ironing_only_highest_layer": "True",
         "ironing_pattern": "concentric",
-        "speed_infill": "15",
-        "speed_ironing": "8",
-        "speed_layer_0": "6",
-        "speed_print": "15",
-        "speed_topbottom": "11",
-        "speed_travel": "35",
-        "speed_wall": "12",
+        **speed_settings,
     }
     return global_settings, extruder_settings
 
@@ -439,7 +448,10 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
     footer = (
         ';SETTING_3 {"global_quality": "[values]\\n'
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
-        'layer_height = 0.16\\nlayer_height_0 = 0.2\\nspeed_layer_0 = 6\\n'
+        'layer_height = 0.16\\nlayer_height_0 = 0.2\\n'
+        'speed_print = 11\\nspeed_wall = 8\\nspeed_topbottom = 8\\n'
+        'speed_infill = 11\\nspeed_travel = 25\\nspeed_layer_0 = 4\\n'
+        'skirt_brim_speed = 4\\nspeed_ironing = 6\\n'
         'bottom_layers = 7\\ntop_layers = 7\\nskin_overlap = 10\\n'
         'wall_line_count = 5\\n'
         'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = 35\\n'
