@@ -45,8 +45,10 @@ def main() -> int:
     require('"M204 T1000"' not in app, "k9_control_center.py must not hard-code M204 T1000.", failures)
     require("JOG_RESTORE_TRAVEL_ACCEL = 80" in app, "Manual jog must leave service travel acceleration at T80.", failures)
     require("SERVICE_BED_FEEDRATE = 240" in app, "App long bed service moves must remain F240.", failures)
-    require("JOG_BED_FEEDRATE = 300" in app, "App manual bed jog must remain F300.", failures)
+    require("JOG_BED_FEEDRATE = 120" in app, "App manual bed jog must remain F120.", failures)
+    require("BED_JOG_SEGMENT_MM = 2.0" in app, "App manual bed jog must remain segmented into 2 mm chunks.", failures)
     require('"Y": JOG_BED_FEEDRATE' in app, "Manual bed jog must use the named conservative bed feedrate.", failures)
+    require('"Y": 40' in app, "Manual bed jog acceleration must remain very soft at M204 T40.", failures)
     require("HOME_TRUST_TRUSTED" in app and "HOME_TRUST_UNCERTAIN" in app, "Home trust state machine is missing.", failures)
     require("_home_is_trusted()" in app, "Home-sensitive actions must use the explicit home trust guard.", failures)
 

@@ -2527,3 +2527,17 @@ After each test print, append:
 - Cura rule:
   - end-gcode now presents the bed with `G1 Y95 F240`
   - the tracked Cura profile, slicing helper, project rules, and regression checks were updated to match that lower long-motion limit
+
+## 2026-05-14 Segmented Manual Bed Jog
+
+- Field observation:
+  - after the first bed-speed guard, manual bed jog from the app could still make the bed motor buzz instead of visibly moving
+  - the runtime log showed the app sent the command and Marlin processed it, so this is treated as a service-motion / resonance / skipped-step UI regression, not as proven hardware failure
+- Fix:
+  - manual bed jog now uses `F120` instead of `F300`
+  - manual bed jog uses very soft `M204 T40`
+  - bed jog commands larger than `2 mm` are split into `2 mm` chunks, each followed by `M400`
+  - long recovery / end-presentation bed moves remain at `F240`, because this change targets manual UI jog reliability first
+- Regression rule:
+  - keep this segmented jog behavior protected in `tools/regression_checks.py`
+  - do not raise manual bed jog speed again just because a short diagnostic command works once

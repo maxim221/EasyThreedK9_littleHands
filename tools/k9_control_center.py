@@ -90,7 +90,8 @@ JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
 JOG_DEFAULT_STEP_MM = 5.0
 SERVICE_X_FEEDRATE = 900
 SERVICE_BED_FEEDRATE = 240
-JOG_BED_FEEDRATE = 300
+JOG_BED_FEEDRATE = 120
+BED_JOG_SEGMENT_MM = 2.0
 JOG_FEEDRATES = {
     "X": SERVICE_X_FEEDRATE,
     "Y": JOG_BED_FEEDRATE,
@@ -98,7 +99,7 @@ JOG_FEEDRATES = {
 }
 JOG_TRAVEL_ACCEL = {
     "X": 80,
-    "Y": 80,
+    "Y": 40,
     "Z": 80,
 }
 JOG_RESTORE_TRAVEL_ACCEL = 80
@@ -4851,6 +4852,15 @@ class K9ControlCenter:
         travel_accel = JOG_TRAVEL_ACCEL.get(axis)
         display_hint = self._operator_axis_hint(axis)
         signed_distance = f"{distance:+g}"
+        segments: list[float] = [distance]
+        if axis == "Y" and abs(distance) > BED_JOG_SEGMENT_MM:
+            sign = 1.0 if distance > 0 else -1.0
+            remaining = abs(distance)
+            segments = []
+            while remaining > 1e-6:
+                step = min(BED_JOG_SEGMENT_MM, remaining)
+                segments.append(sign * step)
+                remaining -= step
 
         def task() -> None:
             self.at_saved_start_pose = False
@@ -4862,12 +4872,15 @@ class K9ControlCenter:
             self._post(
                 "log",
                 f"Jog: {display_hint} {signed_distance} мм; G-code {axis}{distance:.3f} F{feedrate}"
+                + (f", segments {len(segments)}x<= {BED_JOG_SEGMENT_MM:g}mm" if len(segments) > 1 else "")
                 + (f", M204 T{travel_accel}" if travel_accel is not None else ""),
             )
             commands = ["M17", "G90", "M211 S0"]
             if travel_accel is not None:
                 commands.append(f"M204 T{travel_accel}")
-            commands.extend(["G91", f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])
+            commands.append("G91")
+            for segment in segments:
+                commands.extend([f"G1 {axis}{segment:.3f} F{feedrate}", "M400"])
             if travel_accel is not None:
                 commands.append(f"M204 T{JOG_RESTORE_TRAVEL_ACCEL}")
             commands.append("G90")

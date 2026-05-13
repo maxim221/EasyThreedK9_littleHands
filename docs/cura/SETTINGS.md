@@ -111,7 +111,7 @@ These limits are intentionally gentle for the small K9 mechanics and help reduce
 - Ironing acceleration: `120 mm/s^2`
 - Jerk control: `off`
 - Note: do not enable Cura jerk control for this RepRap-flavor profile yet; our Marlin firmware uses `M205`, while Cura emits `M566` for jerk in this mode.
-- K9 service-motion limit: the verified `LH-v4` currently stores `M201 X1000 Y1000` and `M204 T1000` in EEPROM/Marlin, which is too aggressive for manual and recovery moves on the tiny mechanics. Keep print travel acceleration at or below `200 mm/s^2`; Little Hands leaves manual/recovery motion in the soft `M204 T80` service-idle state, moves long bed service moves around `F240`, uses `F300` for manual bed jogs, and moves the head left/right around `F900`.
+- K9 service-motion limit: the verified `LH-v4` currently stores `M201 X1000 Y1000` and `M204 T1000` in EEPROM/Marlin, which is too aggressive for manual and recovery moves on the tiny mechanics. Keep print travel acceleration at or below `200 mm/s^2`; Little Hands leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service moves around `F240`, uses slower segmented `F120` / `M204 T40` manual bed jogs, and moves the head left/right around `F900`.
 
 ## Adhesion
 
