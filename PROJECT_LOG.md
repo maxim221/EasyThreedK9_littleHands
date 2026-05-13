@@ -2535,10 +2535,21 @@ After each test print, append:
   - the runtime log showed the app sent the command and Marlin processed it, so this is treated as a service-motion / resonance / skipped-step UI regression, not as proven hardware failure
 - Fix:
   - manual bed jog now uses `F120` instead of `F300`
-  - manual bed jog uses very soft `M204 T40`
+  - manual bed jog uses very soft `M204 P40 T40`
   - manual bed jog is capped to `2 mm` per click even if the global UI step is larger
   - bed jog commands larger than `2 mm` are split into `2 mm` chunks, each followed by `M400`
   - long recovery / end-presentation bed moves remain at `F240`, because this change targets manual UI jog reliability first
 - Regression rule:
   - keep this segmented jog behavior protected in `tools/regression_checks.py`
   - do not raise manual bed jog speed again just because a short diagnostic command works once
+
+## 2026-05-14 Manual Bed Jog Edge Precheck
+
+- Comparison against direct manual control:
+  - direct raw `Y+2` with `M204 P80 T80` moved the Marlin model from `Y:-92.00` to `Y:-90.00`
+  - exact app-style raw `Y+2` with `M204 P40 T40`, `F120`, and `M400` moved the Marlin model from `Y:-90.00` to `Y:-88.00`
+  - the failing UI attempts were raw `Y-` while the printer already reported a strongly negative raw `Y` position, i.e. the app was pressing the bed farther into the back/away hard stop and then accepting Marlin's queued `ok`
+- Fix:
+  - manual bed jog now reads raw `M114` before raw `Y` moves
+  - moves farther below raw `Y0` or above raw `Y95` are blocked with a user message and log entry
+  - manual jog now sets both acceleration fields (`M204 P... T...`) to match the diagnostic context instead of changing only `T`

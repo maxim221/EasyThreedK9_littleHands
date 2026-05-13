@@ -48,8 +48,11 @@ def main() -> int:
     require("JOG_BED_FEEDRATE = 120" in app, "App manual bed jog must remain F120.", failures)
     require("BED_JOG_SEGMENT_MM = 2.0" in app, "App manual bed jog must remain segmented into 2 mm chunks.", failures)
     require("MAX_MANUAL_BED_JOG_MM = 2.0" in app, "App manual bed jog must be capped to 2 mm per click.", failures)
+    require("BED_RAW_MIN_MM = 0.0" in app and "BED_RAW_MAX_MM = 95.0" in app, "Manual bed jog must keep raw Y edge guards.", failures)
     require('"Y": JOG_BED_FEEDRATE' in app, "Manual bed jog must use the named conservative bed feedrate.", failures)
-    require('"Y": 40' in app, "Manual bed jog acceleration must remain very soft at M204 T40.", failures)
+    require('"Y": 40' in app, "Manual bed jog acceleration must remain very soft at M204 P40 T40.", failures)
+    require("M204 P{travel_accel} T{travel_accel}" in app, "Manual jog must soften both print and travel acceleration.", failures)
+    require("Bed jog precheck: raw Y=" in app, "Manual bed jog must log the raw Y edge precheck.", failures)
     require("HOME_TRUST_TRUSTED" in app and "HOME_TRUST_UNCERTAIN" in app, "Home trust state machine is missing.", failures)
     require("_home_is_trusted()" in app, "Home-sensitive actions must use the explicit home trust guard.", failures)
 

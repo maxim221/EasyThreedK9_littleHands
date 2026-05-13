@@ -107,7 +107,7 @@ Where the bad speed/dynamics came from:
 Current rule:
 
 - treat the small X head carriage and Y bed as limiting service-motion axes when choosing print speeds and acceleration
-- Little Hands now leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service/recovery paths around `F240`, uses slower segmented `F120` / `M204 T40` for manual bed jogs capped to `2 mm` per click, and moves the head left/right around `F900`
+- Little Hands now leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service/recovery paths around `F240`, uses slower segmented `F120` / `M204 P40 T40` for manual bed jogs capped to `2 mm` per click, and moves the head left/right around `F900`
 - short diagnostic bed moves up to `F600` worked over `5 mm`, but the public UI workflow keeps the lower segmented jog so manual moves do not regress into buzzing / skipped-step behavior
 - the Cura baseline keeps travel acceleration at or below `200 mm/s^2`
 - for the next firmware rebuild, apply the tracked patch: `docs/firmware/LH-v4-safe-motion.patch`
