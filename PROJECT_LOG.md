@@ -2662,3 +2662,10 @@ After each test print, append:
   - manual jog after Stop updates the saved recovery pose by the jog distance instead of deleting it
   - `Go to start` can therefore return from the current stopped-print coordinate model after the operator confirms that the bed is clear
   - before long SD-start preheat, if the nozzle is known to be sitting at saved `Z0`, Little Hands lifts to the safe clearance and later returns to start before `M24`
+
+## 2026-05-14 Field Check: Quiet Print After Recovery Changes
+
+- Field observation:
+  - a real SD print is running after the controlled-stop / preheat-clearance changes
+  - the operator reports no scraping, squeaks, or foreign motor sounds during the active print
+  - controlled normal `Stop` and `Go to start` recovery still need a separate physical validation after this print is no longer useful to keep running
