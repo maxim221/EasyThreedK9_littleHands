@@ -90,8 +90,8 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Top / bottom speed: `8 mm/s`
 - Infill speed: `11 mm/s`
 - Travel speed: `25 mm/s`
-- Initial layer speed: `4 mm/s`
-- Skirt / brim speed: `4 mm/s`
+- Initial layer speed: `6 mm/s`
+- Skirt / brim speed: `21 mm/s`
 - Support speed: `11 mm/s`
 - Support interface / roof speed: `8 mm/s`
 - Ironing speed: `6 mm/s`

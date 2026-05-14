@@ -129,9 +129,9 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "speed": "11",
         "speed_infill": "11",
         "speed_ironing": "6",
-        "speed_layer_0": "4",
+        "speed_layer_0": "6",
         "speed_print": "11",
-        "speed_print_layer_0": "4",
+        "speed_print_layer_0": "6",
         "speed_support": "11",
         "speed_support_bottom": "8",
         "speed_support_infill": "11",
@@ -143,7 +143,7 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "speed_wall": "8",
         "speed_wall_0": "8",
         "speed_wall_x": "8",
-        "skirt_brim_speed": "4",
+        "skirt_brim_speed": "21",
     }
 
     global_settings = {
@@ -450,8 +450,8 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
         'layer_height = 0.16\\nlayer_height_0 = 0.2\\n'
         'speed_print = 11\\nspeed_wall = 8\\nspeed_topbottom = 8\\n'
-        'speed_infill = 11\\nspeed_travel = 25\\nspeed_layer_0 = 4\\n'
-        'skirt_brim_speed = 4\\nspeed_ironing = 6\\n'
+        'speed_infill = 11\\nspeed_travel = 25\\nspeed_layer_0 = 6\\n'
+        'skirt_brim_speed = 21\\nspeed_ironing = 6\\n'
         'bottom_layers = 7\\ntop_layers = 7\\nskin_overlap = 10\\n'
         'wall_line_count = 5\\n'
         'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = 35\\n'

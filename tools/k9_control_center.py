@@ -385,6 +385,7 @@ class K9ControlCenter:
         self.bed_clear_before_go_start_required = False
         self.stopped_print_pose: tuple[float, float, float] | None = None
         self.stopped_print_display = "-"
+        self.stopped_print_live_return_available = False
         self.predicted_print_end_valid = False
         self.predicted_print_end_file = "-"
         self.predicted_print_end_display = "-"
@@ -659,6 +660,12 @@ class K9ControlCenter:
                 except (TypeError, ValueError):
                     self.stopped_print_pose = None
                     self.stopped_print_display = "-"
+            elif data.get("stopped_print_live_return_available"):
+                self.stopped_print_live_return_available = True
+                self.stopped_print_display = str(data.get("stopped_print_display") or "stopped print")
+                self.bed_clear_before_go_start_required = True
+                self.home_trust = HOME_TRUST_UNCERTAIN
+                self.home_trust_reason = "stopped print live return marker restored from persistent state"
         if (
             phase in {"prepared", "printing", "print_end_expected"}
             and updated_ts
@@ -739,6 +746,7 @@ class K9ControlCenter:
             "bed_clear_before_go_start_required": self.bed_clear_before_go_start_required,
             "stopped_print_pose": list(self.stopped_print_pose) if self.stopped_print_pose is not None else None,
             "stopped_print_display": self.stopped_print_display,
+            "stopped_print_live_return_available": self.stopped_print_live_return_available,
             "sd_gcode_profiles": self.sd_gcode_profiles,
         }
 
@@ -2710,6 +2718,7 @@ class K9ControlCenter:
                 self._set_home_trust(HOME_TRUST_INVALID, "printer port disconnected", log_change=True)
                 self.post_print_pose_known = False
                 self.post_print_pose = None
+                self.stopped_print_live_return_available = False
             self.port_display_var.set(disconnected_label)
             self.port_var.set("")
             return
@@ -2720,6 +2729,7 @@ class K9ControlCenter:
                         self._set_home_trust(HOME_TRUST_INVALID, "printer port changed", log_change=True)
                         self.post_print_pose_known = False
                         self.post_print_pose = None
+                        self.stopped_print_live_return_available = False
                     self.port_display_var.set(self._port_label(meta))
                     self.port_var.set(selected_device)
                     self.preferred_port = selected_device
@@ -2734,6 +2744,7 @@ class K9ControlCenter:
             self._set_home_trust(HOME_TRUST_INVALID, "printer port is not available", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
+            self.stopped_print_live_return_available = False
         self.port_display_var.set(disconnected_label)
         self.port_var.set("")
 
@@ -2748,6 +2759,7 @@ class K9ControlCenter:
                 self._set_home_trust(HOME_TRUST_INVALID, "printer port changed", log_change=True)
                 self.post_print_pose_known = False
                 self.post_print_pose = None
+                self.stopped_print_live_return_available = False
             self.port_var.set(device)
             self.preferred_port = device
             self.log(f"Выбран порт: {device}")
@@ -2763,6 +2775,7 @@ class K9ControlCenter:
             self._set_home_trust(HOME_TRUST_INVALID, "printer port disconnected", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
+            self.stopped_print_live_return_available = False
         if log_change:
             self.log("Порт отключён. Автоопрос и команды принтера остановлены до выбора нового порта.")
 
@@ -2834,6 +2847,7 @@ class K9ControlCenter:
         self.bed_clear_before_go_start_required = True
         self.stopped_print_pose = None
         self.stopped_print_display = "-"
+        self.stopped_print_live_return_available = False
         self._append_ring_log(f"{time.strftime('%H:%M:%S')} PRINT_START file={path}")
         self._save_print_state("printing", force=True)
         self._post("active-sd", f"Печатается: {display}")
@@ -4343,6 +4357,7 @@ class K9ControlCenter:
         self.at_saved_start_pose = False
         self.post_print_pose_known = False
         self.post_print_pose = None
+        self.stopped_print_live_return_available = False
         self._clear_predicted_print_end(save=False)
         self._save_print_state("idle", force=True)
         self._post("active-sd", "Печатается: -")
@@ -4356,6 +4371,7 @@ class K9ControlCenter:
             error_text = None
             stop_pose: tuple[float, float, float] | None = None
             stopped_display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
+            trusted_zero_before_stop = self._home_is_trusted()
             try:
                 out, stop_pose = sdtool.stop_sd_print_with_position(self._port(), self._baud())
             except Exception as exc:
@@ -4370,6 +4386,18 @@ class K9ControlCenter:
                 )
                 self.stopped_print_pose = stop_pose
                 self.stopped_print_display = stopped_display or "-"
+                self.stopped_print_live_return_available = bool(
+                    stop_pose is None and error_text is None and trusted_zero_before_stop and self._port()
+                )
+                if stop_pose is not None:
+                    stop_pose_log = f"X{stop_pose[0]:.2f} Y{stop_pose[1]:.2f} Z{stop_pose[2]:.2f}"
+                else:
+                    stop_pose_log = "?"
+                live_return_log = "1" if self.stopped_print_live_return_available else "0"
+                self._append_ring_log(
+                    f"{time.strftime('%H:%M:%S')} PRINT_STOP file={stopped_display or '-'} "
+                    f"stop_pose=\"{stop_pose_log}\" live_return={live_return_log}"
+                )
                 self._save_print_state("stopped", force=True)
             if out.strip():
                 self._post("log", out.strip())
@@ -4381,7 +4409,8 @@ class K9ControlCenter:
                 "log",
                 "После остановки печати сохранённый старт сброшен: эта K9 может сообщать X0/Y0 после Stop, "
                 "даже если физически сопло осталось не в стартовой X/Y-позе. После удаления пластика со стола "
-                "можно нажать 'К старту': Little Hands попробует вернуться по X/Y до M524 и поднятой Z после стопа.",
+                "'К старту' будет доступен только через recovery-подтверждение: по снятой stop-позе или через "
+                "live-сессию, если позицию снять не удалось, но питание/порт ещё не перезапускались.",
             )
             if stop_pose is not None:
                 self._post(
@@ -4392,7 +4421,9 @@ class K9ControlCenter:
             else:
                 self._post(
                     "log",
-                    "Позицию остановки до M524 получить не удалось. Автоматический возврат к старту после этого стопа недоступен.",
+                    "Позицию остановки до M524 получить не удалось. Если питание/порт ещё не перезапускались, "
+                    "'К старту' попробует live-возврат по текущей Marlin-сессии; после него обязательно проверь "
+                    "физическую позу и нажми 'Запомнить старт'. После power cycle такой live-возврат уже недоступен.",
                 )
 
         self._run_task("Остановка печати", task)
@@ -4426,6 +4457,7 @@ class K9ControlCenter:
                 self._set_home_trust(HOME_TRUST_INVALID, "hard stop disabled steppers", log_change=True)
                 self.stopped_print_pose = None
                 self.stopped_print_display = "-"
+                self.stopped_print_live_return_available = False
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
@@ -4456,6 +4488,7 @@ class K9ControlCenter:
             self._set_home_trust(HOME_TRUST_INVALID, "G28 is disabled for this K9 workflow", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
+            self.stopped_print_live_return_available = False
             self._clear_predicted_print_end()
             self._post(
                 "log",
@@ -4473,6 +4506,7 @@ class K9ControlCenter:
             self.bed_clear_before_go_start_required = False
             self.stopped_print_pose = None
             self.stopped_print_display = "-"
+            self.stopped_print_live_return_available = False
             self.post_print_pose_known = False
             self.post_print_pose = None
             had_active_print = self.current_print_file != "-"
@@ -4696,6 +4730,39 @@ class K9ControlCenter:
         )
         return bool(messagebox.askyesno("Little Hands", prompt))
 
+    def _confirm_live_stopped_session_return(self) -> bool:
+        lang = self.lang_var.get().strip() or "ru"
+        prompt = {
+            "en": (
+                "Try Go to start after a stopped print?\n\n"
+                "Little Hands could not capture M114 before M524, but the USB/Marlin session is still alive and it "
+                "had a trusted saved start before the print. It can try a normal G1 X0 Y0 Z0 return using the current "
+                "session zero.\n\n"
+                "Continue only if the bed is clear. Keep a hand near power: if the printer does not move as expected, "
+                "stop and restore start manually. After the move, press 'Save start' only if the nozzle is physically "
+                "at the correct start pose."
+            ),
+            "zh": (
+                "停止打印后尝试回到起点吗？\n\n"
+                "Little Hands 没能在 M524 前取得 M114，但 USB/Marlin 会话仍然有效，并且打印前有可信起点。"
+                "它可以尝试用当前会话零点执行普通 G1 X0 Y0 Z0 返回。\n\n"
+                "只有平台清空后才继续。请手放在电源附近：如果移动不符合预期，请停止并手动恢复起点。"
+                "移动后，只有喷嘴实际在正确起点时才点击 'Save start'。"
+            ),
+            "ru": (
+                "Попробовать 'К старту' после остановленной печати?\n\n"
+                "Little Hands не успел снять M114 до M524, но USB/Marlin-сессия ещё жива, а перед печатью был "
+                "доверенный сохранённый старт. Можно попробовать обычный возврат G1 X0 Y0 Z0 по текущему нолю сессии.\n\n"
+                "Продолжай только если стол свободен. Держи руку рядом с питанием: если движение выглядит неверно, "
+                "останови и выставь старт вручную. После движения нажимай 'Запомнить старт' только если сопло "
+                "физически стоит в правильной стартовой позе."
+            ),
+        }.get(lang) or (
+            "Попробовать 'К старту' по текущей live-сессии после Stop?\n\n"
+            "Продолжай только если стол свободен; после движения нажми 'Запомнить старт' только при правильной физической позе."
+        )
+        return bool(messagebox.askyesno("Little Hands", prompt))
+
     def go_print_home(self, *, confirm_model_removed: bool = False) -> None:
         if self.current_print_file != "-" and not confirm_model_removed:
             msg = (
@@ -4711,8 +4778,19 @@ class K9ControlCenter:
             if not self._confirm_aborted_print_recovery(stopped_pose):
                 return
             use_stopped_print_pose = True
+        use_live_stopped_session_return = False
         if (
             not use_stopped_print_pose
+            and not self._home_is_trusted()
+            and self.bed_clear_before_go_start_required
+            and self.stopped_print_live_return_available
+        ):
+            if not self._confirm_live_stopped_session_return():
+                return
+            use_live_stopped_session_return = True
+        if (
+            not use_stopped_print_pose
+            and not use_live_stopped_session_return
             and (self.post_print_recovery_required or self.bed_clear_before_go_start_required)
             and not confirm_model_removed
         ):
@@ -4725,6 +4803,11 @@ class K9ControlCenter:
             self.log(
                 "Выполняю recovery к старту после остановленной печати: использую позицию, "
                 "снятую до M524, затем возвращаюсь в X0 Y0 Z0."
+            )
+        elif use_live_stopped_session_return:
+            self.log(
+                "Выполняю live-возврат после Stop без M114: пробую текущий Marlin-ноль этой USB-сессии. "
+                "После движения оператор должен подтвердить физический старт кнопкой 'Запомнить старт'."
             )
         elif self._can_return_from_known_post_print_pose() and not self._home_is_trusted():
             post_print_pose = self.post_print_pose
@@ -4779,6 +4862,8 @@ class K9ControlCenter:
                         end_y=stopped_pose[1],
                         end_z=stopped_pose[2],
                     )
+                elif use_live_stopped_session_return:
+                    out = sdtool.goto_print_home(self._port(), self._baud())
                 elif use_predicted_print_end_pose:
                     assert self.predicted_print_end_z is not None
                     out = sdtool.goto_print_home_from_predicted_end(
@@ -4804,12 +4889,19 @@ class K9ControlCenter:
                 raise
             if use_stopped_print_pose or use_post_print_pose or use_predicted_print_end_pose:
                 self._set_home_trust(HOME_TRUST_TRUSTED, "recovered to saved start", log_change=True)
+            elif use_live_stopped_session_return:
+                self._set_home_trust(
+                    HOME_TRUST_UNCERTAIN,
+                    "live stop return attempted; operator must confirm physical start",
+                    log_change=True,
+                )
             elif self._home_is_trusted():
                 self._set_home_trust(HOME_TRUST_TRUSTED, "returned to saved start", log_change=False)
-            self.at_saved_start_pose = True
+            self.at_saved_start_pose = not use_live_stopped_session_return
             self.bed_clear_before_go_start_required = False
             self.stopped_print_pose = None
             self.stopped_print_display = "-"
+            self.stopped_print_live_return_available = False
             self.post_print_pose_known = False
             self.post_print_pose = None
             if use_stopped_print_pose:
@@ -4818,6 +4910,16 @@ class K9ControlCenter:
                 self._post("progress", ("Recovery после стопа: старт восстановлен", 0.0))
                 self._post("log", out.strip() or "Recovery после остановленной печати выполнен: стартовая поза заново сохранена")
                 self._post("log", "Теперь можно запускать следующую печать из сохранённого старта.")
+            elif use_live_stopped_session_return:
+                self._clear_predicted_print_end(save=False)
+                self._save_print_state("live-stop-return-attempted", force=True)
+                self._post("progress", ("Live recovery после стопа: проверь старт", 0.0))
+                self._post("log", out.strip() or "Live-возврат после Stop выполнен по текущему Marlin-нолю")
+                self._post(
+                    "log",
+                    "Если сопло физически стоит в правильной стартовой позе, нажми 'Запомнить старт'. "
+                    "Если нет - выставь старт ручными кнопками и только потом нажми 'Запомнить старт'.",
+                )
             elif use_post_print_pose:
                 self._clear_predicted_print_end(save=False)
                 self._save_print_state("recovered-to-start", force=True)
@@ -4868,6 +4970,7 @@ class K9ControlCenter:
             self._set_home_trust(HOME_TRUST_INVALID, "motors were disabled", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
+            self.stopped_print_live_return_available = False
             self._clear_predicted_print_end()
             out = sdtool.query_command(self._port(), self._baud(), "M18", wait_before_read=0.4, read_seconds=1.0)
             self._post("log", out.strip() or "Моторы отключены")

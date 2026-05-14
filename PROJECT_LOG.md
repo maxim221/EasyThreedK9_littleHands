@@ -2594,6 +2594,18 @@ After each test print, append:
   - update the direct slicing helper `tools/k9_cura_slice.py`
   - update local Cura 5.11 `codex - K9 warm mat cautious` profile files so the next GUI slice uses the slower baseline after Cura is reopened
 
+## 2026-05-14 Cura Slow Profile Correction: Brim Was Too Slow
+
+- Field observation:
+  - the next GUI-sliced `CFFFP_moduleBot.gcode` felt far slower than a `30%` reduction
+  - inspection confirmed the first brim move was `F240` (`4 mm/s`), while the earlier working file used about `F1800` (`30 mm/s`)
+  - this was not a practical `30%` reduction; it made first-layer/brim motion crawl and stretched startup time unnecessarily
+- Fix:
+  - keep the conservative body speeds: print/infill `11 mm/s`, wall/top-bottom `8 mm/s`, travel `25 mm/s`, bridge `7 mm/s`
+  - restore first-layer part speed to `6 mm/s`
+  - set skirt/brim speed to `21 mm/s`, which is the actual roughly-30%-slower target from the observed `30 mm/s` brim
+  - update the tracked Cura bundle, direct slicing helper, local Cura 5.11 profile files, docs, and regression checks
+
 ## 2026-05-14 Stopped-Print Recovery Pose Fix
 
 - Field observation:
@@ -2616,3 +2628,15 @@ After each test print, append:
   - automatic post-print mechanical moves are now blocked when print state was restored from logs / app restart
   - the completion sequence is also blocked when home is not trusted or the printer port is not connected
   - restored completion may update logs/UI and play the PC sound, but it must not move axes; the operator must clear the bed, manually restore start, and press `Save start`
+
+## 2026-05-14 Stop Without M114: Guarded Live Return
+
+- Field observation:
+  - stopping a very slow first-layer print during the post-`M24` quiet window produced only `echo:busy: processing`
+  - Little Hands could not capture `M114` before `M524`
+  - the app then invalidated home and blocked `Go to start`, even though the printer had a trusted saved zero before the print and the Marlin session was still alive
+- Fix:
+  - when Stop succeeds but no stop pose is captured, Little Hands records a guarded `stopped_print_live_return_available` marker
+  - `Go to start` can now offer a live-session return using the current Marlin zero
+  - the confirmation warns that the bed must be clear, power must be nearby, and the operator must press `Save start` only after visually confirming the physical start pose
+  - the live-return marker is cleared on new print starts, hard stop, motor off, port change/disconnect, or after the recovery attempt

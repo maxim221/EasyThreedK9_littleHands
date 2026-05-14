@@ -111,6 +111,12 @@ def main() -> int:
     require("_can_run_automatic_completion_sequence" in app, "Automatic post-print movement safety guard is missing.", failures)
     require("if self.print_state_restored_from_log:" in app, "Restored print state must block automatic completion moves.", failures)
     require("completion_sequence_allowed" in app and "_run_printer_completion_sequence().strip()" in app, "Completion moves must be explicitly guarded.", failures)
+    require(
+        "stopped_print_live_return_available" in app and "_confirm_live_stopped_session_return" in app,
+        "Stopped-print recovery must offer a guarded live-session return when M114 was not captured.",
+        failures,
+    )
+    require("PRINT_STOP file=" in app and "live_return=" in app, "Stopped-print events must be recorded in the runtime log.", failures)
 
     require("brim_width = 14" in cura_quality, "Tracked Cura baseline must keep 14 mm brim.", failures)
     require("bottom_layers = 7" in cura_quality and "top_layers = 7" in cura_quality, "Tracked Cura baseline must keep 7 top/bottom layers.", failures)
@@ -118,7 +124,8 @@ def main() -> int:
     require("speed_print = 11" in cura_quality and '"speed_print": "11"' in slicer, "Tracked Cura baseline must keep the 30% slower print speed.", failures)
     require("speed_wall = 8" in cura_quality and '"speed_wall": "8"' in slicer, "Tracked Cura baseline must keep the slower wall speed.", failures)
     require("speed_travel = 25" in cura_quality and '"speed_travel": "25"' in slicer, "Tracked Cura baseline must keep the slower travel speed.", failures)
-    require("skirt_brim_speed = 4" in cura_quality and '"skirt_brim_speed": "4"' in slicer, "Tracked Cura baseline must keep slow skirt/brim movement.", failures)
+    require("speed_layer_0 = 6" in cura_quality and '"speed_layer_0": "6"' in slicer, "Tracked Cura baseline must keep practical first-layer speed.", failures)
+    require("skirt_brim_speed = 21" in cura_quality and '"skirt_brim_speed": "21"' in slicer, "Tracked Cura baseline must keep practical 30% slower skirt/brim movement.", failures)
     require("initial_layer_line_width_factor = 155" in cura_extruder, "Initial layer width must remain 155%.", failures)
     require("material_print_temperature_layer_0 = 226" in cura_extruder, "First-layer PLA target must remain 226C.", failures)
     require("bridge_skin_speed = 7" in cura_extruder and "bridge_wall_speed = 7" in cura_extruder, "Bridge speeds must remain reduced for the small K9 mechanics.", failures)
