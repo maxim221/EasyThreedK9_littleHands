@@ -1035,6 +1035,20 @@ class K9ControlCenter:
             "Нагрев выключен командой M104 S0; не запускаю печать вслепую."
         )
 
+    def _lift_from_saved_start_for_preheat_if_needed(self) -> None:
+        if not self.at_saved_start_pose:
+            return
+        self._post("log", "Сопло сейчас в сохранённом старте: поднимаю Z перед предпрогревом, затем вернусь к старту перед M24.")
+        out = sdtool.lift_from_saved_start_for_preheat(self._port(), self._baud())
+        self.at_saved_start_pose = False
+        useful_lines = [
+            line.strip()
+            for line in out.splitlines()
+            if line.strip() and line.strip().lower() != "ok"
+        ]
+        if useful_lines:
+            self._post("log", "\n".join(useful_lines))
+
     def _prime_print_end_contract(self, sd_path: str, display: str, source: Path | None = None) -> None:
         profile = self._profile_for_print(sd_path, display, source)
         max_z = profile.get("max_z") if isinstance(profile, dict) else None
@@ -4110,6 +4124,7 @@ class K9ControlCenter:
             self._post("sd-files", files)
             self._post("upload-cancel-visible", (False, False))
             target = self._hotend_target_for_print(dest, source.name, upload_source)
+            self._lift_from_saved_start_for_preheat_if_needed()
             self._preheat_hotend_for_sd_start(target)
             self._prime_print_end_contract(dest, source.name, upload_source)
             try:
@@ -4228,6 +4243,7 @@ class K9ControlCenter:
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
             target = self._hotend_target_for_print(path, display, source_for_profile)
+            self._lift_from_saved_start_for_preheat_if_needed()
             self._preheat_hotend_for_sd_start(target)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
@@ -4427,7 +4443,7 @@ class K9ControlCenter:
                 self._post(
                     "log",
                     f"Recovery-поза после стопа сохранена: X{stop_pose[0]:.2f} Y{stop_pose[1]:.2f} Z{stop_pose[2]:.2f} "
-                    "(X/Y из позиции прерывания, Z с учётом подъёма головы).",
+                    "(X/Y из позиции прерывания, Z из управляемого post-stop подъёма, если он подтвердился).",
                 )
             else:
                 self._post(
@@ -4705,7 +4721,7 @@ class K9ControlCenter:
             "en": (
                 "Return to start after a stopped / failed print?\n\n"
                 f"Little Hands saved recovery coordinates for the stopped print:\n{file_text}\n{pose_text}\n\n"
-                "X/Y come from the interrupted print position; Z accounts for the head lift after stop.\n\n"
+                "X/Y come from the interrupted print position; Z is the controlled post-stop safe height when available.\n\n"
                 "It will not use any endstop-based homing. It will:\n"
                 "1. lift the nozzle\n"
                 "2. temporarily restore that interrupted coordinate model with G92\n"
@@ -4716,7 +4732,7 @@ class K9ControlCenter:
             "zh": (
                 "停止/失败打印后回到起点吗？\n\n"
                 f"Little Hands 保存了停止打印的恢复坐标：\n{file_text}\n{pose_text}\n\n"
-                "X/Y 来自中断时的位置；Z 已考虑停止后喷头抬升。\n\n"
+                "X/Y 来自中断时的位置；如果可用，Z 是受控停止后的安全高度。\n\n"
                 "它不会使用任何基于限位开关的 homing。它会：\n"
                 "1. 抬起喷嘴\n"
                 "2. 用 G92 临时恢复中断时的坐标模型\n"
@@ -4727,7 +4743,7 @@ class K9ControlCenter:
             "ru": (
                 "Вернуть к старту после остановленной / сорванной печати?\n\n"
                 f"Little Hands сохранил recovery-координаты остановленной печати:\n{file_text}\n{pose_text}\n\n"
-                "X/Y взяты из позиции прерывания; Z учитывает подъём головы после стопа.\n\n"
+                "X/Y взяты из позиции прерывания; Z — управляемая безопасная высота после Stop, если её удалось подтвердить.\n\n"
                 "Он не будет использовать home по концевикам. Recovery будет таким:\n"
                 "1. поднимет сопло\n"
                 "2. временно восстановит координаты прерывания через G92\n"
@@ -4988,6 +5004,25 @@ class K9ControlCenter:
 
         self._run_task("Отключение моторов", task)
 
+    def _update_stopped_print_pose_after_jog(
+        self,
+        pose: tuple[float, float, float] | None,
+        axis: str,
+        distance: float,
+    ) -> tuple[float, float, float] | None:
+        if pose is None:
+            return None
+        x, y, z = pose
+        if axis == "X":
+            x += distance
+        elif axis == "Y":
+            y += distance
+        elif axis == "Z":
+            z += distance
+        else:
+            return pose
+        return (x, y, z)
+
     def jog_axis(self, axis: str, distance: float) -> None:
         axis = axis.upper()
         feedrate = JOG_FEEDRATES.get(axis, 1200)
@@ -4996,11 +5031,10 @@ class K9ControlCenter:
         signed_distance = f"{distance:+g}"
 
         def task() -> None:
+            stopped_pose_before_jog = self.stopped_print_pose
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
             self.post_print_pose = None
-            self.stopped_print_pose = None
-            self.stopped_print_display = "-"
             self._clear_predicted_print_end()
             self._post(
                 "log",
@@ -5023,8 +5057,22 @@ class K9ControlCenter:
                     per_command_timeout=45.0,
                 )
             except Exception:
+                self.stopped_print_pose = None
+                self.stopped_print_display = "-"
+                self.stopped_print_live_return_available = False
+                self._save_print_state("stopped-jog-failed", force=True)
                 self._set_home_trust(HOME_TRUST_UNCERTAIN, "manual jog failed; app position model is not trusted", log_change=True)
                 raise
+            updated_stopped_pose = self._update_stopped_print_pose_after_jog(stopped_pose_before_jog, axis, distance)
+            if updated_stopped_pose is not None and self.bed_clear_before_go_start_required:
+                self.stopped_print_pose = updated_stopped_pose
+                self._save_print_state("stopped-jog-updated", force=True)
+                self._post(
+                    "log",
+                    "Recovery-поза после ручного сдвига обновлена: "
+                    f"X{updated_stopped_pose[0]:.2f} Y{updated_stopped_pose[1]:.2f} Z{updated_stopped_pose[2]:.2f}. "
+                    "'К старту' по-прежнему сможет вернуть принтер к сохранённому 0 после подтверждения.",
+                )
             useful_lines = [
                 line.strip()
                 for line in out.splitlines()

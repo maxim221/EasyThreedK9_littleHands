@@ -135,7 +135,8 @@ So:
 - after a failed start or suspicious state, re-establish the start pose and zero again
 - Little Hands now tracks home as `trusted`, `uncertain`, or `invalid`; SD start and `Go to start` are blocked unless home is trusted or the app is showing an explicit post-print recovery prompt
 - changing / disconnecting the USB port, disabling motors, hard-stopping, a failed jog, or a failed recovery invalidates that trust because the printer has no physical endstops to re-discover zero
-- after a normal `Stop`, Little Hands saves a stopped-print recovery marker when possible: X/Y come from the interrupted print position before `M524`, while Z accounts for the K9 head lift after stop; `Go to start` may use this only after the operator confirms the bed is clear
+- normal `Stop` is a controlled stop, not the emergency path: Little Hands pauses, reads `M114`, tries to lift Z to a known safe recovery height, then sends `M524` / heater-off commands
+- after a normal `Stop`, Little Hands saves a stopped-print recovery marker when possible: X/Y come from the interrupted print position, while Z comes from the controlled post-stop lift when available; manual jogs after Stop update this recovery marker instead of deleting it
 - if `Stop` happens while the K9 is still busy and no `M114` is captured, Little Hands may offer a guarded live-session `Go to start`; use it only with a clear bed, then press `Save start` only after visually confirming the physical start pose
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 
@@ -168,7 +169,7 @@ For the current validated public baseline:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
-- brim width: `12 mm`
+- brim width: `14 mm`
 - PLA temperature: `225C` first layer, `224C` after that
 - bed temperature in G-code: `0C` because the warm bed is external
 - support mode for `mainFlasherTop.STL`: supports everywhere, normal supports, interface / roof enabled, support angle `35`
@@ -181,7 +182,7 @@ Important G-code rules:
 - when a file is uploaded through Little Hands, early blocking `M109` is rewritten to `M104`; the app preheats the hotend before the SD start
 - use `Check G-code` before upload; the same validation also runs automatically before `Upload G-code` and `Upload & start`
 - reject or re-slice files with `Filament used: 0m`, impossible bounds, motion outside `100 x 100 x 100 mm`, bed heat `M140/M190 S>0`, `M18/M84`, missing hotend target, or aggressive body `M204`
-- `12 mm` brim is now the current default after the automatic hotend-preheat workflow was confirmed; the old start failure was tied to heat / SD-start sequencing, not to brim width itself
+- `14 mm` brim is now the current default after the anti-warp profile tuning; the old start failure was tied to heat / SD-start sequencing, not to brim width itself
 
 Current end-G-code rule:
 
@@ -209,7 +210,7 @@ If a different slicer version is used, configure it from `docs/cura/SETTINGS.md`
 6. Set the physical start pose.
 7. Press `Save start`.
 8. Press `Go to start` and confirm it returns correctly.
-9. Start printing from SD. Manual hotend preheat is not needed: before `M24`, Little Hands preheats the hotend to the target found in the G-code, then sends `M23`, waits for `File selected`, and sends `M24`.
+9. Start printing from SD. Manual hotend preheat is not needed: if the nozzle is still at saved `Z0`, Little Hands first lifts it to a safe clearance; before `M24`, it preheats the hotend to the target found in the G-code, returns to the saved start, then sends `M23`, waits for `File selected`, and sends `M24`.
 10. If the file was uploaded through Little Hands or exported by the bundled helper, the early `M109` has been rewritten to `M104` so SD start does not get stuck in a blocking heat wait.
 11. After `M24`, Little Hands keeps USB fully quiet for `180` seconds. This is expected and helps this K9 enter SD printing reliably.
 12. During any remaining `M109` in older G-code, firmware may not answer ordinary `M105` / `M27`; Little Hands first listens passively for `M109` temperature lines and avoids stuffing the queue with extra commands.

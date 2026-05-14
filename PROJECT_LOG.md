@@ -2650,3 +2650,15 @@ After each test print, append:
   - local Cura 5.11 now has `[cura] jobname_prefix = False`
   - the validated Cura documentation says to disable `Preferences -> General -> Add machine prefix to job name`
   - `Export Cura profile` now writes `CURA_PREFERENCES.txt` into the exported bundle so this non-profile preference is not lost
+
+## 2026-05-14 Controlled Normal Stop Recovery
+
+- Field observation:
+  - after a normal `Stop`, Little Hands captured the interrupted position (`X14.10 Y14.68 Z0.20`) but did not create a reliable post-stop Z clearance model
+  - any manual jog after Stop erased `stopped_print_pose`, so `Go to start` lost the only useful recovery model and appeared to do nothing useful
+- Fix:
+  - normal `Stop` now tries to pause, read `M114`, lift Z to a controlled safe recovery height, read `M114` again, then send `M524` / heater-off commands
+  - low stopped prints use a `10 mm` recovery Z clearance; high stopped prints are capped at `95 mm` to stay inside the K9 Z envelope
+  - manual jog after Stop updates the saved recovery pose by the jog distance instead of deleting it
+  - `Go to start` can therefore return from the current stopped-print coordinate model after the operator confirms that the bed is clear
+  - before long SD-start preheat, if the nozzle is known to be sitting at saved `Z0`, Little Hands lifts to the safe clearance and later returns to start before `M24`

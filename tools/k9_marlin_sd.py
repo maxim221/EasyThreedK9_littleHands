@@ -45,6 +45,7 @@ RESTORE_TRAVEL_ACCEL = SOFT_TRAVEL_ACCEL
 SAFE_BED_FEEDRATE = 240
 SAFE_VERTICAL_FEEDRATE = 600
 SAFE_X_FEEDRATE = 900
+SAFE_HOME_CLEARANCE_Z = 10.0
 POSITION_RE = re.compile(r"^\s*X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)", re.MULTILINE)
 
 
@@ -266,6 +267,10 @@ def parse_stopped_print_position(text: str) -> tuple[float, float, float] | None
         return None
     safe_z = max(pos[2] for pos in positions)
     return (interrupted[0], interrupted[1], max(interrupted[2], safe_z))
+
+
+def _stop_recovery_z(current_z: float) -> float:
+    return min(95.0, max(current_z + 3.0, SAFE_HOME_CLEARANCE_Z))
 
 
 def sync_ascii(ser: serial.Serial) -> None:
@@ -687,6 +692,23 @@ def goto_print_home(port: str, baud: int) -> str:
     )
 
 
+def lift_from_saved_start_for_preheat(port: str, baud: int) -> str:
+    return run_commands_wait_ok(
+        port,
+        baud,
+        [
+            "M17",
+            "G90",
+            "M211 S0",
+            *soft_service_travel_commands([
+                f"G1 Z{SAFE_HOME_CLEARANCE_Z:g} F{SAFE_VERTICAL_FEEDRATE}",
+            ]),
+            "M114",
+        ],
+        per_command_timeout=45.0,
+    )
+
+
 def goto_print_home_from_predicted_end(
     port: str,
     baud: int,
@@ -701,7 +723,7 @@ def goto_print_home_from_predicted_end(
         "M211 S0",
         f"G92 X{end_x:.3f} Y{end_y:.3f} Z{end_z:.3f}",
     ]
-    travel_z = min(100.0, end_z + 3.0)
+    travel_z = min(100.0, max(end_z + 3.0, SAFE_HOME_CLEARANCE_Z))
     if travel_z > end_z:
         commands.append(f"G1 Z{travel_z:.3f} F600")
     commands.extend(
@@ -806,11 +828,31 @@ def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float,
             send_line(ser, command)
             time.sleep(delay)
         pose_out = read_for(ser, 1.8)
+        interrupted_pose = parse_position(pose_out)
+        controlled_stop_out = ""
+        if interrupted_pose is not None:
+            safe_z = _stop_recovery_z(interrupted_pose[2])
+            controlled_stop_out += f";LH controlled stop lift to Z{safe_z:.3f}\n"
+            for command in (
+                "G90",
+                "M211 S0",
+                f"M204 T{SOFT_TRAVEL_ACCEL}",
+                f"G1 Z{safe_z:.3f} F{SAFE_VERTICAL_FEEDRATE}",
+                "M400",
+                f"M204 T{RESTORE_TRAVEL_ACCEL}",
+                "M114",
+            ):
+                try:
+                    controlled_stop_out += send_line_wait_ok(ser, command, timeout_s=45.0)
+                except Exception as exc:
+                    controlled_stop_out += f";LH controlled stop lift failed at {command}: {exc}\n"
+                    break
+                time.sleep(0.05)
         for command in ("M108", "M524", "M104 S0", "M140 S0", "M107", "M400"):
             send_line(ser, command)
             time.sleep(0.4)
         stop_out = read_for(ser, 2.5)
-    out = pose_out + stop_out
+    out = pose_out + controlled_stop_out + stop_out
     return out, parse_stopped_print_position(out)
 
 

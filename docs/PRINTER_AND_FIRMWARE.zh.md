@@ -132,7 +132,8 @@ G92 X0 Y0 Z0
 - 如果启动失败或状态可疑，应重新建立起始姿态并重新设零
 - Little Hands 现在把 home 状态分为 `trusted`、`uncertain` 和 `invalid`；除非 home 可信，或应用正在显示明确的打印后 recovery 确认流程，否则会阻止 SD 启动和 `Go to start`
 - 更换 / 断开 USB 端口、关闭电机、硬停止、jog 失败或 recovery 失败都会清除 home 信任，因为这台机器没有物理限位开关来重新寻找绝对零点
-- 正常 `Stop` 后，Little Hands 会尽量保存 stopped-print recovery 标记：X/Y 来自 `M524` 前的中断打印位置，Z 会考虑停止后的喷头抬升；只有操作者确认平台已清空后，`Go to start` 才能使用它
+- 普通 `Stop` 是受控停止，不是紧急路径：Little Hands 会暂停、读取 `M114`、尝试把 Z 抬到已知安全 recovery 高度，然后发送 `M524` 和关闭加热命令
+- 正常 `Stop` 后，Little Hands 会尽量保存 stopped-print recovery 标记：X/Y 来自中断打印位置，Z 来自受控 post-stop 抬升（如果确认成功）；Stop 后的手动 jog 会更新该标记，而不是删除它
 - 如果 `Stop` 发生在 K9 仍然 busy、没有取得 `M114` 的窗口内，Little Hands 可能提供受保护的 live-session `Go to start`；只有平台清空后才使用，并且只有目视确认实际起点正确后才点击 `Save start`
 - 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
 
@@ -160,7 +161,7 @@ G92 X0 Y0 Z0
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
-- brim width: `12 mm`
+- brim width: `14 mm`
 - PLA 温度：第一层 `225C`，之后 `224C`
 - G-code 中的热床温度：`0C`，因为热床是外部供电
 - `mainFlasherTop.STL` 的支撑：supports everywhere、normal supports、启用 interface / roof、support angle `35`
@@ -173,7 +174,7 @@ G92 X0 Y0 Z0
 - 通过 Little Hands 上传时，早期阻塞式 `M109` 会自动改写为 `M104`；应用会在 SD 启动前预热热端
 - 上传前可以使用 `Check G-code`；同一套校验也会在 `Upload G-code` 和 `Upload & start` 前自动运行
 - 如果文件出现 `Filament used: 0m`、不可能的 bounds、超出 `100 x 100 x 100 mm`、热床加热 `M140/M190 S>0`、`M18/M84`、缺少热端目标温度，或 body `M204` 过激，请重新切片
-- 自动热端预热流程确认后，`12 mm` brim 现在是默认值；旧的启动失败与加热 / SD 启动顺序有关，不是 brim 宽度本身造成的
+- anti-warp 配置调整后，`14 mm` brim 现在是默认值；旧的启动失败与加热 / SD 启动顺序有关，不是 brim 宽度本身造成的
 
 当前 end-gcode 规则：
 
@@ -201,7 +202,7 @@ G92 X0 Y0 Z0
 6. 设定物理起始姿态
 7. 点击 `Save start`
 8. 点击 `Go to start` 并确认它确实返回正确位置
-9. 从 SD 启动打印。不需要手动预热热端：发送 `M24` 前，Little Hands 会把热端预热到 G-code 中的目标温度，然后发送 `M23`，等待 `File selected` 确认，再发送 `M24`。
+9. 从 SD 启动打印。不需要手动预热热端：如果喷嘴仍在已保存的 `Z0`，Little Hands 会先抬到安全间隙；发送 `M24` 前，它会把热端预热到 G-code 中的目标温度，回到已保存起点，然后发送 `M23`，等待 `File selected` 确认，再发送 `M24`。
 10. 如果文件是通过 Little Hands 上传或由内置 helper 导出的，早期 `M109` 已改写为 `M104`，避免 SD 启动卡在阻塞式加热等待中。
 11. 发送 `M24` 后，Little Hands 会让 USB 完全安静 `180` 秒。这是预期行为，有助于这台 K9 稳定进入 SD 打印。
 12. 对旧 G-code 中残留的 `M109`，固件可能不会响应普通的 `M105` / `M27`；Little Hands 会先被动监听 `M109` 的温度行，避免向队列塞入额外命令。

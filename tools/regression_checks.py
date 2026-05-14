@@ -43,6 +43,7 @@ def main() -> int:
     )
     require("SAFE_BED_FEEDRATE = 240" in marlin, "Long bed service/recovery feedrate must remain F240.", failures)
     require("SAFE_X_FEEDRATE = 900" in marlin, "Head X service feedrate must remain F900.", failures)
+    require("SAFE_HOME_CLEARANCE_Z = 10.0" in marlin, "Recovery/preheat clearance must keep a 10 mm Z lift.", failures)
     require('"M204 T1000"' not in marlin, "k9_marlin_sd.py must not hard-code M204 T1000.", failures)
     require('"M204 T1000"' not in app, "k9_control_center.py must not hard-code M204 T1000.", failures)
     require("JOG_RESTORE_TRAVEL_ACCEL = 80" in app, "Manual jog must leave service travel acceleration at T80.", failures)
@@ -73,6 +74,8 @@ def main() -> int:
         failures,
     )
     require("send_line_wait_ok" in marlin, "Start-from-home serial service moves must wait for ok.", failures)
+    require("lift_from_saved_start_for_preheat" in marlin, "Start workflow must be able to lift from Z0 before preheat.", failures)
+    require("_lift_from_saved_start_for_preheat_if_needed" in app, "App must lift from saved Z0 before long SD preheat.", failures)
     require_regex(
         marlin,
         r"def _start_sd_print_from_home_once\(.*?send_line_wait_ok",
@@ -117,6 +120,16 @@ def main() -> int:
         failures,
     )
     require("PRINT_STOP file=" in app and "live_return=" in app, "Stopped-print events must be recorded in the runtime log.", failures)
+    require(
+        "_update_stopped_print_pose_after_jog" in app and "stopped-jog-updated" in app,
+        "Manual jog after Stop must update, not erase, the stopped-print recovery pose.",
+        failures,
+    )
+    require(
+        "LH controlled stop lift to Z" in marlin,
+        "Normal Stop must try to create a controlled post-stop recovery height.",
+        failures,
+    )
 
     require("brim_width = 14" in cura_quality, "Tracked Cura baseline must keep 14 mm brim.", failures)
     require("bottom_layers = 7" in cura_quality and "top_layers = 7" in cura_quality, "Tracked Cura baseline must keep 7 top/bottom layers.", failures)
@@ -144,6 +157,8 @@ def main() -> int:
         "Stopped-print recovery must keep interrupted X/Y and lifted post-stop Z.",
         failures,
     )
+    require(sdtool._stop_recovery_z(0.2) == 10.0, "Low stopped prints must lift to a 10 mm recovery height.", failures)
+    require(sdtool._stop_recovery_z(94.0) == 95.0, "High stopped prints must not plan recovery above the K9 Z limit.", failures)
 
     if failures:
         print("Regression checks failed:")
