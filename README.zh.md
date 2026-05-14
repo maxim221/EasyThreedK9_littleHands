@@ -108,6 +108,7 @@ python3 tools/k9_control_center.py
    - machine: `lilHands K9 warm mat`
    - profile: `codex - K9 warm mat cautious`
    - brim: `14 mm`
+   - Cura 偏好设置：`Add machine prefix to job name` = `off`
    - `mainFlasherTop.STL` 支撑：everywhere，启用 interface / roof，support angle `35`
 
 公开固定的 Cura 基线副本位于 [docs/cura/](docs/cura/)。

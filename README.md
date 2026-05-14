@@ -119,6 +119,7 @@ python3 tools/k9_control_center.py
    - machine: `lilHands K9 warm mat`
    - profile: `codex - K9 warm mat cautious`
    - brim: `14 mm`
+   - Cura preference: `Add machine prefix to job name` = `off`
    - PLA: `225C` first layer, then `224C`
    - walls: `5`, Z seam: `Random`
    - supports for `mainFlasherTop.STL`: everywhere, interface / roof enabled, support angle `35`

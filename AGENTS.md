@@ -32,6 +32,7 @@ If a physical printer test is needed, ask the operator before moving axes or sta
 - Do not let Cura control the single K9 fan as part cooling. Slicer `M106/M107` must be stripped or disabled.
 - Do not directly slice raw `moduleBot.STL` without checking orientation. Use the validated oriented STL or explicitly inspect Cura Preview.
 - Keep the current cautious Cura baseline for this small K9 mechanics unless a new physical test proves a faster profile is safe: print/infill `11 mm/s`, wall/top-bottom `8 mm/s`, travel `25 mm/s`, first layer `6 mm/s`, skirt/brim `21 mm/s`, bridge `7 mm/s`. Do not drop first-layer/brim to `4 mm/s` without an explicit physical test; it made the print crawl rather than simply reducing speed by 30%.
+- Keep Cura `Preferences -> General -> Add machine prefix to job name` disabled (`[cura] jobname_prefix = False`). The K9 workflow should save `model.gcode`, not `CFFFP_model.gcode`.
 
 ## Documentation
 

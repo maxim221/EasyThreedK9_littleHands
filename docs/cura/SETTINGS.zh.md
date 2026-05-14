@@ -13,6 +13,7 @@
 - G-code flavor：`RepRap (RepRap)`，或最接近的 Marlin / RepRap-style 模式
 - 耗材直径：`1.75 mm`
 - 喷嘴直径：使用实际安装的喷嘴；已验证配置没有覆盖 Cura 的 nozzle diameter
+- Cura 偏好设置：关闭 `Preferences -> General -> Add machine prefix to job name`。在 `cura.cfg` 中对应 `[cura] jobname_prefix = False`。这样 Cura 不会在导出的 G-code 文件名前添加无用的 `CFFFP_`。
 
 ## Start G-code
 
@@ -183,5 +184,6 @@ G1 Y95 F240 ;Move bed toward the operator
 - 不出现 `Filament used: 0m`
 - 没有 `M18/M84`、没有热床加热 `M140/M190 S>0`，body `M204` 不超过安全的 K9 baseline
 - preview 中在模型需要的位置显示支撑
+- 导出的文件名不应以 `CFFFP_` 开头；如果出现该前缀，请关闭 Cura 的 `Add machine prefix to job name` 后重新保存
 
 如果有任何一项不满足，请重新切片。不要手工修改 G-code，除非你有意创建一个新文件，并明确标记为 modified。

@@ -13,6 +13,7 @@ These settings describe the currently validated EasyThreeD K9 / Little Hands bas
 - G-code flavor: `RepRap (RepRap)` or the closest Marlin / RepRap-style mode available
 - Filament diameter: `1.75 mm`
 - Nozzle diameter: use the real installed nozzle; the validated profile does not override Cura's nozzle diameter
+- Cura preference: turn `Preferences -> General -> Add machine prefix to job name` off. In `cura.cfg` this is `[cura] jobname_prefix = False`. This prevents useless `CFFFP_` prefixes in exported G-code names.
 
 ## Start G-code
 
@@ -183,5 +184,6 @@ The generated G-code must satisfy all of these:
 - not `Filament used: 0m`
 - no `M18/M84`, no bed heat `M140/M190 S>0`, and no body `M204` above the safe K9 baseline
 - preview shows supports where the model needs them
+- exported file name should not start with `CFFFP_`; if it does, turn off Cura's `Add machine prefix to job name` preference and save again
 
 If any of these fail, re-slice from settings. Do not manually edit the G-code unless you intentionally create a new file and clearly mark it as modified.

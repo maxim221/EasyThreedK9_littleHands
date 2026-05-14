@@ -224,6 +224,16 @@ CURA_EXPORT_PATTERNS = [
     "quality_changes/codex*.cfg",
     "extruders/*.extruder.cfg",
 ]
+CURA_BASELINE_PREFERENCES = """Little Hands Cura preferences
+
+Set this in Cura before saving G-code for the K9:
+
+- Preferences -> General -> Add machine prefix to job name: off
+- Equivalent cura.cfg value: [cura] jobname_prefix = False
+
+This keeps Cura from exporting files as CFFFP_<model>.gcode when the active
+machine is based on Cura's Custom FFF printer definition.
+"""
 DISCONNECTED_PORT_LABEL = "— не подключаться —"
 LANG_CHOICES = [("RU", "ru"), ("EN", "en"), ("中文", "zh")]
 
@@ -2990,6 +3000,7 @@ class K9ControlCenter:
         manual_path = target_root / "BASELINE_MANUAL.txt"
         manual_text = MANUAL_TEXTS.get(self.lang_var.get().strip() or "ru", MANUAL_TEXT)
         manual_path.write_text(manual_text + "\n", encoding="utf-8")
+        (target_root / "CURA_PREFERENCES.txt").write_text(CURA_BASELINE_PREFERENCES, encoding="utf-8")
         self.log(f"Экспорт профиля Cura готов: {target_root} ({copied} файлов)")
 
     def play_computer_melody_button(self) -> None:

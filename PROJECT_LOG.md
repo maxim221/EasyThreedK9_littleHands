@@ -2640,3 +2640,13 @@ After each test print, append:
   - `Go to start` can now offer a live-session return using the current Marlin zero
   - the confirmation warns that the bed must be clear, power must be nearby, and the operator must press `Save start` only after visually confirming the physical start pose
   - the live-return marker is cleared on new print starts, hard stop, motor off, port change/disconnect, or after the recovery attempt
+
+## 2026-05-14 Cura Export Name Prefix
+
+- Field observation:
+  - Cura exported recent K9 files as `CFFFP_moduleBot.gcode`
+  - `CFFFP` is Cura's automatic abbreviation for `Custom FFF printer`, not useful information for the Little Hands SD workflow
+- Fix:
+  - local Cura 5.11 now has `[cura] jobname_prefix = False`
+  - the validated Cura documentation says to disable `Preferences -> General -> Add machine prefix to job name`
+  - `Export Cura profile` now writes `CURA_PREFERENCES.txt` into the exported bundle so this non-profile preference is not lost

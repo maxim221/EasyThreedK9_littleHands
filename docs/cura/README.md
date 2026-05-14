@@ -14,8 +14,10 @@ This directory contains the current tracked Cura baseline for the validated Easy
 - Ironing: highest top layer only, concentric, low flow
 - Motion smoothing: conservative acceleration limits for reduced diagonal ringing
 - Supports for `mainFlasherTop.STL`: everywhere, support interface / roof enabled, support angle `35`
+- Cura file-name preference: `Add machine prefix to job name` must be `off`, so saved files are named like `moduleBot.gcode` instead of `CFFFP_moduleBot.gcode`
 
 The app button `Export Cura profile` exports the live local Cura containers to `exports/`, which is intentionally ignored by git. This checked-in copy is the public reference baseline.
+The export also writes `CURA_PREFERENCES.txt` with the non-profile Cura preference that keeps the useless `CFFFP_` prefix disabled.
 
 Do not use startup `G28` with this printer. The start G-code uses the Little Hands manual-zero `G92 X0 Y0 Z0` workflow.
 

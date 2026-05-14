@@ -13,6 +13,7 @@
 - G-code flavor: `RepRap (RepRap)` или ближайший Marlin / RepRap-style режим
 - Диаметр филамента: `1.75 mm`
 - Диаметр сопла: фактически установленное сопло; проверенный профиль Cura не переопределяет nozzle diameter
+- Настройка Cura: выключи `Preferences -> General -> Add machine prefix to job name`. В `cura.cfg` это `[cura] jobname_prefix = False`. Так Cura не будет добавлять бесполезный префикс `CFFFP_` к G-code файлам.
 
 ## Start G-code
 
@@ -183,5 +184,6 @@ G1 Y95 F240 ;Move bed toward the operator
 - нет `Filament used: 0m`
 - нет `M18/M84`, нагрева стола `M140/M190 S>0` и body `M204` выше безопасного K9 baseline
 - preview показывает поддержки там, где они нужны модели
+- имя экспортированного файла не начинается с `CFFFP_`; если начинается, выключи в Cura `Add machine prefix to job name` и сохрани файл заново
 
 Если что-то не сходится, переслайсь из настроек. Не правь G-code руками, если только специально не создаёшь новый файл и явно не маркируешь его как modified.
