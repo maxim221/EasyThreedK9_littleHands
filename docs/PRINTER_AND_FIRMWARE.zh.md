@@ -139,6 +139,7 @@ G92 X0 Y0 Z0
 - 如果 USB 断开后 CH340 打印机以新的 `/dev/ttyUSB*` 名称重新枚举，`Go to start` recovery 可以自动切换到唯一可见的安全 printer-like 端口；此 recovery 场景不需要手动点击 `Find`
 - 如果旧的活动打印标记已经太旧，不能恢复为活动打印，Little Hands 仍会保留有效的 predicted print-end 作为受保护 recovery 选项
 - 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
+- SD 启动必须在 `M24` 前回到已保存的 `X0 Y0 Z0`；如果 Little Hands 为热端预热抬起喷嘴而预热失败，应用必须先回到已保存起点，再显示错误
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

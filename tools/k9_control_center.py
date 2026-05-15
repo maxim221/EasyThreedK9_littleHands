@@ -1094,7 +1094,8 @@ class K9ControlCenter:
                             raise RuntimeError(
                                 f"Hotend почти не греется: {first_temp:.1f}C -> {current:.1f}C "
                                 f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд. "
-                                "Нагрев выключен командой M104 S0; печать не запускаю."
+                                "Нагрев выключен командой M104 S0; печать не запускаю. "
+                                "Проверь силовое питание/hotend и сделай power cycle принтера перед новой попыткой."
                             )
                     time.sleep(PRINT_PREHEAT_POLL_SEC)
                 send_hotend_off(ser)
@@ -1108,12 +1109,13 @@ class K9ControlCenter:
             )
         raise RuntimeError(
             f"Hotend не вышел на температуру перед SD-стартом: {last_temp:.1f}/{target:.0f}C. "
-            "Нагрев выключен командой M104 S0; не запускаю печать вслепую."
+            "Нагрев выключен командой M104 S0; не запускаю печать вслепую. "
+            "Проверь силовое питание/hotend и сделай power cycle принтера перед новой попыткой."
         )
 
-    def _lift_from_saved_start_for_preheat_if_needed(self) -> None:
+    def _lift_from_saved_start_for_preheat_if_needed(self) -> bool:
         if not self.at_saved_start_pose:
-            return
+            return False
         self._post("log", "Сопло сейчас в сохранённом старте: поднимаю Z перед предпрогревом, затем вернусь к старту перед M24.")
         out = sdtool.lift_from_saved_start_for_preheat(self._port(), self._baud())
         self.at_saved_start_pose = False
@@ -1124,6 +1126,39 @@ class K9ControlCenter:
         ]
         if useful_lines:
             self._post("log", "\n".join(useful_lines))
+        return True
+
+    def _return_to_saved_start_after_failed_preheat(self, *, lifted_for_preheat: bool) -> None:
+        if not lifted_for_preheat:
+            return
+        self._post("log", "Предпрогрев сорвался после подъёма Z: возвращаю сопло в сохранённый старт, чтобы не оставить ложный Z0.")
+        try:
+            out = sdtool.goto_print_home(self._port(), self._baud())
+        except Exception as exc:
+            self.at_saved_start_pose = False
+            self._set_home_trust(HOME_TRUST_UNCERTAIN, "failed preheat left lifted Z; return to start failed", log_change=True)
+            self._post(
+                "log",
+                f"Не удалось вернуть сопло к старту после сорванного предпрогрева: {exc}. "
+                "Не нажимай 'Запомнить старт' в поднятой позиции; сначала верни Z к столу вручную или после power cycle.",
+            )
+            return
+        self.at_saved_start_pose = True
+        useful_lines = [
+            line.strip()
+            for line in out.splitlines()
+            if line.strip() and line.strip().lower() != "ok"
+        ]
+        if useful_lines:
+            self._post("log", "\n".join(useful_lines))
+
+    def _preheat_hotend_for_sd_start_with_clearance(self, target: float) -> None:
+        lifted_for_preheat = self._lift_from_saved_start_for_preheat_if_needed()
+        try:
+            self._preheat_hotend_for_sd_start(target)
+        except Exception:
+            self._return_to_saved_start_after_failed_preheat(lifted_for_preheat=lifted_for_preheat)
+            raise
 
     def _prime_print_end_contract(self, sd_path: str, display: str, source: Path | None = None) -> None:
         profile = self._profile_for_print(sd_path, display, source)
@@ -4232,15 +4267,11 @@ class K9ControlCenter:
             self._post("sd-files", files)
             self._post("upload-cancel-visible", (False, False))
             target = self._hotend_target_for_print(dest, source.name, upload_source)
-            self._lift_from_saved_start_for_preheat_if_needed()
-            self._preheat_hotend_for_sd_start(target)
+            self._preheat_hotend_for_sd_start_with_clearance(target)
             self._prime_print_end_contract(dest, source.name, upload_source)
             try:
-                if self.at_saved_start_pose:
-                    out = sdtool.start_sd_print(self._port(), self._baud(), dest)
-                else:
-                    out = sdtool.start_sd_print_from_home(self._port(), self._baud(), dest)
-                    self.at_saved_start_pose = True
+                out = sdtool.start_sd_print_from_home(self._port(), self._baud(), dest)
+                self.at_saved_start_pose = True
             except Exception:
                 self._clear_predicted_print_end()
                 self._set_home_trust(HOME_TRUST_UNCERTAIN, "upload-and-start failed after motion/start attempt", log_change=True)
@@ -4351,13 +4382,14 @@ class K9ControlCenter:
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
             target = self._hotend_target_for_print(path, display, source_for_profile)
-            self._lift_from_saved_start_for_preheat_if_needed()
-            self._preheat_hotend_for_sd_start(target)
+            self._preheat_hotend_for_sd_start_with_clearance(target)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
-                out = sdtool.start_sd_print(self._port(), self._baud(), path)
+                out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
+                self.at_saved_start_pose = True
             except Exception:
                 self._clear_predicted_print_end()
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD print start failed after motion/start attempt", log_change=True)
                 raise
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"Печать запущена: {display}")
@@ -4384,16 +4416,12 @@ class K9ControlCenter:
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
             target = self._hotend_target_for_print(path, display, source_for_profile)
-            self._preheat_hotend_for_sd_start(target)
+            self._preheat_hotend_for_sd_start_with_clearance(target)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
-                if self.at_saved_start_pose:
-                    out = sdtool.start_sd_print(self._port(), self._baud(), path)
-                    start_note = "Печать с SD запущена из уже сохранённой стартовой позы"
-                else:
-                    out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
-                    self.at_saved_start_pose = True
-                    start_note = "Печать с SD запущена от сохранённого старта"
+                out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
+                self.at_saved_start_pose = True
+                start_note = "Печать с SD запущена от сохранённого старта"
             except Exception:
                 self._clear_predicted_print_end()
                 self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD print start failed after motion/start attempt", log_change=True)

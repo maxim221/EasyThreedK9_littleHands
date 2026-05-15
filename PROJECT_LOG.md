@@ -2691,3 +2691,14 @@ After each test print, append:
   - guarded `Go to start` recovery now tries to auto-select the single currently visible safe printer-like port when the saved port disappeared or is unsafe
   - stale active-print restore no longer deletes a valid predicted print-end just because the active marker is older than the active-restore window
   - completion handling keeps the predicted print-end if real completion `M114` was not captured, so the user-facing `Go to start` button can still perform the same recovery that worked manually
+
+## 2026-05-15 SD Start Height Regression
+
+- Field observation:
+  - after a failed upload/start attempt, Little Hands lifted from saved `Z0` to `Z10` for hotend preheat
+  - the hotend preheat then stalled around `45C`, so the print did not start
+  - a subsequent start/save flow could treat the raised clearance position as the practical start, causing the next print to begin roughly `10-20 mm` above the bed
+- Fix:
+  - every UI SD-start path now uses `start_sd_print_from_home()` after preheat, forcing a real return to `X0 Y0 Z0` immediately before `M24`
+  - plain `start_sd_print()` is no longer used from the GUI start paths
+  - if preheat fails after a clearance lift, Little Hands attempts to return to the saved start before showing the error, so the operator is not left at a false raised `Z0`

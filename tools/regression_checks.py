@@ -77,6 +77,22 @@ def main() -> int:
     require("send_line_wait_ok" in marlin, "Start-from-home serial service moves must wait for ok.", failures)
     require("lift_from_saved_start_for_preheat" in marlin, "Start workflow must be able to lift from Z0 before preheat.", failures)
     require("_lift_from_saved_start_for_preheat_if_needed" in app, "App must lift from saved Z0 before long SD preheat.", failures)
+    require(
+        "sdtool.start_sd_print(" not in app,
+        "GUI SD-start paths must not bypass start_sd_print_from_home after a preheat clearance lift.",
+        failures,
+    )
+    require(
+        "_preheat_hotend_for_sd_start_with_clearance" in app
+        and "_return_to_saved_start_after_failed_preheat" in app,
+        "Failed hotend preheat after a clearance lift must return to saved start.",
+        failures,
+    )
+    require(
+        app.count("_preheat_hotend_for_sd_start_with_clearance(target)") >= 3,
+        "Every GUI SD-start path must use the clearance-aware preheat wrapper.",
+        failures,
+    )
     require_regex(
         marlin,
         r"def _start_sd_print_from_home_once\(.*?send_line_wait_ok",

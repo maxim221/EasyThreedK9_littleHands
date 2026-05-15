@@ -142,6 +142,7 @@ So:
 - if the CH340 printer re-enumerates under a new `/dev/ttyUSB*` name after USB loss, `Go to start` recovery may automatically switch to the single visible safe printer-like port; manual `Find` is not required for that recovery case
 - if an old active-print marker is too stale to restore as active printing, Little Hands still keeps a valid predicted print-end as a guarded recovery option
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
+- SD start must always return to the saved `X0 Y0 Z0` immediately before `M24`; if Little Hands lifted the nozzle for hotend preheat and the preheat fails, it must return to saved start before showing the error
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 
