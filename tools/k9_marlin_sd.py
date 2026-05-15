@@ -672,7 +672,7 @@ def pseudo_home_to_zero(port: str, baud: int) -> str:
     )
 
 
-def goto_print_home(port: str, baud: int) -> str:
+def goto_print_home(port: str, baud: int, *, per_command_timeout: float = 45.0) -> str:
     return run_commands_wait_ok(
         port,
         baud,
@@ -688,7 +688,7 @@ def goto_print_home(port: str, baud: int) -> str:
             ]),
             "M114",
         ],
-        per_command_timeout=45.0,
+        per_command_timeout=per_command_timeout,
     )
 
 

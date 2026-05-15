@@ -140,6 +140,7 @@ G92 X0 Y0 Z0
 - 如果旧的活动打印标记已经太旧，不能恢复为活动打印，Little Hands 仍会保留有效的 predicted print-end 作为受保护 recovery 选项
 - 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
 - SD 启动必须在 `M24` 前回到已保存的 `X0 Y0 Z0`；如果 Little Hands 为热端预热抬起喷嘴而预热失败，应用必须先回到已保存起点，再显示错误
+- 如果 Marlin 显示热端目标温度和非零加热输出，但温度仍停留在外部温床附近，应把它当作热端预热失败 / 打印机半卡死状态，而不是正常的慢启动
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

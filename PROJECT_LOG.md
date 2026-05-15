@@ -2702,3 +2702,9 @@ After each test print, append:
   - every UI SD-start path now uses `start_sd_print_from_home()` after preheat, forcing a real return to `X0 Y0 Z0` immediately before `M24`
   - plain `start_sd_print()` is no longer used from the GUI start paths
   - if preheat fails after a clearance lift, Little Hands attempts to return to the saved start before showing the error, so the operator is not left at a false raised `Z0`
+- Follow-up field observation:
+  - after power cycle, the same start attempt again accepted `M104 S226` but stayed around `45C` while reporting `@:127`
+  - the printer then stopped acknowledging even safe commands like `M105`, `M115`, `M114`, and `M17` until a real reset/reconnect path
+- Follow-up fix:
+  - no-rise preheat detection is now stricter: if the hotend does not climb at least `8C` in `75s`, Little Hands stops the heater and aborts instead of waiting the full preheat timeout
+  - failed-preheat recovery uses shorter command acknowledgements, so the UI does not sit for minutes trying to return home when Marlin is already not responding

@@ -143,6 +143,7 @@ So:
 - if an old active-print marker is too stale to restore as active printing, Little Hands still keeps a valid predicted print-end as a guarded recovery option
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 - SD start must always return to the saved `X0 Y0 Z0` immediately before `M24`; if Little Hands lifted the nozzle for hotend preheat and the preheat fails, it must return to saved start before showing the error
+- if Marlin shows a hotend target and nonzero heater output but temperature stays near the external warm-bed temperature, treat it as a failed hotend preheat / semi-stuck printer state, not as a valid slow start
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

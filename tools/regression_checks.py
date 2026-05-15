@@ -89,6 +89,13 @@ def main() -> int:
         failures,
     )
     require(
+        "PRINT_PREHEAT_NO_RISE_GRACE_SEC = 75.0" in app
+        and "PRINT_PREHEAT_MIN_RISE_C = 8.0" in app
+        and "per_command_timeout=12.0" in app,
+        "Failed preheat must abort quickly and must not hang for long if Marlin stops acknowledging recovery commands.",
+        failures,
+    )
+    require(
         app.count("_preheat_hotend_for_sd_start_with_clearance(target)") >= 3,
         "Every GUI SD-start path must use the clearance-aware preheat wrapper.",
         failures,

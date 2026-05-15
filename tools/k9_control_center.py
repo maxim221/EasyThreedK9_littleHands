@@ -64,8 +64,8 @@ PRINT_PREHEAT_TIMEOUT_SEC = 240.0
 PRINT_PREHEAT_POLL_SEC = 3.0
 PRINT_PREHEAT_TARGET_GRACE_SEC = 25.0
 PRINT_PREHEAT_HEATER_ZERO_GRACE_SEC = 45.0
-PRINT_PREHEAT_NO_RISE_GRACE_SEC = 120.0
-PRINT_PREHEAT_MIN_RISE_C = 4.0
+PRINT_PREHEAT_NO_RISE_GRACE_SEC = 75.0
+PRINT_PREHEAT_MIN_RISE_C = 8.0
 K9_PRINT_BED_SIZE_MM = 100.0
 K9_MAX_PRINT_Z_MM = 100.0
 K9_GCODE_BOUNDS_TOLERANCE_MM = 0.2
@@ -1133,7 +1133,7 @@ class K9ControlCenter:
             return
         self._post("log", "Предпрогрев сорвался после подъёма Z: возвращаю сопло в сохранённый старт, чтобы не оставить ложный Z0.")
         try:
-            out = sdtool.goto_print_home(self._port(), self._baud())
+            out = sdtool.goto_print_home(self._port(), self._baud(), per_command_timeout=12.0)
         except Exception as exc:
             self.at_saved_start_pose = False
             self._set_home_trust(HOME_TRUST_UNCERTAIN, "failed preheat left lifted Z; return to start failed", log_change=True)
