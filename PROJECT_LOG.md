@@ -2669,3 +2669,14 @@ After each test print, append:
   - a real SD print is running after the controlled-stop / preheat-clearance changes
   - the operator reports no scraping, squeaks, or foreign motor sounds during the active print
   - controlled normal `Stop` and `Go to start` recovery still need a separate physical validation after this print is no longer useful to keep running
+
+## 2026-05-15 Stale Active-Print Marker Recovery
+
+- Field observation:
+  - `LifteraModuleTop_LH_checked.gcode` completed physically, but Little Hands lost USB at `44%`
+  - the persisted state still had `phase=printing` / `current_print_file=LIFTERAM.GCO`, so the main `Go to start` button treated the print as active and blocked recovery
+  - the same recovery was safe manually because the saved `LH_END_GCODE_V1` model predicted the final pose as `X95 Y95 Z19`
+- Fix:
+  - `Go to start` now recognizes a stale active-print marker when home is untrusted, the marker matches a valid predicted print-end, and there is no recent SD progress
+  - in that case it offers the same guarded predicted-end recovery prompt instead of immediately blocking on `current_print_file != "-"`
+  - fresh SD progress still blocks `Go to start`, so this does not make the app drive axes during a visibly active print

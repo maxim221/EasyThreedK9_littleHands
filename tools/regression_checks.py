@@ -119,6 +119,12 @@ def main() -> int:
         "Stopped-print recovery must offer a guarded live-session return when M114 was not captured.",
         failures,
     )
+    require(
+        "_can_recover_stale_active_marker_from_predicted_end" in app
+        and "ACTIVE_PRINT_RECENT_PROGRESS_BLOCK_SEC" in app,
+        "Go-to-start must offer guarded predicted-end recovery for stale active-print markers after USB loss.",
+        failures,
+    )
     require("PRINT_STOP file=" in app and "live_return=" in app, "Stopped-print events must be recorded in the runtime log.", failures)
     require(
         "_update_stopped_print_pose_after_jog" in app and "stopped-jog-updated" in app,

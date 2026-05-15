@@ -50,6 +50,7 @@ PRINT_START_RECENT_TEMP_CONFIRM_SEC = 90.0
 POST_M24_USB_QUIET_SEC = 180
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
+ACTIVE_PRINT_RECENT_PROGRESS_BLOCK_SEC = 90.0
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
 PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
 PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
@@ -4610,6 +4611,26 @@ class K9ControlCenter:
             and self.predicted_print_end_z is None
         )
 
+    def _predicted_print_end_matches_current_marker(self) -> bool:
+        if self.current_print_file == "-":
+            return True
+        return self._normalize_sd_key(self.current_print_file) == self._normalize_sd_key(self.predicted_print_end_file)
+
+    def _has_recent_active_print_progress(self) -> bool:
+        return bool(
+            self.last_sd_progress_ts
+            and (time.time() - self.last_sd_progress_ts) <= ACTIVE_PRINT_RECENT_PROGRESS_BLOCK_SEC
+        )
+
+    def _can_recover_stale_active_marker_from_predicted_end(self) -> bool:
+        return bool(
+            self.current_print_file != "-"
+            and self.bed_clear_before_go_start_required
+            and self._can_return_from_predicted_print_end_pose()
+            and self._predicted_print_end_matches_current_marker()
+            and not self._has_recent_active_print_progress()
+        )
+
     def _confirm_predicted_print_return(self) -> str | None:
         lang = self.lang_var.get().strip() or "ru"
         end_z = self.predicted_print_end_z
@@ -4619,6 +4640,7 @@ class K9ControlCenter:
             "en": (
                 f"Little Hands has a saved print-end model for:\n{file_text}\n\n"
                 f"Expected final pose: X95 Y95 Z{z_text}.\n\n"
+                "If the main window still says that printing is active after a USB drop, this can be a stale marker.\n\n"
                 "Try automatic return to start only if ALL are true:\n"
                 "- the print is fully finished\n"
                 "- the printed part has been removed\n"
@@ -4631,6 +4653,7 @@ class K9ControlCenter:
             "zh": (
                 f"Little Hands 保存了以下文件的打印结束模型：\n{file_text}\n\n"
                 f"预计结束位置：X95 Y95 Z{z_text}。\n\n"
+                "如果 USB 断开后主窗口仍显示正在打印，这可能只是过期标记。\n\n"
                 "只有全部满足时才尝试自动回到起点：\n"
                 "- 打印已经完全结束\n"
                 "- 模型已经取下\n"
@@ -4643,6 +4666,7 @@ class K9ControlCenter:
             "ru": (
                 f"У Little Hands есть сохранённая модель print-end для файла:\n{file_text}\n\n"
                 f"Ожидаемая конечная поза: X95 Y95 Z{z_text}.\n\n"
+                "Если после USB-срыва главное окно всё ещё показывает активную печать, это может быть stale-маркер.\n\n"
                 "Пробовать автоматический возврат к старту можно только если ВСЁ верно:\n"
                 "- печать полностью завершилась\n"
                 "- деталь снята со стола\n"
@@ -4791,7 +4815,8 @@ class K9ControlCenter:
         return bool(messagebox.askyesno("Little Hands", prompt))
 
     def go_print_home(self, *, confirm_model_removed: bool = False) -> None:
-        if self.current_print_file != "-" and not confirm_model_removed:
+        stale_active_marker_recovery = self._can_recover_stale_active_marker_from_predicted_end()
+        if self.current_print_file != "-" and not confirm_model_removed and not stale_active_marker_recovery:
             msg = (
                 "Сейчас у приложения есть активный SD-старт/печать. 'К старту' не выполняется во время активной печати: "
                 "сначала нажми 'Стоп', дождись остановки, убери пластик со стола и заново выставь стартовую позу."
@@ -4799,6 +4824,11 @@ class K9ControlCenter:
             self.log(msg)
             messagebox.showwarning("Little Hands", msg)
             return
+        if stale_active_marker_recovery:
+            self.log(
+                "Вижу активный SD-маркер, но свежего SD-прогресса нет, home недоверенный, "
+                "а сохранённый print-end для этого файла валиден. Предлагаю guarded recovery вместо блокировки 'К старту'."
+            )
         use_stopped_print_pose = False
         stopped_pose = self.stopped_print_pose
         if not self._home_is_trusted() and self.bed_clear_before_go_start_required and stopped_pose is not None:
