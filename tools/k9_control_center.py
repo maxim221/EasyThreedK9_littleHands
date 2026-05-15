@@ -107,6 +107,62 @@ MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
 LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
 M92_RE = re.compile(r"M92\s+X([-\d.]+)\s+Y([-\d.]+)\s+Z([-\d.]+)\s+E([-\d.]+)")
 
+
+def normalize_sd_key(path: str) -> str:
+    return path.strip().lstrip("/").upper()
+
+
+def predicted_print_end_has_recovery_pose(predicted: object) -> bool:
+    return bool(
+        isinstance(predicted, dict)
+        and predicted.get("valid")
+        and str(predicted.get("file") or "-").strip()
+        and str(predicted.get("file") or "-").strip() != "-"
+        and predicted.get("end_z") is not None
+    )
+
+
+def should_keep_predicted_end_for_stale_active_restore(
+    *,
+    phase: str,
+    updated_ts: float,
+    now_ts: float,
+    predicted: object,
+) -> bool:
+    return bool(
+        phase in {"prepared", "printing", "print_end_expected"}
+        and updated_ts
+        and (now_ts - updated_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC
+        and predicted_print_end_has_recovery_pose(predicted)
+    )
+
+
+def should_offer_stale_predicted_end_recovery(
+    *,
+    current_print_file: str,
+    bed_clear_required: bool,
+    home_trusted: bool,
+    port_ready: bool,
+    predicted_valid: bool,
+    predicted_file: str,
+    predicted_contract: str,
+    predicted_end_z: float | None,
+    recent_active_progress: bool,
+) -> bool:
+    return bool(
+        current_print_file != "-"
+        and bed_clear_required
+        and port_ready
+        and not home_trusted
+        and predicted_valid
+        and predicted_file != "-"
+        and predicted_contract == PRINT_END_CONTRACT
+        and predicted_end_z is not None
+        and normalize_sd_key(current_print_file) == normalize_sd_key(predicted_file)
+        and not recent_active_progress
+    )
+
+
 LH_FIRMWARE_CATALOG = {
     "custom-hotend-autofan-45c-usb-mksLite.bin": {
         "lh_version": "LH v1",
@@ -627,7 +683,7 @@ class K9ControlCenter:
                 self.predicted_print_end_z = float(end_z) if isinstance(end_z, (int, float)) else None
 
     def _normalize_sd_key(self, path: str) -> str:
-        return path.strip().lstrip("/").upper()
+        return normalize_sd_key(path)
 
     def _restore_persistent_print_state(self) -> None:
         if not PRINT_STATE_PATH.is_file():
@@ -649,13 +705,7 @@ class K9ControlCenter:
             self.sd_gcode_profiles.update(profiles)
         phase = str(data.get("phase") or "")
         predicted = data.get("predicted_end")
-        predicted_has_recovery_pose = bool(
-            isinstance(predicted, dict)
-            and predicted.get("valid")
-            and str(predicted.get("file") or "-").strip()
-            and str(predicted.get("file") or "-").strip() != "-"
-            and predicted.get("end_z") is not None
-        )
+        predicted_has_recovery_pose = predicted_print_end_has_recovery_pose(predicted)
         restore_active_print_marker = True
         if phase == "completed" and data.get("post_print_recovery_required"):
             pose = data.get("post_print_pose")
@@ -687,9 +737,17 @@ class K9ControlCenter:
                 self.home_trust = HOME_TRUST_UNCERTAIN
                 self.home_trust_reason = "stopped print live return marker restored from persistent state"
         if (
-            phase in {"prepared", "printing", "print_end_expected"}
-            and updated_ts
-            and (time.time() - updated_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC
+            should_keep_predicted_end_for_stale_active_restore(
+                phase=phase,
+                updated_ts=updated_ts,
+                now_ts=time.time(),
+                predicted=predicted,
+            )
+            or (
+                phase in {"prepared", "printing", "print_end_expected"}
+                and updated_ts
+                and (time.time() - updated_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC
+            )
         ):
             if not predicted_has_recovery_pose:
                 self._clear_predicted_print_end(save=False)
@@ -4672,12 +4730,16 @@ class K9ControlCenter:
         )
 
     def _can_recover_stale_active_marker_from_predicted_end(self) -> bool:
-        return bool(
-            self.current_print_file != "-"
-            and self.bed_clear_before_go_start_required
-            and self._can_return_from_predicted_print_end_pose()
-            and self._predicted_print_end_matches_current_marker()
-            and not self._has_recent_active_print_progress()
+        return should_offer_stale_predicted_end_recovery(
+            current_print_file=self.current_print_file,
+            bed_clear_required=self.bed_clear_before_go_start_required,
+            home_trusted=self._home_is_trusted(),
+            port_ready=bool(self._port()),
+            predicted_valid=self.predicted_print_end_valid,
+            predicted_file=self.predicted_print_end_file,
+            predicted_contract=self.predicted_print_end_contract,
+            predicted_end_z=self.predicted_print_end_z,
+            recent_active_progress=self._has_recent_active_print_progress(),
         )
 
     def _confirm_predicted_print_return(self) -> str | None:

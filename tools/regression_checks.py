@@ -7,6 +7,7 @@ import re
 import sys
 from pathlib import Path
 
+import k9_control_center as appmod
 import k9_marlin_sd as sdtool
 
 
@@ -141,6 +142,68 @@ def main() -> int:
         "keep_predicted_print_end_for_recovery" in app
         and "Сохраняю predicted print-end" in app,
         "Completion handling must keep predicted print-end recovery when final M114 was not captured.",
+        failures,
+    )
+    require(
+        appmod.should_offer_stale_predicted_end_recovery(
+            current_print_file="LIFTERAM.GCO",
+            bed_clear_required=True,
+            home_trusted=False,
+            port_ready=True,
+            predicted_valid=True,
+            predicted_file="LIFTERAM.GCO",
+            predicted_contract=appmod.PRINT_END_CONTRACT,
+            predicted_end_z=19.0,
+            recent_active_progress=False,
+        ),
+        "Stale LIFTERAM active marker must choose predicted-end recovery, not block Go to start.",
+        failures,
+    )
+    require(
+        not appmod.should_offer_stale_predicted_end_recovery(
+            current_print_file="LIFTERAM.GCO",
+            bed_clear_required=True,
+            home_trusted=False,
+            port_ready=True,
+            predicted_valid=True,
+            predicted_file="LIFTERAM.GCO",
+            predicted_contract=appmod.PRINT_END_CONTRACT,
+            predicted_end_z=19.0,
+            recent_active_progress=True,
+        ),
+        "Fresh SD progress must still block predicted-end recovery during active printing.",
+        failures,
+    )
+    require(
+        not appmod.should_offer_stale_predicted_end_recovery(
+            current_print_file="OTHER.GCO",
+            bed_clear_required=True,
+            home_trusted=False,
+            port_ready=True,
+            predicted_valid=True,
+            predicted_file="LIFTERAM.GCO",
+            predicted_contract=appmod.PRINT_END_CONTRACT,
+            predicted_end_z=19.0,
+            recent_active_progress=False,
+        ),
+        "Predicted-end recovery must not run for a mismatched active SD file marker.",
+        failures,
+    )
+    require(
+        appmod.should_keep_predicted_end_for_stale_active_restore(
+            phase="printing",
+            updated_ts=1000.0,
+            now_ts=1000.0 + appmod.PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC + 1.0,
+            predicted={
+                "valid": True,
+                "file": "LIFTERAM.GCO",
+                "contract": appmod.PRINT_END_CONTRACT,
+                "end_x": 95.0,
+                "end_y": 95.0,
+                "end_z": 19.0,
+            },
+        ),
+        "Persistent restore must keep valid predicted print-end after stale active-print timeout.",
         failures,
     )
     require("PRINT_STOP file=" in app and "live_return=" in app, "Stopped-print events must be recorded in the runtime log.", failures)
