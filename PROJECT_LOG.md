@@ -2680,3 +2680,14 @@ After each test print, append:
   - `Go to start` now recognizes a stale active-print marker when home is untrusted, the marker matches a valid predicted print-end, and there is no recent SD progress
   - in that case it offers the same guarded predicted-end recovery prompt instead of immediately blocking on `current_print_file != "-"`
   - fresh SD progress still blocks `Go to start`, so this does not make the app drive axes during a visibly active print
+
+## 2026-05-15 Go To Start After USB Re-Enumeration
+
+- Field observation:
+  - after another `LifteraModuleTop` completion, the printer had physically reached the expected end pose `X95 Y95 Z19`
+  - USB dropped near `80%` and the CH340 reappeared as `/dev/ttyUSB0` while Little Hands still held the old `/dev/ttyUSB1`
+  - manual terminal recovery worked immediately on the new port, proving the button problem was UI state/port handling rather than motion G-code
+- Fix:
+  - guarded `Go to start` recovery now tries to auto-select the single currently visible safe printer-like port when the saved port disappeared or is unsafe
+  - stale active-print restore no longer deletes a valid predicted print-end just because the active marker is older than the active-restore window
+  - completion handling keeps the predicted print-end if real completion `M114` was not captured, so the user-facing `Go to start` button can still perform the same recovery that worked manually

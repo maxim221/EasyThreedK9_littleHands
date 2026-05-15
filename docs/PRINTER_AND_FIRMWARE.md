@@ -139,6 +139,8 @@ So:
 - after a normal `Stop`, Little Hands saves a stopped-print recovery marker when possible: X/Y come from the interrupted print position, while Z comes from the controlled post-stop lift when available; manual jogs after Stop update this recovery marker instead of deleting it
 - if `Stop` happens while the K9 is still busy and no `M114` is captured, Little Hands may offer a guarded live-session `Go to start`; use it only with a clear bed, then press `Save start` only after visually confirming the physical start pose
 - if USB drops during a real SD print and the main window still shows a stale active-print marker after reconnect, `Go to start` may offer guarded recovery from the saved `LH_END_GCODE_V1` print-end; accept only if the print is definitely finished, the bed is clear, and the axes were not moved after finish
+- if the CH340 printer re-enumerates under a new `/dev/ttyUSB*` name after USB loss, `Go to start` recovery may automatically switch to the single visible safe printer-like port; manual `Find` is not required for that recovery case
+- if an old active-print marker is too stale to restore as active printing, Little Hands still keeps a valid predicted print-end as a guarded recovery option
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 
 ![Manual window](screenshots/little-hands-manual-window.png)

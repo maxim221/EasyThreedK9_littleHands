@@ -648,6 +648,15 @@ class K9ControlCenter:
         if isinstance(profiles, dict):
             self.sd_gcode_profiles.update(profiles)
         phase = str(data.get("phase") or "")
+        predicted = data.get("predicted_end")
+        predicted_has_recovery_pose = bool(
+            isinstance(predicted, dict)
+            and predicted.get("valid")
+            and str(predicted.get("file") or "-").strip()
+            and str(predicted.get("file") or "-").strip() != "-"
+            and predicted.get("end_z") is not None
+        )
+        restore_active_print_marker = True
         if phase == "completed" and data.get("post_print_recovery_required"):
             pose = data.get("post_print_pose")
             if isinstance(pose, list) and len(pose) == 3:
@@ -682,10 +691,14 @@ class K9ControlCenter:
             and updated_ts
             and (time.time() - updated_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC
         ):
-            self._clear_predicted_print_end(save=False)
-            self._save_print_state("idle", force=True)
-            return
-        predicted = data.get("predicted_end")
+            if not predicted_has_recovery_pose:
+                self._clear_predicted_print_end(save=False)
+                self._save_print_state("idle", force=True)
+                return
+            restore_active_print_marker = False
+            self.bed_clear_before_go_start_required = True
+            self.home_trust = HOME_TRUST_INVALID
+            self.home_trust_reason = "stale active print marker restored as predicted print-end recovery"
         if not isinstance(predicted, dict) or not predicted.get("valid"):
             return
         file_name = str(predicted.get("file") or "-").strip()
@@ -708,7 +721,11 @@ class K9ControlCenter:
             self.predicted_print_end_z = float(end_z) if end_z is not None else None
         except (TypeError, ValueError):
             self.predicted_print_end_z = None
-        if self.current_print_file == "-" and phase in {"prepared", "printing", "print_end_expected"}:
+        if (
+            restore_active_print_marker
+            and self.current_print_file == "-"
+            and phase in {"prepared", "printing", "print_end_expected"}
+        ):
             restore_start_ts = self.predicted_print_end_start_ts or updated_ts or None
             progress = data.get("progress_pct")
             try:
@@ -2714,6 +2731,38 @@ class K9ControlCenter:
                 "в чужой serial-интерфейс."
             )
         return None
+
+    def _select_single_safe_printer_port_for_recovery(self) -> bool:
+        device = self._port()
+        safety_error = self._selected_port_safety_error() if device else "Порт принтера не выбран."
+        if safety_error is None:
+            return True
+        try:
+            ports = sdtool.list_serial_ports()
+        except Exception as exc:
+            self.log(f"Recovery не может проверить порты: {exc}")
+            return False
+        safe_ports = [meta for meta in ports if meta.get("device") and self._is_safe_printer_port_meta(meta)]
+        if len(safe_ports) != 1:
+            if safe_ports:
+                choices = ", ".join(str(meta.get("device")) for meta in safe_ports)
+                self.log(f"Recovery не выбрал порт автоматически: найдено несколько printer-like портов ({choices}). Нажми 'Найти' и выбери нужный.")
+            else:
+                self.log(f"Recovery не выбрал порт автоматически: {safety_error}")
+            return False
+        meta = safe_ports[0]
+        new_device = str(meta.get("device") or "").strip()
+        if not new_device:
+            return False
+        old_device = device or "-"
+        self.port_var.set(new_device)
+        self.port_display_var.set(self._port_label(meta))
+        self.preferred_port = new_device
+        self.log(
+            f"Recovery автоматически переключил порт принтера: {old_device} -> {new_device}. "
+            "Это безопасная замена после USB re-enumeration CH340."
+        )
+        return True
 
     def _is_port_gone_error(self, exc: BaseException | str) -> bool:
         text = str(exc).lower()
@@ -4815,6 +4864,11 @@ class K9ControlCenter:
         return bool(messagebox.askyesno("Little Hands", prompt))
 
     def go_print_home(self, *, confirm_model_removed: bool = False) -> None:
+        if (
+            (self.predicted_print_end_valid or self.post_print_recovery_required or self.bed_clear_before_go_start_required)
+            and (not self._port() or self._selected_port_safety_error())
+        ):
+            self._select_single_safe_printer_port_for_recovery()
         stale_active_marker_recovery = self._can_recover_stale_active_marker_from_predicted_end()
         if self.current_print_file != "-" and not confirm_model_removed and not stale_active_marker_recovery:
             msg = (
@@ -5495,6 +5549,11 @@ class K9ControlCenter:
                             f"Финиш печати: {finished_file}; финиш {finished_at_log}; "
                             "старт неизвестен, фактическую длительность посчитать не удалось."
                         )
+                    keep_predicted_print_end_for_recovery = bool(
+                        self.predicted_print_end_valid
+                        and self.predicted_print_end_z is not None
+                        and self._predicted_print_end_matches_current_marker()
+                    )
                     self.print_was_active = False
                     self.print_completion_armed = False
                     completion_move_result = ""
@@ -5562,7 +5621,14 @@ class K9ControlCenter:
                     self.sd_progress_sample_count = 0
                     self.first_sd_progress_ts = None
                     self.last_sd_progress_ts = None
-                    self._clear_predicted_print_end(save=False)
+                    if completion_pose_known or not keep_predicted_print_end_for_recovery:
+                        self._clear_predicted_print_end(save=False)
+                    else:
+                        self._post(
+                            "log",
+                            "Сохраняю predicted print-end для guarded 'К старту': "
+                            "печать завершена, но реальную M114-позу финиша снять не удалось.",
+                        )
                     self._save_print_state("completed", force=True)
                     self._post("active-sd", "Печатается: -")
                 elif self.print_was_active and not self.print_completion_armed:

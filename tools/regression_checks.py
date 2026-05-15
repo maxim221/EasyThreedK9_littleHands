@@ -125,6 +125,24 @@ def main() -> int:
         "Go-to-start must offer guarded predicted-end recovery for stale active-print markers after USB loss.",
         failures,
     )
+    require(
+        "_select_single_safe_printer_port_for_recovery" in app
+        and "Recovery автоматически переключил порт принтера" in app,
+        "Go-to-start recovery must auto-switch to the single safe CH340/ACM printer port after USB re-enumeration.",
+        failures,
+    )
+    require(
+        "restore_active_print_marker = False" in app
+        and "stale active print marker restored as predicted print-end recovery" in app,
+        "Persistent restore must keep valid predicted print-end recovery even when active-print state is stale.",
+        failures,
+    )
+    require(
+        "keep_predicted_print_end_for_recovery" in app
+        and "Сохраняю predicted print-end" in app,
+        "Completion handling must keep predicted print-end recovery when final M114 was not captured.",
+        failures,
+    )
     require("PRINT_STOP file=" in app and "live_return=" in app, "Stopped-print events must be recorded in the runtime log.", failures)
     require(
         "_update_stopped_print_pose_after_jog" in app and "stopped-jog-updated" in app,
