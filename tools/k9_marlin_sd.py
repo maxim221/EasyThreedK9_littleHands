@@ -709,6 +709,25 @@ def lift_from_saved_start_for_preheat(port: str, baud: int) -> str:
     )
 
 
+def return_from_preheat_lift(port: str, baud: int, *, per_command_timeout: float = 20.0) -> str:
+    return run_commands_wait_ok(
+        port,
+        baud,
+        [
+            "M17",
+            "M211 S0",
+            *soft_service_travel_commands([
+                "G91",
+                f"G1 Z-{SAFE_HOME_CLEARANCE_Z:g} F{SAFE_VERTICAL_FEEDRATE}",
+                "M400",
+                "G90",
+            ]),
+            "M114",
+        ],
+        per_command_timeout=per_command_timeout,
+    )
+
+
 def goto_print_home_from_predicted_end(
     port: str,
     baud: int,

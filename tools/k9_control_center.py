@@ -1131,9 +1131,13 @@ class K9ControlCenter:
     def _return_to_saved_start_after_failed_preheat(self, *, lifted_for_preheat: bool) -> None:
         if not lifted_for_preheat:
             return
-        self._post("log", "Предпрогрев сорвался после подъёма Z: возвращаю сопло в сохранённый старт, чтобы не оставить ложный Z0.")
+        self._post(
+            "log",
+            "Предпрогрев сорвался после подъёма Z: опускаю сопло обратно на тот же относительный ход, "
+            "чтобы не зависеть от возможного сброса логического Z0.",
+        )
         try:
-            out = sdtool.goto_print_home(self._port(), self._baud(), per_command_timeout=12.0)
+            out = sdtool.return_from_preheat_lift(self._port(), self._baud(), per_command_timeout=12.0)
         except Exception as exc:
             self.at_saved_start_pose = False
             self._set_home_trust(HOME_TRUST_UNCERTAIN, "failed preheat left lifted Z; return to start failed", log_change=True)
@@ -1150,16 +1154,12 @@ class K9ControlCenter:
         ]
         if useful_lines:
             self._post("log", "\n".join(useful_lines))
-        self.at_saved_start_pose = False
-        self._set_home_trust(
-            HOME_TRUST_UNCERTAIN,
-            "failed preheat after clearance lift; operator must confirm physical start",
-            log_change=True,
-        )
+        self.at_saved_start_pose = True
         self._post(
             "log",
-            "Сопло попыталось вернуться после сорванного предпрогрева, но home больше не считается доверенным. "
-            "Проверь физически, что сопло стоит в настоящем старте, и нажми 'Запомнить старт' перед новой печатью.",
+            "Сопло опущено обратно после сорванного предпрогрева тем же относительным ходом. "
+            "Если USB/питание принтера при этом не отваливались, стартовая поза остаётся пригодной; "
+            "если был reset порта или есть сомнение по высоте, проверь физически и нажми 'Запомнить старт' заново.",
         )
 
     def _preheat_hotend_for_sd_start_with_clearance(self, target: float) -> None:

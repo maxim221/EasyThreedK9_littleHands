@@ -2712,8 +2712,9 @@ After each test print, append:
   - after a failed preheat and manual/USB recovery, `Go to start` could raise the head and then lower only back to the already-raised pose
   - likely cause: the controller/USB path reset while the head was physically raised, so Marlin's logical `Z0` no longer represented the real saved print start
 - Follow-up fix:
-  - after any failed hotend preheat that involved a clearance lift, Little Hands now marks home as uncertain even if the attempted return reports `M114 Z0`
-  - the operator must visually confirm the physical start and press `Save start` again before another SD start or `Go to start`
+  - failed-preheat recovery no longer uses logical `G1 Z0`
+  - because Little Hands knows the exact clearance lift distance, it now undoes the lift with a relative `G91` / `G1 Z-10` recovery move
+  - if that relative return fails or USB disappears, home is marked uncertain and the operator must visually confirm the physical start and press `Save start` again
 - Field confirmation:
   - after a later retry, the SD start did not begin from the temporary raised/preheat pose
   - the nozzle moved down into the real print start and the print began, confirming that the start-from-home path can recover the intended working height before actual extrusion

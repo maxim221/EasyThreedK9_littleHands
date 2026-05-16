@@ -76,6 +76,12 @@ def main() -> int:
     )
     require("send_line_wait_ok" in marlin, "Start-from-home serial service moves must wait for ok.", failures)
     require("lift_from_saved_start_for_preheat" in marlin, "Start workflow must be able to lift from Z0 before preheat.", failures)
+    require(
+        "def return_from_preheat_lift" in marlin
+        and f"G1 Z-{{SAFE_HOME_CLEARANCE_Z:g}} F{{SAFE_VERTICAL_FEEDRATE}}" in marlin,
+        "Failed-preheat recovery must undo the known lift with a relative Z move, not trust logical Z0.",
+        failures,
+    )
     require("_lift_from_saved_start_for_preheat_if_needed" in app, "App must lift from saved Z0 before long SD preheat.", failures)
     require(
         "sdtool.start_sd_print(" not in app,
@@ -89,9 +95,9 @@ def main() -> int:
         failures,
     )
     require(
-        "failed preheat after clearance lift; operator must confirm physical start" in app
-        and "home больше не считается доверенным" in app,
-        "Failed preheat after a clearance lift must not leave the saved start trusted even if M114 reports Z0.",
+        "sdtool.return_from_preheat_lift" in app
+        and "тем же относительным ходом" in app,
+        "Failed preheat after a clearance lift must return by undoing the known relative lift.",
         failures,
     )
     require(
