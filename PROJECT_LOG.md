@@ -2711,3 +2711,15 @@ After each test print, append:
 - Field confirmation:
   - after a later retry, the SD start did not begin from the temporary raised/preheat pose
   - the nozzle moved down into the real print start and the print began, confirming that the start-from-home path can recover the intended working height before actual extrusion
+
+## 2026-05-16 CH340 / Hub Drop During Start Setup
+
+- Field observation:
+  - while manually setting the start pose, `/dev/ttyUSB0` disappeared several times
+  - kernel journal showed a real disconnect of the whole USB hub branch `1-4`, not only the CH340 printer port
+  - the printer CH340 then re-enumerated back as `/dev/ttyUSB0`
+- Interpretation:
+  - `Save start` / jog commands are not expected to power-cycle the printer port; this looks like a physical hub/cable/power/USB-stack reset
+  - Little Hands can still reduce stress on the CH340 by avoiding immediate telemetry reopens between repeated manual jog commands
+- Fix:
+  - auto telemetry now pauses for `3s` after each user USB task, so manual start setup gets a quiet window between jog/save commands instead of `M105/M27/M114` reopening the port every second

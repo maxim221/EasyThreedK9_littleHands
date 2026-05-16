@@ -52,6 +52,7 @@ PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 ACTIVE_PRINT_RECENT_PROGRESS_BLOCK_SEC = 90.0
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
+SERIAL_POLL_COOLDOWN_AFTER_TASK_SEC = 3.0
 PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
 PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
 PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC = 30 * 60
@@ -392,6 +393,7 @@ class K9ControlCenter:
         self.serial_lock = threading.Lock()
         self.monitor_enabled = True
         self.user_task_pending = False
+        self.serial_poll_quiet_until = 0.0
         self.upload_cancel_requested = False
 
         self.preferred_port = str(self.ui_state.get("last_port", "")).strip()
@@ -3435,6 +3437,7 @@ class K9ControlCenter:
             except Exception as exc:
                 self._post("error", exc)
             finally:
+                self.serial_poll_quiet_until = time.time() + SERIAL_POLL_COOLDOWN_AFTER_TASK_SEC
                 self.serial_lock.release()
                 self.user_task_pending = False
                 self._post("busy", (False, "USB: idle"))
@@ -5290,6 +5293,9 @@ class K9ControlCenter:
     def _poll_status(self) -> None:
         if not self._port():
             self.busy_var.set("USB: отключен")
+            self.root.after(1000, self._poll_status)
+            return
+        if time.time() < self.serial_poll_quiet_until:
             self.root.after(1000, self._poll_status)
             return
         safety_error = self._selected_port_safety_error()
