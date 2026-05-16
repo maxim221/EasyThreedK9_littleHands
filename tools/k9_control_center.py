@@ -1143,7 +1143,6 @@ class K9ControlCenter:
                 "Не нажимай 'Запомнить старт' в поднятой позиции; сначала верни Z к столу вручную или после power cycle.",
             )
             return
-        self.at_saved_start_pose = True
         useful_lines = [
             line.strip()
             for line in out.splitlines()
@@ -1151,6 +1150,17 @@ class K9ControlCenter:
         ]
         if useful_lines:
             self._post("log", "\n".join(useful_lines))
+        self.at_saved_start_pose = False
+        self._set_home_trust(
+            HOME_TRUST_UNCERTAIN,
+            "failed preheat after clearance lift; operator must confirm physical start",
+            log_change=True,
+        )
+        self._post(
+            "log",
+            "Сопло попыталось вернуться после сорванного предпрогрева, но home больше не считается доверенным. "
+            "Проверь физически, что сопло стоит в настоящем старте, и нажми 'Запомнить старт' перед новой печатью.",
+        )
 
     def _preheat_hotend_for_sd_start_with_clearance(self, target: float) -> None:
         lifted_for_preheat = self._lift_from_saved_start_for_preheat_if_needed()

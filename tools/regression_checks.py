@@ -89,6 +89,12 @@ def main() -> int:
         failures,
     )
     require(
+        "failed preheat after clearance lift; operator must confirm physical start" in app
+        and "home больше не считается доверенным" in app,
+        "Failed preheat after a clearance lift must not leave the saved start trusted even if M114 reports Z0.",
+        failures,
+    )
+    require(
         "PRINT_PREHEAT_NO_RISE_GRACE_SEC = 75.0" in app
         and "PRINT_PREHEAT_MIN_RISE_C = 8.0" in app
         and "per_command_timeout=12.0" in app,

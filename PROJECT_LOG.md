@@ -2708,6 +2708,12 @@ After each test print, append:
 - Follow-up fix:
   - no-rise preheat detection is now stricter: if the hotend does not climb at least `8C` in `75s`, Little Hands stops the heater and aborts instead of waiting the full preheat timeout
   - failed-preheat recovery uses shorter command acknowledgements, so the UI does not sit for minutes trying to return home when Marlin is already not responding
+- Follow-up regression:
+  - after a failed preheat and manual/USB recovery, `Go to start` could raise the head and then lower only back to the already-raised pose
+  - likely cause: the controller/USB path reset while the head was physically raised, so Marlin's logical `Z0` no longer represented the real saved print start
+- Follow-up fix:
+  - after any failed hotend preheat that involved a clearance lift, Little Hands now marks home as uncertain even if the attempted return reports `M114 Z0`
+  - the operator must visually confirm the physical start and press `Save start` again before another SD start or `Go to start`
 - Field confirmation:
   - after a later retry, the SD start did not begin from the temporary raised/preheat pose
   - the nozzle moved down into the real print start and the print began, confirming that the start-from-home path can recover the intended working height before actual extrusion
