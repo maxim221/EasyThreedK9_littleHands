@@ -718,6 +718,11 @@ class K9ControlCenter:
                 except (TypeError, ValueError):
                     self.post_print_pose = None
                     self.post_print_pose_known = False
+            elif predicted_has_recovery_pose:
+                self.post_print_recovery_required = True
+                self.bed_clear_before_go_start_required = True
+                self.home_trust = HOME_TRUST_INVALID
+                self.home_trust_reason = "operator-confirmed completion restored as predicted print-end recovery"
         if phase == "stopped" and data.get("bed_clear_before_go_start_required"):
             pose = data.get("stopped_print_pose")
             if isinstance(pose, list) and len(pose) == 3:
@@ -1239,14 +1244,37 @@ class K9ControlCenter:
     def _home_is_trusted(self) -> bool:
         return bool(self.home_trust == HOME_TRUST_TRUSTED and self.session_zero_defined)
 
+    def _has_predicted_print_end_recovery_model(self) -> bool:
+        return bool(
+            self.predicted_print_end_valid
+            and self.predicted_print_end_file != "-"
+            and self.predicted_print_end_contract == PRINT_END_CONTRACT
+            and self.predicted_print_end_z is not None
+        )
+
+    def _can_confirm_operator_finished_print(self) -> bool:
+        return bool(self.current_print_file != "-" and self._has_predicted_print_end_recovery_model())
+
     def _sync_home_controls(self) -> None:
         trusted = self._home_is_trusted()
-        go_state = "normal" if trusted and not self.user_task_pending else "disabled"
+        recovery_ready = bool(
+            self.current_print_file == "-"
+            and (
+                self.post_print_recovery_required
+                or self.bed_clear_before_go_start_required
+                or self.stopped_print_pose is not None
+                or self.stopped_print_live_return_available
+                or self._has_predicted_print_end_recovery_model()
+            )
+        )
+        go_state = "normal" if (trusted or recovery_ready) and not self.user_task_pending else "disabled"
         start_state = "normal" if trusted and not self.user_task_pending else "disabled"
+        confirm_finish_state = "normal" if self._can_confirm_operator_finished_print() and not self.user_task_pending else "disabled"
         guarded_buttons = (
             ("go_start_button", go_state),
             ("start_print_button", start_state),
             ("upload_and_start_button", start_state),
+            ("confirm_finish_button", confirm_finish_state),
         )
         for name, state in guarded_buttons:
             widget = getattr(self, name, None)
@@ -1337,6 +1365,7 @@ class K9ControlCenter:
             "pause": {"ru": "Пауза", "en": "Pause", "zh": "暂停"},
             "resume": {"ru": "Продолжить", "en": "Resume", "zh": "继续"},
             "stop": {"ru": "Стоп", "en": "Stop", "zh": "停止"},
+            "confirm_finish": {"ru": "Печать завершена", "en": "Print finished", "zh": "打印完成"},
             "manual_controls": {"ru": "Ручное управление", "en": "Manual control", "zh": "手动控制"},
             "save_start": {"ru": "Запомнить старт", "en": "Save start", "zh": "保存起点"},
             "go_start": {"ru": "К старту", "en": "Go to start", "zh": "回到起点"},
@@ -1990,6 +2019,9 @@ class K9ControlCenter:
         self.stop_button = ttk.Button(buttons, text="Стоп", command=self.stop_print)
         self.stop_button.grid(row=1, column=2, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.stop_button)
+        self.confirm_finish_button = ttk.Button(buttons, text="Печать завершена", command=self.confirm_print_finished_by_operator)
+        self.confirm_finish_button.grid(row=2, column=0, columnspan=3, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.confirm_finish_button)
         self.left_split.add(live_frame, stretch="always", minsize=180)
         self.left_split.add(sd_frame, stretch="always", minsize=120)
 
@@ -2117,6 +2149,7 @@ class K9ControlCenter:
         self.pause_button.configure(text=self._t("pause"))
         self.resume_button.configure(text=self._t("resume"))
         self.stop_button.configure(text=self._t("stop"))
+        self.confirm_finish_button.configure(text=self._t("confirm_finish"))
         self.motion_frame.configure(text=self._t("manual_controls"))
         self.save_start_button.configure(text=self._t("save_start"))
         self.go_start_button.configure(text=self._t("go_start"))
@@ -3040,6 +3073,108 @@ class K9ControlCenter:
             "Это нужно этой K9-прошивке, чтобы спокойно войти в SD-печать. "
             "Если вентилятор/моторы ожили или пластик пошёл - не выключай питание, просто наблюдай.",
         )
+
+    def _confirm_operator_finished_prompt(self) -> bool:
+        lang = self.lang_var.get().strip() or "ru"
+        file_text = self.predicted_print_end_display if self.predicted_print_end_display != "-" else self.predicted_print_end_file
+        end_z = self.predicted_print_end_z
+        z_text = f"{end_z:.1f} mm" if end_z is not None else "?"
+        prompt = {
+            "en": (
+                f"Confirm that this SD print finished normally?\n\n"
+                f"File: {file_text}\n"
+                f"Saved final pose: X95 Y95 Z{z_text}\n\n"
+                "Continue only if ALL are true:\n"
+                "- the print is fully finished\n"
+                "- the part has been removed from the bed\n"
+                "- axes were not moved after the finish\n"
+                "- if USB/power was cycled, the printer physically stayed at the finished pose\n\n"
+                "After confirmation, 'Go to start' can use the saved final pose."
+            ),
+            "zh": (
+                f"确认这次 SD 打印已正常完成？\n\n"
+                f"文件：{file_text}\n"
+                f"保存的结束位置：X95 Y95 Z{z_text}\n\n"
+                "只有全部满足时才继续：\n"
+                "- 打印已经完全结束\n"
+                "- 模型已经从平台取下\n"
+                "- 结束后没有移动各轴\n"
+                "- 如果 USB/电源重置过，打印机实际仍停在结束位置\n\n"
+                "确认后，'Go to start' 可以使用保存的结束位置。"
+            ),
+            "ru": (
+                f"Подтвердить, что SD-печать штатно завершилась?\n\n"
+                f"Файл: {file_text}\n"
+                f"Сохранённая финальная поза: X95 Y95 Z{z_text}\n\n"
+                "Продолжай только если ВСЁ верно:\n"
+                "- печать полностью закончилась\n"
+                "- деталь снята со стола\n"
+                "- после финиша оси не двигали\n"
+                "- если был USB/power reset, физически принтер остался в финальной позе\n\n"
+                "После подтверждения 'К старту' сможет использовать сохранённую финальную точку."
+            ),
+        }.get(lang) or "Подтвердить штатное завершение печати?"
+        return bool(messagebox.askyesno("Little Hands", prompt))
+
+    def confirm_print_finished_by_operator(self) -> None:
+        if not self._has_predicted_print_end_recovery_model():
+            msg = (
+                "Нет сохранённой финальной точки для этой печати. "
+                "Без неё автоматический возврат небезопасен: выставь старт вручную и нажми 'Запомнить старт'."
+            )
+            self.log(msg)
+            messagebox.showerror("Little Hands", msg)
+            return
+        if self.current_print_file == "-":
+            msg = "Активной печати нет. Если нужно вернуться к старту, нажми 'К старту' и подтверди recovery."
+            self.log(msg)
+            messagebox.showinfo("Little Hands", msg)
+            return
+        if not self._confirm_operator_finished_prompt():
+            return
+
+        finished_file = self.current_print_display if self.current_print_display != "-" else self.current_print_file
+        finish_ts = time.time()
+        self._append_ring_log(
+            f"{time.strftime('%H:%M:%S', time.localtime(finish_ts))} "
+            f"PRINT_END_CONFIRMED_BY_OPERATOR file={self.current_print_file} "
+            f"contract={self.predicted_print_end_contract} "
+            f"end_x={self.predicted_print_end_x:.2f} end_y={self.predicted_print_end_y:.2f} "
+            f"end_z={self.predicted_print_end_z:.2f}"
+        )
+        self.current_print_file = "-"
+        self.current_print_display = "-"
+        self.current_print_start_ts = None
+        self.current_print_progress_pct = 100.0
+        self.print_state_restored_from_log = False
+        self.print_start_watchdog_alerted = False
+        self.print_was_active = False
+        self.print_completion_armed = False
+        self.sd_progress_sample_count = 0
+        self.first_sd_progress_ts = None
+        self.last_sd_progress_ts = None
+        self.post_print_recovery_required = True
+        self.bed_clear_before_go_start_required = True
+        self.post_print_pose_known = False
+        self.post_print_pose = None
+        self.stopped_print_pose = None
+        self.stopped_print_display = "-"
+        self.stopped_print_live_return_available = False
+        self.at_saved_start_pose = False
+        self._set_home_trust(
+            HOME_TRUST_INVALID,
+            "operator confirmed SD print finished; use saved predicted print-end recovery",
+            log_change=True,
+        )
+        self._save_print_state("completed", force=True)
+        self._post("active-sd", "Печатается: -")
+        self._post("progress", ("Печать: завершение подтверждено", 100.0))
+        self.log(
+            f"Оператор подтвердил штатный финиш печати {finished_file}. "
+            "Сохранённая финальная точка оставлена для guarded 'К старту'."
+        )
+        self._show_post_print_recovery_window("completion")
+        self._sync_home_controls()
 
     def _refresh_ports_on_startup(self) -> None:
         try:
@@ -4741,10 +4876,7 @@ class K9ControlCenter:
         return bool(
             self._port()
             and not self._home_is_trusted()
-            and self.predicted_print_end_valid
-            and self.predicted_print_end_file != "-"
-            and self.predicted_print_end_contract == PRINT_END_CONTRACT
-            and self.predicted_print_end_z is not None
+            and self._has_predicted_print_end_recovery_model()
         )
 
     def _has_unusable_predicted_print_end(self) -> bool:

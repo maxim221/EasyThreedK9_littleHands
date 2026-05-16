@@ -180,6 +180,18 @@ def main() -> int:
         failures,
     )
     require(
+        "confirm_print_finished_by_operator" in app
+        and "PRINT_END_CONFIRMED_BY_OPERATOR" in app
+        and "operator confirmed SD print finished; use saved predicted print-end recovery" in app,
+        "The UI must let the operator confirm normal completion after USB loss and keep the predicted print-end recovery pose.",
+        failures,
+    )
+    require(
+        "operator-confirmed completion restored as predicted print-end recovery" in app,
+        "Operator-confirmed predicted print-end recovery must survive app restart.",
+        failures,
+    )
+    require(
         appmod.should_offer_stale_predicted_end_recovery(
             current_print_file="LIFTERAM.GCO",
             bed_clear_required=True,

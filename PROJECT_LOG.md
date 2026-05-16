@@ -2731,3 +2731,14 @@ After each test print, append:
 - Follow-up:
   - the `3s` Little Hands telemetry cooldown experiment was reverted because the evidence points to a system-level USB hub reset, not an application-level serial pacing issue
   - keep investigating hub/cable/power/OS USB stability separately from printer workflow logic
+
+## 2026-05-16 Operator-Confirmed Print-End Recovery
+
+- Field observation:
+  - during a real SD print the CH340/USB path disappeared while the printer kept printing from SD
+  - Little Hands had already saved `PRINT_END_EXPECTED` for `VENUSTOP.GCO`: `X95 Y95 Z25.08`
+- Fix:
+  - the SD file panel now has an operator-only `Print finished` / `Печать завершена` action
+  - it does not send USB commands; it only records that the user confirmed normal completion, model removal, and no manual axis movement
+  - after confirmation, Little Hands clears the stale active print marker but keeps the predicted final pose so guarded `Go to start` can return from the expected print-end point
+  - this operator-confirmed predicted recovery state is persisted across app restarts

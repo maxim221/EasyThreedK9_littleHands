@@ -141,6 +141,7 @@ So:
 - if USB drops during a real SD print and the main window still shows a stale active-print marker after reconnect, `Go to start` may offer guarded recovery from the saved `LH_END_GCODE_V1` print-end; accept only if the print is definitely finished, the bed is clear, and the axes were not moved after finish
 - if the CH340 printer re-enumerates under a new `/dev/ttyUSB*` name after USB loss, `Go to start` recovery may automatically switch to the single visible safe printer-like port; manual `Find` is not required for that recovery case
 - if an old active-print marker is too stale to restore as active printing, Little Hands still keeps a valid predicted print-end as a guarded recovery option
+- if USB is lost during SD printing but the print finishes normally, the operator can use `Print finished` after removing the part; Little Hands then keeps the saved predicted final pose for guarded `Go to start`
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 - SD start must always return to the saved `X0 Y0 Z0` immediately before `M24`; if Little Hands lifted the nozzle for hotend preheat and the preheat fails, it first undoes the known lift with a relative Z-down move before showing the error
 - if Marlin shows a hotend target and nonzero heater output but temperature stays near the external warm-bed temperature, treat it as a failed hotend preheat / semi-stuck printer state, not as a valid slow start
