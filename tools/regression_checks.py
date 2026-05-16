@@ -100,13 +100,6 @@ def main() -> int:
         "Every GUI SD-start path must use the clearance-aware preheat wrapper.",
         failures,
     )
-    require(
-        "SERIAL_POLL_COOLDOWN_AFTER_TASK_SEC = 3.0" in app
-        and "self.serial_poll_quiet_until = time.time() + SERIAL_POLL_COOLDOWN_AFTER_TASK_SEC" in app
-        and "time.time() < self.serial_poll_quiet_until" in app,
-        "Auto telemetry must pause briefly after user USB tasks to reduce CH340/hub churn during manual start setup.",
-        failures,
-    )
     require_regex(
         marlin,
         r"def _start_sd_print_from_home_once\(.*?send_line_wait_ok",

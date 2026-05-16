@@ -2721,5 +2721,6 @@ After each test print, append:
 - Interpretation:
   - `Save start` / jog commands are not expected to power-cycle the printer port; this looks like a physical hub/cable/power/USB-stack reset
   - Little Hands can still reduce stress on the CH340 by avoiding immediate telemetry reopens between repeated manual jog commands
-- Fix:
-  - auto telemetry now pauses for `3s` after each user USB task, so manual start setup gets a quiet window between jog/save commands instead of `M105/M27/M114` reopening the port every second
+- Follow-up:
+  - the `3s` Little Hands telemetry cooldown experiment was reverted because the evidence points to a system-level USB hub reset, not an application-level serial pacing issue
+  - keep investigating hub/cable/power/OS USB stability separately from printer workflow logic
