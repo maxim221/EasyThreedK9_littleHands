@@ -126,23 +126,23 @@ That means:
 G92 X0 Y0 Z0
 ```
 
-3. `Go to start` returns to that logical zero during a clean trusted session.
+3. `Go to saved start` returns to that logical zero during a clean trusted session.
 
 So:
 
 - this is practical and field-tested
 - but it is not yet a guaranteed absolute home after arbitrary external movement
 - after a failed start or suspicious state, re-establish the start pose and zero again
-- Little Hands now tracks home as `trusted`, `uncertain`, or `invalid`; SD start and `Go to start` are blocked unless home is trusted or the app is showing an explicit post-print recovery prompt
+- Little Hands now tracks home as `trusted`, `uncertain`, or `invalid`; SD start and `Go to saved start` are blocked unless home is trusted or the app is showing an explicit post-print recovery prompt
 - changing / disconnecting the USB port, disabling motors, hard-stopping, a failed jog, or a failed recovery invalidates that trust because the printer has no physical endstops to re-discover zero
 - normal `Stop` is a controlled stop, not the emergency path: Little Hands pauses, reads `M114`, tries to lift Z to a known safe recovery height, then sends `M524` / heater-off commands
 - after a normal `Stop`, Little Hands saves a stopped-print recovery marker when possible: X/Y come from the interrupted print position, while Z comes from the controlled post-stop lift when available; manual jogs after Stop update this recovery marker instead of deleting it
-- if `Stop` happens while the K9 is still busy and no `M114` is captured, Little Hands may offer a guarded live-session `Go to start`; use it only with a clear bed, then press `Save start` only after visually confirming the physical start pose
-- if USB drops during a real SD print and the main window still shows a stale active-print marker after reconnect, `Go to start` may offer guarded recovery from the saved `LH_END_GCODE_V1` print-end; accept only if the print is definitely finished, the bed is clear, and the axes were not moved after finish
-- if the CH340 printer re-enumerates under a new `/dev/ttyUSB*` name after USB loss, `Go to start` recovery may automatically switch to the single visible safe printer-like port; manual `Find` is not required for that recovery case
+- if `Stop` happens while the K9 is still busy and no `M114` is captured, Little Hands may offer a guarded live-session `Go to saved start`; use it only with a clear bed, then press `Save start` only after visually confirming the physical start pose
+- if USB drops during a real SD print and the main window still shows a stale active-print marker after reconnect, `After print: return` may offer guarded recovery from the saved `LH_END_GCODE_V1` print-end; accept only if the print is definitely finished, the bed is clear, and the axes were not moved after finish
+- if the CH340 printer re-enumerates under a new `/dev/ttyUSB*` name after USB loss, post-print recovery may automatically switch to the single visible safe printer-like port; manual `Find` is not required for that recovery case
 - if an old active-print marker is too stale to restore as active printing, Little Hands still keeps a valid predicted print-end as a guarded recovery option
-- if USB is lost during SD printing but the print finishes normally, the operator can use `Print finished` after removing the part; Little Hands then keeps the saved predicted final pose for guarded `Go to start`
-- the SD panel has a dedicated `Return to start` button; it does not perform a separate unsafe home, but runs the same guarded recovery path as the manual `Go to start` button, including the clear-bed confirmation
+- if USB is lost during SD printing but the print finishes normally, the operator can use `Print finished` after removing the part; Little Hands then keeps the saved predicted final pose for guarded `After print: return`
+- the SD panel has a dedicated `After print: return` button; it does not perform a separate unsafe home, but runs the same guarded recovery path as the manual `Go to saved start` button, including the clear-bed confirmation
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 - SD start must always return to the saved `X0 Y0 Z0` immediately before `M24`; if Little Hands lifted the nozzle for hotend preheat and the preheat fails, it first undoes the known lift with a relative Z-down move before showing the error
 - if Marlin shows a hotend target and nonzero heater output but temperature stays near the external warm-bed temperature, treat it as a failed hotend preheat / semi-stuck printer state, not as a valid slow start
@@ -216,7 +216,7 @@ If a different slicer version is used, configure it from `docs/cura/SETTINGS.md`
 5. Upload the G-code.
 6. Set the physical start pose.
 7. Press `Save start`.
-8. Press `Go to start` and confirm it returns correctly.
+8. Press `Go to saved start` and confirm it returns correctly.
 9. Start printing from SD. Manual hotend preheat is not needed: if the nozzle is still at saved `Z0`, Little Hands first lifts it to a safe clearance; before `M24`, it preheats the hotend to the target found in the G-code, returns to the saved start, then sends `M23`, waits for `File selected`, and sends `M24`.
 10. If the file was uploaded through Little Hands or exported by the bundled helper, the early `M109` has been rewritten to `M104` so SD start does not get stuck in a blocking heat wait.
 11. After `M24`, Little Hands keeps USB fully quiet for `180` seconds. This is expected and helps this K9 enter SD printing reliably.
@@ -228,7 +228,7 @@ If a different slicer version is used, configure it from `docs/cura/SETTINGS.md`
 After a successful SD print, use this order before starting the next one:
 
 1. Remove the printed part from the bed.
-2. Press `Go to start` while the saved zero is still valid.
+2. Press `Go to saved start` while the saved zero is still valid.
 3. Power-cycle the printer for `5–10` seconds.
 4. Confirm the printer is still in the start pose.
 5. Press `Save start`.

@@ -76,7 +76,7 @@ Instead, Little Hands uses a manual-zero workflow:
 1. Move the printer into a known print start pose.
 2. Press `Save start`.
 3. The app tells the printer `G92 X0 Y0 Z0`.
-4. `Go to start` returns to that logical zero during the current clean session.
+4. `Go to saved start` returns to that logical zero during the current clean session.
 
 This means:
 
@@ -85,9 +85,9 @@ This means:
   - power cycle the printer
   - re-check the start pose
   - press `Save start` again
-- after a stopped print, `Go to start` is allowed only through the explicit recovery prompts; if the app offers a live-session return because `M114` was not captured, clear the bed first and press `Save start` only after visually confirming the nozzle is back at the real start pose
+- after a stopped print, `Go to saved start` is allowed only through the explicit recovery prompts; if the app offers a live-session return because `M114` was not captured, clear the bed first and press `Save start` only after visually confirming the nozzle is back at the real start pose
 - if the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet
-- after a normal print finish, the SD panel `Return to start` button runs the same guarded recovery path as `Go to start` and requires a clear bed
+- after a normal print finish, the SD panel `After print: return` button runs the same guarded recovery path as `Go to saved start` and requires a clear bed
 
 ## External Warm Bed / Hotbed Note
 

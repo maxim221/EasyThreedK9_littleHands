@@ -2762,3 +2762,7 @@ After each test print, append:
 - Manual update:
   - the in-app `Manual` text was rewritten as a real workflow guide covering normal print start, post-print return, sleep/USB-drop recovery, stopped-print recovery, button meanings, logs, metrics, and safety rules
   - the manual now has full Russian, English, and Chinese variants and updates immediately when the interface language changes
+- Button naming cleanup:
+  - the manual-control return button is now labeled `К сохранённому старту` / `Go to saved start`
+  - the SD-panel post-print recovery button is now labeled `После печати: к старту` / `After print: return`
+  - the rename keeps both buttons on the same guarded recovery implementation while making their intended context clear in the UI

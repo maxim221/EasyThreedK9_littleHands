@@ -123,23 +123,23 @@
 G92 X0 Y0 Z0
 ```
 
-3. `Go to start` 会在干净、可信的会话中回到这个逻辑零点
+3. `回到保存起点` 会在干净、可信的会话中回到这个逻辑零点
 
 因此：
 
 - 这是一种实用并且已经经过现场验证的工作流
 - 但它还不是在任意外部移动后的绝对 home
 - 如果启动失败或状态可疑，应重新建立起始姿态并重新设零
-- Little Hands 现在把 home 状态分为 `trusted`、`uncertain` 和 `invalid`；除非 home 可信，或应用正在显示明确的打印后 recovery 确认流程，否则会阻止 SD 启动和 `Go to start`
+- Little Hands 现在把 home 状态分为 `trusted`、`uncertain` 和 `invalid`；除非 home 可信，或应用正在显示明确的打印后 recovery 确认流程，否则会阻止 SD 启动和 `回到保存起点`
 - 更换 / 断开 USB 端口、关闭电机、硬停止、jog 失败或 recovery 失败都会清除 home 信任，因为这台机器没有物理限位开关来重新寻找绝对零点
 - 普通 `Stop` 是受控停止，不是紧急路径：Little Hands 会暂停、读取 `M114`、尝试把 Z 抬到已知安全 recovery 高度，然后发送 `M524` 和关闭加热命令
 - 正常 `Stop` 后，Little Hands 会尽量保存 stopped-print recovery 标记：X/Y 来自中断打印位置，Z 来自受控 post-stop 抬升（如果确认成功）；Stop 后的手动 jog 会更新该标记，而不是删除它
-- 如果 `Stop` 发生在 K9 仍然 busy、没有取得 `M114` 的窗口内，Little Hands 可能提供受保护的 live-session `Go to start`；只有平台清空后才使用，并且只有目视确认实际起点正确后才点击 `Save start`
-- 如果 USB 在真实 SD 打印期间断开，重新连接后主窗口仍显示过期的活动打印标记，`Go to start` 可以按保存的 `LH_END_GCODE_V1` print-end 提供受保护恢复；只有确认打印已经结束、平台已清空且结束后没有手动移动各轴时才接受
-- 如果 USB 断开后 CH340 打印机以新的 `/dev/ttyUSB*` 名称重新枚举，`Go to start` recovery 可以自动切换到唯一可见的安全 printer-like 端口；此 recovery 场景不需要手动点击 `Find`
+- 如果 `Stop` 发生在 K9 仍然 busy、没有取得 `M114` 的窗口内，Little Hands 可能提供受保护的 live-session `回到保存起点`；只有平台清空后才使用，并且只有目视确认实际起点正确后才点击 `Save start`
+- 如果 USB 在真实 SD 打印期间断开，重新连接后主窗口仍显示过期的活动打印标记，`打印后返回` 可以按保存的 `LH_END_GCODE_V1` print-end 提供受保护恢复；只有确认打印已经结束、平台已清空且结束后没有手动移动各轴时才接受
+- 如果 USB 断开后 CH340 打印机以新的 `/dev/ttyUSB*` 名称重新枚举，打印后 recovery 可以自动切换到唯一可见的安全 printer-like 端口；此 recovery 场景不需要手动点击 `Find`
 - 如果旧的活动打印标记已经太旧，不能恢复为活动打印，Little Hands 仍会保留有效的 predicted print-end 作为受保护 recovery 选项
-- 如果 SD 打印期间 USB 断开但打印正常完成，操作者可以在取下模型后点击 `Print finished`；Little Hands 会保留预测的最终位置，用于受保护的 `Go to start`
-- SD 面板有单独的 `Return to start` 按钮；它不会执行另一套不安全的 home，而是调用与手动 `Go to start` 相同的受保护 recovery 流程，包括确认平台已清空
+- 如果 SD 打印期间 USB 断开但打印正常完成，操作者可以在取下模型后点击 `Print finished`；Little Hands 会保留预测的最终位置，用于受保护的 `打印后返回`
+- SD 面板有单独的 `打印后返回` 按钮；它不会执行另一套不安全的 home，而是调用与手动 `回到保存起点` 相同的受保护 recovery 流程，包括确认平台已清空
 - 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
 - SD 启动必须在 `M24` 前回到已保存的 `X0 Y0 Z0`；如果 Little Hands 为热端预热抬起喷嘴而预热失败，应用会先用相同距离的相对 Z 向下移动撤销这次抬升，然后再显示错误
 - 如果 Marlin 显示热端目标温度和非零加热输出，但温度仍停留在外部温床附近，应把它当作热端预热失败 / 打印机半卡死状态，而不是正常的慢启动
@@ -208,7 +208,7 @@ G92 X0 Y0 Z0
 5. 上传 G-code
 6. 设定物理起始姿态
 7. 点击 `Save start`
-8. 点击 `Go to start` 并确认它确实返回正确位置
+8. 点击 `回到保存起点` 并确认它确实返回正确位置
 9. 从 SD 启动打印。不需要手动预热热端：如果喷嘴仍在已保存的 `Z0`，Little Hands 会先抬到安全间隙；发送 `M24` 前，它会把热端预热到 G-code 中的目标温度，回到已保存起点，然后发送 `M23`，等待 `File selected` 确认，再发送 `M24`。
 10. 如果文件是通过 Little Hands 上传或由内置 helper 导出的，早期 `M109` 已改写为 `M104`，避免 SD 启动卡在阻塞式加热等待中。
 11. 发送 `M24` 后，Little Hands 会让 USB 完全安静 `180` 秒。这是预期行为，有助于这台 K9 稳定进入 SD 打印。
@@ -220,7 +220,7 @@ G92 X0 Y0 Z0
 一次 SD 打印成功结束后，下一次启动前请按这个顺序操作：
 
 1. 从平台上取下模型。
-2. 在已保存零点仍然有效时点击 `Go to start`。
+2. 在已保存零点仍然有效时点击 `回到保存起点`。
 3. 关闭打印机电源 `5–10` 秒，然后重新打开。
 4. 确认打印机仍在起始位置。
 5. 点击 `Save start`。
