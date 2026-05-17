@@ -2781,3 +2781,8 @@ After each test print, append:
   - uploaded / prepared SD files still rewrite early file-local `M109` to `M104`; the blocking wait is now owned by the controlled app preheat stage before the model is selected and started
   - if this stage has to abort, Little Hands sends `M108` before `M104 S0` so a blocking heat wait can be interrupted cleanly
   - the local recovery marker was restored for the current failed attempt because the nozzle is physically known to be at the `10 mm` preheat lift and the relative return failed only because USB/Marlin was silent
+- Thermal-halt field result:
+  - a following M109 preheat attempt reached only about `40C` and Marlin reported `Error:Heating failed, system stopped! Heater_ID: E0`
+  - in this Marlin tree the reported hotend heater `@:127` is the full-power internal scale (`PID_MAX 255 >> 1`), so the firmware was commanding heat but the measured hotend temperature did not rise enough
+  - because the fan threshold is `45C` and the hotend never reached it, this specific failure is not explained by firmware-managed fan cooling
+  - Little Hands now recognizes this as firmware thermal halt, preserves the `10 mm` preheat-lift recovery marker, and does not keep trying axis-return commands until after the required power cycle

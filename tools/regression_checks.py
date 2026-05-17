@@ -132,6 +132,13 @@ def main() -> int:
         failures,
     )
     require(
+        "is_firmware_halt_message" in app
+        and '"heating failed"' in app
+        and "firmware thermal halt left preheat lift unrecovered" in app,
+        "Heating-failed thermal halt must preserve preheat-lift recovery without trying more axis moves.",
+        failures,
+    )
+    require(
         app.count("_preheat_hotend_for_sd_start_with_clearance(target)") >= 3,
         "Every GUI SD-start path must use the clearance-aware preheat wrapper.",
         failures,

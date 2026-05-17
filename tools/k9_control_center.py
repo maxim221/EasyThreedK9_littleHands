@@ -112,6 +112,21 @@ def normalize_sd_key(path: str) -> str:
     return path.strip().lstrip("/").upper()
 
 
+def is_firmware_halt_message(message: object) -> bool:
+    lowered = str(message).lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "printer halted",
+            "kill() called",
+            "heating failed",
+            "system stopped",
+            "homing failed",
+            "bad x endstop",
+        )
+    )
+
+
 def predicted_print_end_has_recovery_pose(predicted: object) -> bool:
     return bool(
         isinstance(predicted, dict)
@@ -1484,7 +1499,21 @@ class K9ControlCenter:
         lifted_for_preheat = self._lift_from_saved_start_for_preheat_if_needed()
         try:
             self._preheat_hotend_for_sd_start(target)
-        except Exception:
+        except Exception as exc:
+            if lifted_for_preheat and is_firmware_halt_message(exc):
+                self.at_saved_start_pose = False
+                self.preheat_lift_recovery_available = True
+                self.preheat_lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "firmware thermal halt left preheat lift unrecovered", log_change=True)
+                self._save_print_state("preheat-lift-failed", force=True)
+                self._post(
+                    "log",
+                    "Прошивка остановила принтер во время предпрогрева hotend. "
+                    "Не пытаюсь двигать оси до power cycle: после thermal halt Marlin обычно не подтверждает M17/G1, "
+                    "и попытка возврата только создаёт шум. После перезагрузки по питанию нажми 'К сохранённому старту' "
+                    "и подтверди guarded возврат: Little Hands опустит Z на известный preheat-lift.",
+                )
+                raise
             self._return_to_saved_start_after_failed_preheat(lifted_for_preheat=lifted_for_preheat)
             raise
 
@@ -2528,20 +2557,12 @@ class K9ControlCenter:
         self.log_text.configure(state="disabled")
         self._append_ring_log(line)
         lowered = message.lower()
-        if (
-            not self.printer_halted
-            and (
-                "printer halted" in lowered
-                or "kill() called" in lowered
-                or "homing failed" in lowered
-                or "bad x endstop" in lowered
-            )
-        ):
+        if not self.printer_halted and is_firmware_halt_message(message):
             self.printer_halted = True
             self.busy_var.set("USB: printer halted")
             messagebox.showwarning(
                 "Little Hands",
-                "Прошивка остановила принтер (Printer halted / Homing Failed).\n"
+                "Прошивка остановила принтер (thermal halt / Heating Failed / Homing Failed).\n"
                 "Нужен power cycle: выключи принтер по питанию на 5–10 секунд и включи снова.",
             )
 
