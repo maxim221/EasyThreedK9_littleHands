@@ -87,6 +87,7 @@ This means:
   - press `Save start` again
 - after a stopped print, `Go to start` is allowed only through the explicit recovery prompts; if the app offers a live-session return because `M114` was not captured, clear the bed first and press `Save start` only after visually confirming the nozzle is back at the real start pose
 - if the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet
+- after a normal print finish, the SD panel `Return to start` button runs the same guarded recovery path as `Go to start` and requires a clear bed
 
 ## External Warm Bed / Hotbed Note
 

@@ -139,6 +139,7 @@ G92 X0 Y0 Z0
 - 如果 USB 断开后 CH340 打印机以新的 `/dev/ttyUSB*` 名称重新枚举，`Go to start` recovery 可以自动切换到唯一可见的安全 printer-like 端口；此 recovery 场景不需要手动点击 `Find`
 - 如果旧的活动打印标记已经太旧，不能恢复为活动打印，Little Hands 仍会保留有效的 predicted print-end 作为受保护 recovery 选项
 - 如果 SD 打印期间 USB 断开但打印正常完成，操作者可以在取下模型后点击 `Print finished`；Little Hands 会保留预测的最终位置，用于受保护的 `Go to start`
+- SD 面板有单独的 `Return to start` 按钮；它不会执行另一套不安全的 home，而是调用与手动 `Go to start` 相同的受保护 recovery 流程，包括确认平台已清空
 - 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
 - SD 启动必须在 `M24` 前回到已保存的 `X0 Y0 Z0`；如果 Little Hands 为热端预热抬起喷嘴而预热失败，应用会先用相同距离的相对 Z 向下移动撤销这次抬升，然后再显示错误
 - 如果 Marlin 显示热端目标温度和非零加热输出，但温度仍停留在外部温床附近，应把它当作热端预热失败 / 打印机半卡死状态，而不是正常的慢启动

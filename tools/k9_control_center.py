@@ -1371,10 +1371,12 @@ class K9ControlCenter:
             )
         )
         go_state = "normal" if (trusted or recovery_ready) and not self.user_task_pending else "disabled"
+        post_print_go_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
         start_state = "normal" if trusted and not self.user_task_pending else "disabled"
         confirm_finish_state = "normal" if self._can_confirm_operator_finished_print() and not self.user_task_pending else "disabled"
         guarded_buttons = (
             ("go_start_button", go_state),
+            ("post_print_go_start_button", post_print_go_state),
             ("start_print_button", start_state),
             ("upload_and_start_button", start_state),
             ("confirm_finish_button", confirm_finish_state),
@@ -1454,7 +1456,7 @@ class K9ControlCenter:
             "disconnect": {"ru": "Откл.", "en": "Off", "zh": "断开"},
             "files_and_firmware": {"ru": "Файлы и прошивка", "en": "Files & Firmware", "zh": "文件和固件"},
             "manual": {"ru": "Manual", "en": "Manual", "zh": "说明"},
-            "reset_usb": {"ru": "Сброс USB", "en": "Reset USB", "zh": "重置 USB"},
+            "reset_usb": {"ru": "Сброс USB-сессии", "en": "Reset USB session", "zh": "重置 USB 会话"},
             "export_cura": {"ru": "Экспорт профиля Cura", "en": "Export Cura profile", "zh": "导出 Cura 配置"},
             "sound_pc_short": {"ru": "Звук ПК", "en": "PC sound", "zh": "电脑提示音"},
             "sound_pc_complete": {"ru": "Звук окончания печати ПК", "en": "PC completion sound", "zh": "打印完成电脑提示音"},
@@ -1469,6 +1471,7 @@ class K9ControlCenter:
             "resume": {"ru": "Продолжить", "en": "Resume", "zh": "继续"},
             "stop": {"ru": "Стоп", "en": "Stop", "zh": "停止"},
             "confirm_finish": {"ru": "Печать завершена", "en": "Print finished", "zh": "打印完成"},
+            "post_print_go_start": {"ru": "Вернуть к старту", "en": "Return to start", "zh": "返回起点"},
             "manual_controls": {"ru": "Ручное управление", "en": "Manual control", "zh": "手动控制"},
             "save_start": {"ru": "Запомнить старт", "en": "Save start", "zh": "保存起点"},
             "go_start": {"ru": "К старту", "en": "Go to start", "zh": "回到起点"},
@@ -2126,8 +2129,11 @@ class K9ControlCenter:
         self.stop_button.grid(row=1, column=2, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.stop_button)
         self.confirm_finish_button = ttk.Button(buttons, text="Печать завершена", command=self.confirm_print_finished_by_operator)
-        self.confirm_finish_button.grid(row=2, column=0, columnspan=3, padx=3, pady=2, sticky="ew")
+        self.confirm_finish_button.grid(row=2, column=0, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.confirm_finish_button)
+        self.post_print_go_start_button = ttk.Button(buttons, text="Вернуть к старту", command=self.return_to_start_after_print)
+        self.post_print_go_start_button.grid(row=2, column=1, columnspan=2, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.post_print_go_start_button)
         self.left_split.add(live_frame, stretch="always", minsize=180)
         self.left_split.add(sd_frame, stretch="always", minsize=120)
 
@@ -2256,6 +2262,7 @@ class K9ControlCenter:
         self.resume_button.configure(text=self._t("resume"))
         self.stop_button.configure(text=self._t("stop"))
         self.confirm_finish_button.configure(text=self._t("confirm_finish"))
+        self.post_print_go_start_button.configure(text=self._t("post_print_go_start"))
         self.motion_frame.configure(text=self._t("manual_controls"))
         self.save_start_button.configure(text=self._t("save_start"))
         self.go_start_button.configure(text=self._t("go_start"))
@@ -3540,6 +3547,55 @@ class K9ControlCenter:
         ):
             return
         self.go_print_home(confirm_model_removed=True)
+
+    def return_to_start_after_print(self) -> None:
+        if self.current_print_file != "-":
+            msg = {
+                "ru": "Печать ещё считается активной. Не возвращаю к старту во время активной SD-печати.",
+                "en": "A print is still marked active. I will not return to start during active SD printing.",
+                "zh": "仍标记为正在打印。SD 打印活动期间不会返回起点。",
+            }.get(self.lang_var.get().strip() or "ru", "Печать ещё считается активной.")
+            self.log(msg)
+            messagebox.showwarning("Little Hands", msg)
+            return
+
+        self._rehydrate_known_post_print_pose_from_state()
+        has_recovery_context = bool(
+            self.post_print_recovery_required
+            or self.bed_clear_before_go_start_required
+            or self.stopped_print_pose is not None
+            or self.stopped_print_live_return_available
+            or self._has_predicted_print_end_recovery_model()
+            or self._home_is_trusted()
+        )
+        if has_recovery_context and (not self._port() or self._selected_port_safety_error()):
+            if not self._select_single_safe_printer_port_for_recovery():
+                msg = {
+                    "ru": "Не могу выбрать безопасный порт принтера для возврата. Нажми 'Найти' или переподключи принтер, затем повтори.",
+                    "en": "Cannot choose a safe printer port for return. Press 'Find' or reconnect the printer, then try again.",
+                    "zh": "无法为返回动作选择安全的打印机端口。请点击“查找”或重新连接打印机后再试。",
+                }.get(self.lang_var.get().strip() or "ru", "Не могу выбрать безопасный порт принтера.")
+                self.log(msg)
+                messagebox.showerror("Little Hands", msg)
+                return
+
+        if not has_recovery_context:
+            msg = {
+                "ru": (
+                    "Нет сохранённой послепечатной позы для автоматического возврата. "
+                    "Если принтер уже стоит в старте, нажми 'Запомнить старт'; иначе выставь старт вручную."
+                ),
+                "en": (
+                    "No saved post-print pose is available for automatic return. "
+                    "If the printer is already at start, press 'Save start'; otherwise jog it manually first."
+                ),
+                "zh": "没有可用于自动返回的打印后位置。如果打印机已在起点，请点击“保存起点”；否则请先手动点动。",
+            }.get(self.lang_var.get().strip() or "ru", "Нет сохранённой послепечатной позы.")
+            self.log(msg)
+            messagebox.showerror("Little Hands", msg)
+            return
+
+        self.go_print_home(confirm_model_removed=False)
 
     def _close_post_print_window(self) -> None:
         if self.post_print_window and self.post_print_window.winfo_exists():
@@ -4988,7 +5044,7 @@ class K9ControlCenter:
         )
 
     def _rehydrate_known_post_print_pose_from_state(self) -> bool:
-        if self._can_return_from_known_post_print_pose():
+        if self.post_print_pose_known and self.post_print_pose is not None and self.post_print_recovery_required:
             return True
         if not PRINT_STATE_PATH.is_file():
             return False
@@ -5027,7 +5083,7 @@ class K9ControlCenter:
             f"X{restored_pose[0]:.2f} Y{restored_pose[1]:.2f} Z{restored_pose[2]:.2f}. "
             "Можно выполнить guarded 'К старту' после подтверждения, что модель снята."
         )
-        return self._can_return_from_known_post_print_pose()
+        return True
 
     def _can_return_from_predicted_print_end_pose(self) -> bool:
         return bool(
@@ -5253,6 +5309,8 @@ class K9ControlCenter:
         return bool(messagebox.askyesno("Little Hands", prompt))
 
     def go_print_home(self, *, confirm_model_removed: bool = False) -> None:
+        if not self._home_is_trusted():
+            self._rehydrate_known_post_print_pose_from_state()
         if (
             (self.predicted_print_end_valid or self.post_print_recovery_required or self.bed_clear_before_go_start_required)
             and (not self._port() or self._selected_port_safety_error())
@@ -5299,8 +5357,6 @@ class K9ControlCenter:
         use_post_print_pose = False
         post_print_pose = self.post_print_pose
         use_predicted_print_end_pose = False
-        if not self._home_is_trusted():
-            self._rehydrate_known_post_print_pose_from_state()
         if use_stopped_print_pose:
             self.log(
                 "Выполняю recovery к старту после остановленной печати: использую позицию, "

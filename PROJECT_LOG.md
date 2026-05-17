@@ -2753,6 +2753,8 @@ After each test print, append:
   - `Go to start` now rehydrates a completed-print `M114` pose from `little_hands_print_state.json` before refusing recovery
   - this keeps the guarded post-print return available after sleep/wake or USB drop, as long as the state is still fresh and explicitly marked `completed`
   - after a manual terminal recovery to `X0 Y0 Z0`, the local state must be marked `returned-to-start` so the UI cannot perform the same recovery twice
+  - the SD file panel now has a dedicated `Return to start` / `Вернуть к старту` button wired to the same guarded recovery path, so the operator does not need to use the manual-control block or ask for terminal recovery
+  - the old `Reset USB` label was renamed to `Reset USB session` because it is a soft Marlin serial-session reset (`M110 N0` + `M105`), not a physical USB hub reset or printer power cycle
 - Time estimate improvement:
   - Little Hands parses Cura `;TIME:<seconds>` from uploaded/known G-code files and stores it in the SD profile
   - the SD panel shows `Expected finish` from print start plus either the previous real duration for that file or Cura time adjusted by observed successful-print ratios
