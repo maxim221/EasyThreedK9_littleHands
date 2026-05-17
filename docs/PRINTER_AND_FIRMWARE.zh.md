@@ -143,7 +143,7 @@ G92 X0 Y0 Z0
 - 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
 - SD 启动必须在 `M24` 前回到已保存的 `X0 Y0 Z0`；如果 Little Hands 为热端预热抬起喷嘴而预热失败，应用会先用相同距离的相对 Z 向下移动撤销这次抬升，然后再显示错误
 - 如果这个相对返回没有收到确认，Little Hands 会保留 failed-preheat-lift recovery 标记；只有操作者确认打印没有开始且各轴没有被手动移动后，`回到保存起点` 才能重试返回
-- 如果 Marlin 显示热端目标温度和非零加热输出，但温度仍停留在外部温床附近，应把它当作热端预热失败 / 打印机半卡死状态，而不是正常的慢启动
+- 如果 Marlin 显示 hotend 目标温度和正的加热输出，但第一分钟温度上升很小，应把它当作这台 K9 hotend / 传感器的 slow-start 特性：Little Hands 会记录警告并等待完整的预热超时；只有目标掉到 `/0C` 或 heater output 一直是 `@0` 时才快速中止
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

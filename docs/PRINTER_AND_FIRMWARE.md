@@ -146,7 +146,7 @@ So:
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 - SD start must always return to the saved `X0 Y0 Z0` immediately before `M24`; if Little Hands lifted the nozzle for hotend preheat and the preheat fails, it first undoes the known lift with a relative Z-down move before showing the error
 - if that relative return is not acknowledged, Little Hands preserves a failed-preheat-lift recovery marker; `Go to saved start` can retry only after the operator confirms that the print did not start and the axes were not moved by hand
-- if Marlin shows a hotend target and nonzero heater output but temperature stays near the external warm-bed temperature, treat it as a failed hotend preheat / semi-stuck printer state, not as a valid slow start
+- if Marlin shows a hotend target and positive heater output but the first minute of temperature rise is small, treat it as this K9's slow-start hotend/sensor behavior: log a warning and keep waiting up to the full preheat timeout; still abort quickly if the target drops to `/0C` or heater output stays `@0`
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

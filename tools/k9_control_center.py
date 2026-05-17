@@ -60,7 +60,7 @@ PRINT_END_MAX_Z = 100.0
 DEFAULT_PRINT_HOTEND_TARGET_C = 218.0
 PRINT_PREHEAT_BLOCKING_M109_EXTRA_C = 7.0
 PRINT_PREHEAT_MARGIN_C = 2.0
-PRINT_PREHEAT_TIMEOUT_SEC = 240.0
+PRINT_PREHEAT_TIMEOUT_SEC = 420.0
 PRINT_PREHEAT_POLL_SEC = 3.0
 PRINT_PREHEAT_TARGET_GRACE_SEC = 25.0
 PRINT_PREHEAT_HEATER_ZERO_GRACE_SEC = 45.0
@@ -1254,6 +1254,7 @@ class K9ControlCenter:
         target_zero_since = 0.0
         heater_zero_since = 0.0
         heater_positive_seen = False
+        slow_rise_warned = False
         hotend_off_sent = False
 
         def send_hotend_off(ser: object | None = None) -> None:
@@ -1351,13 +1352,23 @@ class K9ControlCenter:
                             and current < first_temp + PRINT_PREHEAT_MIN_RISE_C
                             and current < target - PRINT_PREHEAT_MARGIN_C
                         ):
-                            send_hotend_off(ser)
-                            raise RuntimeError(
-                                f"Hotend почти не греется: {first_temp:.1f}C -> {current:.1f}C "
-                                f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд. "
-                                "Нагрев выключен командой M104 S0; печать не запускаю. "
-                                "Проверь силовое питание/hotend и сделай power cycle принтера перед новой попыткой."
-                            )
+                            if heater_positive_seen:
+                                if not slow_rise_warned:
+                                    slow_rise_warned = True
+                                    self._post(
+                                        "log",
+                                        f"Предпрогрев hotend идёт медленно: {first_temp:.1f}C -> {current:.1f}C "
+                                        f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд при положительном @. "
+                                        "Для этой K9 это допустимый slow-start; продолжаю ждать резкого подъёма температуры.",
+                                    )
+                            else:
+                                send_hotend_off(ser)
+                                raise RuntimeError(
+                                    f"Hotend почти не греется: {first_temp:.1f}C -> {current:.1f}C "
+                                    f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд, и положительный heater output не подтверждён. "
+                                    "Нагрев выключен командой M104 S0; печать не запускаю. "
+                                    "Проверь питание/hotend и сделай power cycle принтера перед новой попыткой."
+                                )
                     time.sleep(PRINT_PREHEAT_POLL_SEC)
                 send_hotend_off(ser)
         except Exception:

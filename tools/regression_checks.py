@@ -116,8 +116,10 @@ def main() -> int:
     require(
         "PRINT_PREHEAT_NO_RISE_GRACE_SEC = 75.0" in app
         and "PRINT_PREHEAT_MIN_RISE_C = 8.0" in app
+        and "slow-start" in app
+        and "heater_positive_seen" in app
         and "per_command_timeout=12.0" in app,
-        "Failed preheat must abort quickly and must not hang for long if Marlin stops acknowledging recovery commands.",
+        "Failed preheat must warn on slow K9 heatup but still abort quickly if heater output is not positive.",
         failures,
     )
     require(

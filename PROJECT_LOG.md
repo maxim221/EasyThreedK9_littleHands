@@ -2771,3 +2771,7 @@ After each test print, append:
   - the app now preserves a dedicated failed-preheat-lift recovery marker, including through a following `Stop`, instead of losing the only useful model
   - `К сохранённому старту` / `Go to saved start` can now offer a guarded retry that lowers Z by the same known preheat-lift after the operator confirms that print did not start and axes were not moved by hand
   - manual jog, motor-off, hard stop, and newly saved start clear this marker so stale recovery cannot be reused blindly
+- Hotend slow-start preheat update:
+  - the K9 hotend/sensor can report only a small temperature rise during the first `75s` even when Marlin accepts the target and heater output is positive (`@` nonzero)
+  - Little Hands now treats that as a slow-start warning instead of an immediate abort, and waits up to the full `420s` preheat timeout
+  - fast abort remains for `/0C` target loss or heater output stuck at `@0`
