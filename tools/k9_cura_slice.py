@@ -382,29 +382,6 @@ def estimate_filament_m(lines: list[str]) -> float:
     return total_mm / 1000.0
 
 
-def replace_early_m109_with_m104(lines: list[str]) -> bool:
-    for index, line in enumerate(lines[:120]):
-        stripped = line.strip()
-        if stripped.startswith(";LAYER:") or stripped.startswith(";LAYER_COUNT:"):
-            return False
-        if not stripped or stripped.startswith(";"):
-            continue
-        command = stripped.split(";", 1)[0].strip()
-        if not command.upper().startswith("M109"):
-            continue
-        match = re.search(r"\bS([-+]?\d+(?:\.\d+)?)\b", command, re.IGNORECASE)
-        if not match:
-            continue
-        target = float(match.group(1))
-        prefix = line[: len(line) - len(line.lstrip())]
-        lines[index] = (
-            f"{prefix}M104 S{target:g} ; LH: non-blocking heat target; "
-            "Little Hands preheats before SD start"
-        )
-        return True
-    return False
-
-
 def remove_slicer_fan_commands(lines: list[str]) -> int:
     replacements = 0
     for index, line in enumerate(lines):
@@ -427,7 +404,6 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
     min_x, max_x, min_y, max_y, max_z = bounds
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     filament_m = estimate_filament_m(lines)
-    replace_early_m109_with_m104(lines)
     remove_slicer_fan_commands(lines)
     for index, line in enumerate(lines[:25]):
         if line.startswith(";Filament used:") and filament_m > 0:

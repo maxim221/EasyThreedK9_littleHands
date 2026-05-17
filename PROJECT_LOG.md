@@ -2786,3 +2786,13 @@ After each test print, append:
   - in this Marlin tree the reported hotend heater `@:127` is the full-power internal scale (`PID_MAX 255 >> 1`), so the firmware was commanding heat but the measured hotend temperature did not rise enough
   - because the fan threshold is `45C` and the hotend never reached it, this specific failure is not explained by firmware-managed fan cooling
   - Little Hands now recognizes this as firmware thermal halt, preserves the `10 mm` preheat-lift recovery marker, and does not keep trying axis-return commands until after the required power cycle
+- Failed-jog marker preservation:
+  - after a failed preheat, an ordinary manual Z jog was attempted while Marlin still did not acknowledge even `M17`
+  - the previous app logic cleared the failed-preheat-lift recovery marker before the jog was confirmed, losing the only reliable model that the nozzle had been raised by `10 mm`
+  - manual jog now clears that marker only after `run_commands_wait_ok()` succeeds; if the jog fails, the marker remains available for the guarded `Go to saved start` recovery after USB/power is restored
+- SD-file-owned M109 start:
+  - direct recovery test after power cycle succeeded with the sequence `return_from_preheat_lift` -> `G92 X0 Y0 Z0` -> `start_sd_print_from_home(MODULEBO.GCO)`
+  - `MODULEBO.GCO` then selected successfully, `M24` was accepted, and Marlin reported `T:226.52 /226.00 @:64`, confirming that the file-local `M109` heat wait worked from SD
+  - the app now mirrors that workflow for known SD files that still contain an early blocking `M109`: it does not duplicate a separate host preheat before `M24`, and lets the G-code own hotend heatup
+  - new app uploads and Cura helper exports no longer rewrite early `M109` to `M104`; old `M104`-only prepared files remain supported by a host-preheat fallback, but should be regenerated when possible
+  - failed-preheat recovery now re-declares the recovered physical start with `G92 X0 Y0 Z0` after the known `Z-10` return, because after a power cycle Marlin's logical Z may be stale even when the physical nozzle is back at start

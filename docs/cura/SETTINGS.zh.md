@@ -177,7 +177,8 @@ G1 Y95 F240 ;Move bed toward the operator
 - 没有真正的启动 `G28`
 - 开头附近包含 `G92 X0 Y0 Z0`
 - 包含热端目标温度命令，例如 `M104` / `M109`
-- 如果文件通过 Little Hands 上传或由 slicing helper 生成，SD 文件开头的 `M109` 会改写为 `M104`；Little Hands 会在 SD 启动前用 host-side `M109` 执行阻塞式热端预热
+- 早期阻塞 `M109` 应保留在 SD 文件中；Little Hands 会启动 SD 文件并让 G-code 自己完成热端加热等待，而不会在 `M24` 前重复 host preheat
+- 旧的已准备 `M104`-only 文件最好重新生成；应用保留 host-preheat fallback 只是为了兼容它们
 - bed target 保持 `0C`
 - slicer bounds 正常，并位于 `100 x 100 mm` 平台内
 - 高度位于 `100 mm` 内

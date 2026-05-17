@@ -139,8 +139,24 @@ def main() -> int:
         failures,
     )
     require(
-        app.count("_preheat_hotend_for_sd_start_with_clearance(target)") >= 3,
-        "Every GUI SD-start path must use the clearance-aware preheat wrapper.",
+        "_preheat_hotend_or_defer_to_sd_file" in app
+        and app.count("_preheat_hotend_or_defer_to_sd_file(") >= 4
+        and "hotend будет греться внутри G-code" in app
+        and "_file_owns_blocking_hotend_wait" in app,
+        "Every GUI SD-start path must either use clearance-aware host preheat or defer to a file-local blocking M109.",
+        failures,
+    )
+    require(
+        "replace_early_m109_with_m104" not in slicer
+        and "non-blocking heat target" not in slicer
+        and "non-blocking heat target" not in app,
+        "New K9 G-code must keep early M109 in the SD file instead of rewriting it to M104.",
+        failures,
+    )
+    require_regex(
+        app,
+        r"if use_preheat_lift_recovery:.*?sdtool\.return_from_preheat_lift.*?sdtool\.set_current_home_zero",
+        "Failed-preheat recovery must re-declare G92 X0 Y0 Z0 after undoing the known lift.",
         failures,
     )
     require_regex(
@@ -150,6 +166,14 @@ def main() -> int:
         failures,
     )
     require("sdtool.run_commands_wait_ok" in app, "App jog/level service moves must use ok-waiting serial commands.", failures)
+    require_regex(
+        app,
+        r"preheat_lift_recovery_before_jog = self\.preheat_lift_recovery_available.*?"
+        r"except Exception:.*?preheat_lift_recovery_before_jog.*?"
+        r"raise\s+.*?self\._clear_preheat_lift_recovery\(save=False\)",
+        "Failed manual jog must preserve the failed-preheat-lift marker until a move is acknowledged.",
+        failures,
+    )
     require(
         "elif self._can_return_from_known_post_print_pose() and not self._home_is_trusted():" in app,
         "Post-print M114 recovery must not override a still-trusted live session zero.",
