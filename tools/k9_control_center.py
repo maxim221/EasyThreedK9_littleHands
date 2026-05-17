@@ -407,6 +407,7 @@ class K9ControlCenter:
         self.fw_var = tk.StringVar(value="")
         self.progress_var = tk.StringVar(value="Печать: простой")
         self.print_start_var = tk.StringVar(value="Старт: -")
+        self.print_expected_finish_var = tk.StringVar(value="Ожидаемое завершение: -")
         self.print_known_time_var = tk.StringVar(value="Известное время: -")
         self.busy_var = tk.StringVar(value="USB: idle")
         self.header_marquee_var = tk.StringVar(value="")
@@ -885,6 +886,7 @@ class K9ControlCenter:
             "bounds": bounds,
             "hotend_target": info.get("hotend_target"),
             "has_blocking_m109": bool(info.get("has_blocking_m109")),
+            "cura_estimate_s": info.get("cura_estimate_s"),
         }
         for field in ("last_duration_s", "last_started_at", "last_finished_at", "last_print_display"):
             if field in previous_profile:
@@ -930,32 +932,125 @@ class K9ControlCenter:
         )
         self.sd_gcode_profiles[key] = profile
 
+    def _duration_from_profile_field(self, profile: dict[str, object], field: str) -> float | None:
+        value = profile.get(field)
+        try:
+            duration_s = float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+        if duration_s is None or duration_s < 0:
+            return None
+        return duration_s
+
+    def _cura_estimate_from_profile(self, profile: dict[str, object]) -> float | None:
+        estimate_s = self._duration_from_profile_field(profile, "cura_estimate_s")
+        if estimate_s is not None:
+            return estimate_s
+        source_raw = profile.get("source")
+        if not source_raw:
+            return None
+        source = Path(str(source_raw)).expanduser()
+        if not source.is_file():
+            return None
+        info = self._inspect_gcode_file(source)
+        estimate = info.get("cura_estimate_s")
+        if isinstance(estimate, (int, float)) and estimate >= 0:
+            profile["cura_estimate_s"] = float(estimate)
+            self._save_print_state("idle", force=True)
+            return float(estimate)
+        return None
+
+    def _observed_cura_time_factor(self) -> float:
+        ratios: list[float] = []
+        for profile in self.sd_gcode_profiles.values():
+            if not isinstance(profile, dict):
+                continue
+            actual_s = self._duration_from_profile_field(profile, "last_duration_s")
+            cura_s = self._cura_estimate_from_profile(profile)
+            if actual_s is None or cura_s is None or cura_s <= 0:
+                continue
+            ratio = actual_s / cura_s
+            # Ignore interrupted or obviously stale runs; they poison ETA more than they help.
+            if actual_s >= 1800 and 0.75 <= ratio <= 1.50:
+                ratios.append(ratio)
+        if not ratios:
+            return 1.03
+        ratios.sort()
+        return ratios[len(ratios) // 2]
+
+    def _estimated_print_duration_text(self, profile: dict[str, object]) -> tuple[float | None, str]:
+        actual_s = self._duration_from_profile_field(profile, "last_duration_s")
+        lang = self.lang_var.get().strip() or "ru"
+        if actual_s is not None:
+            source = {
+                "ru": "по прошлой печати",
+                "en": "from last print",
+                "zh": "按上次打印",
+            }.get(lang, "по прошлой печати")
+            return actual_s, source
+
+        cura_s = self._cura_estimate_from_profile(profile)
+        if cura_s is None:
+            return None, ""
+        factor = self._observed_cura_time_factor()
+        source = {
+            "ru": "Cura с поправкой",
+            "en": "Cura adjusted",
+            "zh": "Cura 修正",
+        }.get(lang, "Cura с поправкой")
+        return cura_s * factor, source
+
+    def _expected_finish_time_text(self, sd_path: str | None, display: str | None = None) -> str:
+        if not sd_path or not self.current_print_start_ts:
+            return "-"
+        profile = self._profile_for_print(sd_path, display or sd_path)
+        if not profile:
+            return "-"
+        duration_s, source = self._estimated_print_duration_text(profile)
+        if duration_s is None:
+            return "-"
+        finish_ts = self.current_print_start_ts + duration_s
+        now = time.time()
+        if time.strftime("%Y-%m-%d", time.localtime(finish_ts)) == time.strftime("%Y-%m-%d", time.localtime(now)):
+            finish_text = time.strftime("%H:%M", time.localtime(finish_ts))
+        else:
+            finish_text = time.strftime("%Y-%m-%d %H:%M", time.localtime(finish_ts))
+        return f"{finish_text} ({source})" if source else finish_text
+
     def _known_print_time_text(self, sd_path: str | None, display: str | None = None) -> str:
         if not sd_path:
             return "-"
         profile = self._profile_for_print(sd_path, display or sd_path)
         if not profile:
             return "-"
-        duration = profile.get("last_duration_s")
-        try:
-            duration_s = float(duration) if duration is not None else None
-        except (TypeError, ValueError):
-            duration_s = None
-        if duration_s is None:
-            return "-"
+        duration_s = self._duration_from_profile_field(profile, "last_duration_s")
+        cura_estimate_s = self._cura_estimate_from_profile(profile)
+        lang = self.lang_var.get().strip() or "ru"
         finished = profile.get("last_finished_at")
         try:
             finished_text = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(finished))) if finished else ""
         except (TypeError, ValueError, OSError):
             finished_text = ""
-        base = self._format_duration_short(duration_s)
-        if not finished_text:
+        pieces: list[str] = []
+        if duration_s is not None:
+            actual_label = {
+                "ru": "факт",
+                "en": "actual",
+                "zh": "实际",
+            }.get(lang, "факт")
+            pieces.append(f"{actual_label}: {self._format_duration_short(duration_s)}")
+        if cura_estimate_s is not None:
+            pieces.append(f"Cura: {self._format_duration_short(cura_estimate_s)}")
+        if not pieces:
+            return "-"
+        base = "; ".join(pieces)
+        if not finished_text or duration_s is None:
             return base
         suffix = {
             "ru": "последняя",
             "en": "last",
             "zh": "上次",
-        }.get(self.lang_var.get().strip() or "ru", "последняя")
+        }.get(lang, "последняя")
         return f"{base} ({suffix}: {finished_text})"
 
     def _update_known_print_time_label(self, sd_path: str | None = None, display: str | None = None) -> None:
@@ -970,6 +1065,14 @@ class K9ControlCenter:
                 sd_path = self._selected_print_sd_path()
                 display = self._selected_sd_display() or sd_path
         self.print_known_time_var.set(self._format_label_value("known_print_time", self._known_print_time_text(sd_path, display)))
+
+    def _update_expected_finish_label(self) -> None:
+        if self.current_print_file == "-":
+            self.print_expected_finish_var.set(self._format_label_value("expected_finish", "-"))
+            return
+        display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
+        text = self._expected_finish_time_text(self.current_print_file, display)
+        self.print_expected_finish_var.set(self._format_label_value("expected_finish", text))
 
     def _hotend_target_for_print(self, sd_path: str, display: str, source: Path | None = None) -> float:
         profile = self._profile_for_print(sd_path, display, source)
@@ -1401,6 +1504,7 @@ class K9ControlCenter:
             "selected_sd": {"ru": "Выбрано на SD", "en": "Selected on SD", "zh": "SD 已选择"},
             "active_sd": {"ru": "Печатается", "en": "Printing", "zh": "正在打印"},
             "start_time": {"ru": "Старт", "en": "Start", "zh": "开始时间"},
+            "expected_finish": {"ru": "Ожидаемое завершение", "en": "Expected finish", "zh": "预计完成"},
             "known_print_time": {"ru": "Известное время", "en": "Known time", "zh": "已知耗时"},
             "choose_gcode_or_firmware": {"ru": "Выбери G-code или прошивку.", "en": "Choose a G-code file or firmware.", "zh": "请选择 G-code 或固件文件。"},
             "sd_empty": {"ru": "SD-карта читается, но список файлов пуст.", "en": "The SD card is readable, but the file list is empty.", "zh": "SD 卡可读取，但文件列表为空。"},
@@ -1434,6 +1538,7 @@ class K9ControlCenter:
             self.print_start_var.set(self._format_label_value("start_time", time.strftime("%H:%M:%S", time.localtime(self.current_print_start_ts))))
         else:
             self.print_start_var.set(self._format_label_value("start_time", "-"))
+        self._update_expected_finish_label()
         self._update_known_print_time_label()
         if not self.files_status_var.get() or self.files_status_var.get() == "Выбери G-code или прошивку.":
             self.files_status_var.set(self._t("choose_gcode_or_firmware"))
@@ -1978,27 +2083,28 @@ class K9ControlCenter:
         self.sd_frame = sd_frame
         sd_frame.columnconfigure(0, weight=1)
         sd_frame.columnconfigure(1, weight=0)
-        sd_frame.rowconfigure(6, weight=1)
+        sd_frame.rowconfigure(7, weight=1)
 
         ttk.Label(sd_frame, textvariable=self.selected_sd_var).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(sd_frame, textvariable=self.active_sd_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         ttk.Label(sd_frame, textvariable=self.print_start_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
-        ttk.Label(sd_frame, textvariable=self.print_known_time_var).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        ttk.Label(sd_frame, textvariable=self.print_expected_finish_var).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        ttk.Label(sd_frame, textvariable=self.print_known_time_var).grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.sd_notice_label = tk.Label(sd_frame, textvariable=self.sd_notice_var, anchor="w", justify="left", wraplength=320)
-        self.sd_notice_label.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.sd_notice_label.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         self.sd_printable_label = ttk.Label(sd_frame, text="Файлы для печати")
-        self.sd_printable_label.grid(row=5, column=0, sticky="w", pady=(6, 0))
+        self.sd_printable_label.grid(row=6, column=0, sticky="w", pady=(6, 0))
         self.sd_print_listbox = tk.Listbox(sd_frame, height=4, exportselection=False)
-        self.sd_print_listbox.grid(row=6, column=0, sticky="nsew", pady=(4, 0))
+        self.sd_print_listbox.grid(row=7, column=0, sticky="nsew", pady=(4, 0))
         self.sd_print_listbox.bind("<Double-1>", lambda _event: self.start_selected_print_with_home())
         self.sd_print_listbox.bind("<<ListboxSelect>>", lambda _event: self._on_sd_listbox_select("print"))
         sd_print_scroll = ttk.Scrollbar(sd_frame, orient="vertical", command=self.sd_print_listbox.yview)
-        sd_print_scroll.grid(row=6, column=1, sticky="ns", pady=(4, 0))
+        sd_print_scroll.grid(row=7, column=1, sticky="ns", pady=(4, 0))
         self.sd_print_listbox.configure(yscrollcommand=sd_print_scroll.set)
 
         buttons = ttk.Frame(sd_frame)
-        buttons.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        buttons.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         for idx in range(3):
             buttons.columnconfigure(idx, weight=1)
         self.refresh_sd_button = ttk.Button(buttons, text="Обновить список", command=self.refresh_sd_files)
@@ -2345,6 +2451,7 @@ class K9ControlCenter:
             self.print_start_var.set(self._format_label_value("start_time", time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))))
         else:
             self.print_start_var.set(self._format_label_value("start_time", "-"))
+        self._update_expected_finish_label()
         self._update_known_print_time_label()
 
         lines = [
@@ -3639,6 +3746,7 @@ class K9ControlCenter:
             "read_error": "",
             "line_count": 0,
             "file_size": 0,
+            "cura_estimate_s": None,
             "has_g28": False,
             "first_g28_line": None,
             "has_hotend_target": False,
@@ -3700,6 +3808,13 @@ class K9ControlCenter:
 
         for line_number, line in enumerate(lines, start=1):
             stripped = line.strip()
+            if stripped.startswith(";TIME:") and info["cura_estimate_s"] is None:
+                match = re.match(r";TIME:\s*([-+]?\d+(?:\.\d+)?)\s*$", stripped, re.IGNORECASE)
+                if match:
+                    try:
+                        info["cura_estimate_s"] = max(0.0, float(match.group(1)))
+                    except ValueError:
+                        pass
             if stripped.startswith(";TIME_ELAPSED:") or stripped.startswith(";End of Gcode"):
                 end_phase = True
             if stripped.startswith(";Filament used:"):
@@ -4872,6 +4987,48 @@ class K9ControlCenter:
             and self._port()
         )
 
+    def _rehydrate_known_post_print_pose_from_state(self) -> bool:
+        if self._can_return_from_known_post_print_pose():
+            return True
+        if not PRINT_STATE_PATH.is_file():
+            return False
+        try:
+            data = json.loads(PRINT_STATE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        if not isinstance(data, dict):
+            return False
+        try:
+            updated_ts = float(data.get("updated_ts") or 0.0)
+        except (TypeError, ValueError):
+            return False
+        if updated_ts and (time.time() - updated_ts) > PRINT_STATE_MAX_AGE_SEC:
+            return False
+        if str(data.get("phase") or "") != "completed" or not data.get("post_print_recovery_required"):
+            return False
+        pose = data.get("post_print_pose")
+        if not (isinstance(pose, list) and len(pose) == 3):
+            return False
+        try:
+            restored_pose = (float(pose[0]), float(pose[1]), float(pose[2]))
+        except (TypeError, ValueError):
+            return False
+        self.post_print_pose = restored_pose
+        self.post_print_pose_known = True
+        self.post_print_recovery_required = True
+        self.bed_clear_before_go_start_required = bool(data.get("bed_clear_before_go_start_required", True))
+        self._set_home_trust(
+            HOME_TRUST_INVALID,
+            "post-print pose restored from persistent state",
+            log_change=True,
+        )
+        self.log(
+            "Восстановил послепечатную позу из локального state-файла: "
+            f"X{restored_pose[0]:.2f} Y{restored_pose[1]:.2f} Z{restored_pose[2]:.2f}. "
+            "Можно выполнить guarded 'К старту' после подтверждения, что модель снята."
+        )
+        return self._can_return_from_known_post_print_pose()
+
     def _can_return_from_predicted_print_end_pose(self) -> bool:
         return bool(
             self._port()
@@ -5142,6 +5299,8 @@ class K9ControlCenter:
         use_post_print_pose = False
         post_print_pose = self.post_print_pose
         use_predicted_print_end_pose = False
+        if not self._home_is_trusted():
+            self._rehydrate_known_post_print_pose_from_state()
         if use_stopped_print_pose:
             self.log(
                 "Выполняю recovery к старту после остановленной печати: использую позицию, "

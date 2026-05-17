@@ -2742,3 +2742,18 @@ After each test print, append:
   - it does not send USB commands; it only records that the user confirmed normal completion, model removal, and no manual axis movement
   - after confirmation, Little Hands clears the stale active print marker but keeps the predicted final pose so guarded `Go to start` can return from the expected print-end point
   - this operator-confirmed predicted recovery state is persisted across app restarts
+
+## 2026-05-17 Sleep/Wake Print-End Recovery And Time Estimates
+
+- Field observation:
+  - the computer slept while an SD print continued and finished normally
+  - after wake, Little Hands played the completion sound and ran the post-print presentation move, capturing `M114` at `X95 Y95 Z39`
+  - a later USB re-enumeration invalidated live home trust, and the open window could refuse `Go to start` even though the persistent state file still contained the safe post-print pose
+- Fix:
+  - `Go to start` now rehydrates a completed-print `M114` pose from `little_hands_print_state.json` before refusing recovery
+  - this keeps the guarded post-print return available after sleep/wake or USB drop, as long as the state is still fresh and explicitly marked `completed`
+  - after a manual terminal recovery to `X0 Y0 Z0`, the local state must be marked `returned-to-start` so the UI cannot perform the same recovery twice
+- Time estimate improvement:
+  - Little Hands parses Cura `;TIME:<seconds>` from uploaded/known G-code files and stores it in the SD profile
+  - the SD panel shows `Expected finish` from print start plus either the previous real duration for that file or Cura time adjusted by observed successful-print ratios
+  - the known-time line now shows both real duration and Cura estimate when available
