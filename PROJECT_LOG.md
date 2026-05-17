@@ -2766,3 +2766,8 @@ After each test print, append:
   - the manual-control return button is now labeled `К сохранённому старту` / `Go to saved start`
   - the SD-panel post-print recovery button is now labeled `После печати: к старту` / `After print: return`
   - the rename keeps both buttons on the same guarded recovery implementation while making their intended context clear in the UI
+- Failed-preheat recovery fix:
+  - observed a real failed SD-start preheat where Little Hands lifted Z by `10 mm`, hotend stayed near the warm-bed temperature, and Marlin stopped acknowledging the automatic relative Z-down return
+  - the app now preserves a dedicated failed-preheat-lift recovery marker, including through a following `Stop`, instead of losing the only useful model
+  - `К сохранённому старту` / `Go to saved start` can now offer a guarded retry that lowers Z by the same known preheat-lift after the operator confirms that print did not start and axes were not moved by hand
+  - manual jog, motor-off, hard stop, and newly saved start clear this marker so stale recovery cannot be reused blindly

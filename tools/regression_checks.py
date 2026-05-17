@@ -101,6 +101,19 @@ def main() -> int:
         failures,
     )
     require(
+        "preheat_lift_recovery_available" in app
+        and "_confirm_failed_preheat_lift_recovery" in app
+        and "preheat-lift-failed" in app,
+        "Failed preheat lift must leave a guarded recovery marker instead of losing the known Z-lift.",
+        failures,
+    )
+    require(
+        "failed preheat lift is still the best recovery model" in app
+        and "опустить Z на известный preheat-lift" in app,
+        "Stop after a failed preheat lift must preserve the known lift recovery path.",
+        failures,
+    )
+    require(
         "PRINT_PREHEAT_NO_RISE_GRACE_SEC = 75.0" in app
         and "PRINT_PREHEAT_MIN_RISE_C = 8.0" in app
         and "per_command_timeout=12.0" in app,

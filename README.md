@@ -86,6 +86,7 @@ This means:
   - re-check the start pose
   - press `Save start` again
 - after a stopped print, `Go to saved start` is allowed only through the explicit recovery prompts; if the app offers a live-session return because `M114` was not captured, clear the bed first and press `Save start` only after visually confirming the nozzle is back at the real start pose
+- if hotend preheat fails after Little Hands lifted Z for clearance, `Go to saved start` can offer a guarded retry that lowers Z by the same known preheat lift; accept it only if the print did not start and the axes were not moved by hand
 - if the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet
 - after a normal print finish, the SD panel `After print: return` button runs the same guarded recovery path as `Go to saved start` and requires a clear bed
 

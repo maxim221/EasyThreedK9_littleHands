@@ -254,6 +254,7 @@ MANUAL_TEXT = textwrap.dedent(
 
     Если печать остановлена или сорвалась
     - "Стоп" — это управляемая остановка, а не аварийный путь. Он пытается поставить печать на паузу, снять M114, безопасно поднять Z, остановить SD-печать и выключить нагрев.
+    - Если сорвался предпрогрев после автоматического подъёма Z, "К сохранённому старту" предложит отдельный guarded возврат: опустить Z обратно на тот же известный preheat-lift. Подтверждай только если голову/стол после сбоя не двигали руками.
     - После управляемого Stop сначала убери неудачный пластик, затем нажимай "К сохранённому старту" или "После печати: к старту".
     - "Жёсткий стоп" нужен для срочных остановок. После него доверие к home сбрасывается, стартовую позу нужно заново выставить вручную.
 
@@ -373,6 +374,7 @@ MANUAL_TEXTS = {
 
         If a print is stopped or fails
         - "Stop" is a controlled stop, not the emergency path. It tries to pause, capture M114, lift safely, stop SD printing, and turn heaters off.
+        - If preheat fails after the automatic Z lift, "Go to saved start" offers a dedicated guarded return: lower Z back by the same known preheat lift. Confirm only if the head/bed were not moved by hand after the failure.
         - After a controlled stop, remove the failed plastic before pressing "Go to saved start" or "After print: return".
         - "Hard stop" is for urgent stop situations. After hard stop, home trust is invalid and the start pose must be established again manually.
 
@@ -463,6 +465,7 @@ MANUAL_TEXTS = {
 
         如果打印被停止或失败
         - "Stop" 是受控停止，不是紧急停止。它会尝试暂停、读取 M114、安全抬 Z、停止 SD 打印并关闭加热。
+        - 如果自动抬 Z 后预热失败，"回到保存起点" 会提供专门的受保护返回：按同一个已知 preheat lift 把 Z 降回去。只有失败后没有手动移动喷头/平台时才确认。
         - 受控停止后，请先清除失败塑料，再点击 "回到保存起点" 或 "打印后返回"。
         - "Hard stop" 用于紧急停止。硬停止后 home 信任无效，必须重新手动建立起点。
 
@@ -584,6 +587,8 @@ class K9ControlCenter:
         self.stopped_print_pose: tuple[float, float, float] | None = None
         self.stopped_print_display = "-"
         self.stopped_print_live_return_available = False
+        self.preheat_lift_recovery_available = False
+        self.preheat_lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
         self.predicted_print_end_valid = False
         self.predicted_print_end_file = "-"
         self.predicted_print_end_display = "-"
@@ -872,6 +877,16 @@ class K9ControlCenter:
                 self.bed_clear_before_go_start_required = True
                 self.home_trust = HOME_TRUST_UNCERTAIN
                 self.home_trust_reason = "stopped print live return marker restored from persistent state"
+        if data.get("preheat_lift_recovery_available"):
+            try:
+                lift_mm = float(data.get("preheat_lift_mm") or sdtool.SAFE_HOME_CLEARANCE_Z)
+            except (TypeError, ValueError):
+                lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
+            if 0.0 < lift_mm <= 20.0:
+                self.preheat_lift_recovery_available = True
+                self.preheat_lift_mm = lift_mm
+                self.home_trust = HOME_TRUST_UNCERTAIN
+                self.home_trust_reason = "failed preheat lift recovery marker restored from persistent state"
         if (
             should_keep_predicted_end_for_stale_active_restore(
                 phase=phase,
@@ -969,6 +984,8 @@ class K9ControlCenter:
             "stopped_print_pose": list(self.stopped_print_pose) if self.stopped_print_pose is not None else None,
             "stopped_print_display": self.stopped_print_display,
             "stopped_print_live_return_available": self.stopped_print_live_return_available,
+            "preheat_lift_recovery_available": self.preheat_lift_recovery_available,
+            "preheat_lift_mm": self.preheat_lift_mm,
             "sd_gcode_profiles": self.sd_gcode_profiles,
         }
 
@@ -994,6 +1011,12 @@ class K9ControlCenter:
         self.predicted_print_end_x = 95.0
         self.predicted_print_end_y = 95.0
         self.predicted_print_end_z = None
+        if save:
+            self._save_print_state("idle", force=True)
+
+    def _clear_preheat_lift_recovery(self, *, save: bool = False) -> None:
+        self.preheat_lift_recovery_available = False
+        self.preheat_lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
         if save:
             self._save_print_state("idle", force=True)
 
@@ -1357,6 +1380,9 @@ class K9ControlCenter:
         self._post("log", "Сопло сейчас в сохранённом старте: поднимаю Z перед предпрогревом, затем вернусь к старту перед M24.")
         out = sdtool.lift_from_saved_start_for_preheat(self._port(), self._baud())
         self.at_saved_start_pose = False
+        self.preheat_lift_recovery_available = True
+        self.preheat_lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
+        self._save_print_state("preheat-lifted", force=True)
         useful_lines = [
             line.strip()
             for line in out.splitlines()
@@ -1378,11 +1404,16 @@ class K9ControlCenter:
             out = sdtool.return_from_preheat_lift(self._port(), self._baud(), per_command_timeout=12.0)
         except Exception as exc:
             self.at_saved_start_pose = False
+            self.preheat_lift_recovery_available = True
+            self.preheat_lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
             self._set_home_trust(HOME_TRUST_UNCERTAIN, "failed preheat left lifted Z; return to start failed", log_change=True)
+            self._save_print_state("preheat-lift-failed", force=True)
             self._post(
                 "log",
                 f"Не удалось вернуть сопло к старту после сорванного предпрогрева: {exc}. "
-                "Не нажимай 'Запомнить старт' в поднятой позиции; сначала верни Z к столу вручную или после power cycle.",
+                "Не нажимай 'Запомнить старт' в поднятой позиции. "
+                "После восстановления USB можно нажать 'К сохранённому старту' и подтвердить guarded возврат: "
+                "Little Hands опустит Z на тот же известный preheat-lift.",
             )
             return
         useful_lines = [
@@ -1393,6 +1424,8 @@ class K9ControlCenter:
         if useful_lines:
             self._post("log", "\n".join(useful_lines))
         self.at_saved_start_pose = True
+        self._clear_preheat_lift_recovery(save=False)
+        self._save_print_state("returned-to-start", force=True)
         self._post(
             "log",
             "Сопло опущено обратно после сорванного предпрогрева тем же относительным ходом. "
@@ -1497,6 +1530,7 @@ class K9ControlCenter:
                 or self.bed_clear_before_go_start_required
                 or self.stopped_print_pose is not None
                 or self.stopped_print_live_return_available
+                or self.preheat_lift_recovery_available
                 or self._has_predicted_print_end_recovery_model()
             )
         )
@@ -3275,6 +3309,7 @@ class K9ControlCenter:
         self.refresh_sd_files()
 
     def _mark_sd_start_sent(self, path: str, display: str) -> None:
+        self._clear_preheat_lift_recovery(save=False)
         self.current_print_file = path
         self.current_print_display = display
         start_ts = time.time()
@@ -3695,6 +3730,7 @@ class K9ControlCenter:
             or self.bed_clear_before_go_start_required
             or self.stopped_print_pose is not None
             or self.stopped_print_live_return_available
+            or self.preheat_lift_recovery_available
             or self._has_predicted_print_end_recovery_model()
             or self._home_is_trusted()
         )
@@ -4993,6 +5029,14 @@ class K9ControlCenter:
                     "print stopped; physical position must be recovered or start must be re-saved",
                     log_change=True,
                 )
+                if self.preheat_lift_recovery_available and stop_pose is None:
+                    self._set_home_trust(
+                        HOME_TRUST_UNCERTAIN,
+                        "failed preheat lift is still the best recovery model",
+                        log_change=True,
+                    )
+                elif stop_pose is not None:
+                    self._clear_preheat_lift_recovery(save=False)
                 self.stopped_print_pose = stop_pose
                 self.stopped_print_display = stopped_display or "-"
                 self.stopped_print_live_return_available = bool(
@@ -5028,12 +5072,20 @@ class K9ControlCenter:
                     "(X/Y из позиции прерывания, Z из управляемого post-stop подъёма, если он подтвердился).",
                 )
             else:
-                self._post(
-                    "log",
-                    "Позицию остановки до M524 получить не удалось. Если питание/порт ещё не перезапускались, "
-                    "'К сохранённому старту' попробует live-возврат по текущей Marlin-сессии; после него обязательно проверь "
-                    "физическую позу и нажми 'Запомнить старт'. После power cycle такой live-возврат уже недоступен.",
-                )
+                if self.preheat_lift_recovery_available:
+                    self._post(
+                        "log",
+                        "Позицию остановки до M524 получить не удалось, но сохранён marker сорванного предпрогрева: "
+                        "'К сохранённому старту' предложит опустить Z на известный preheat-lift после подтверждения, "
+                        "что голову/стол не двигали руками.",
+                    )
+                else:
+                    self._post(
+                        "log",
+                        "Позицию остановки до M524 получить не удалось. Если питание/порт ещё не перезапускались, "
+                        "'К сохранённому старту' попробует live-возврат по текущей Marlin-сессии; после него обязательно проверь "
+                        "физическую позу и нажми 'Запомнить старт'. После power cycle такой live-возврат уже недоступен.",
+                    )
 
         self._run_task("Остановка печати", task)
 
@@ -5067,6 +5119,8 @@ class K9ControlCenter:
                 self.stopped_print_pose = None
                 self.stopped_print_display = "-"
                 self.stopped_print_live_return_available = False
+                self._clear_preheat_lift_recovery(save=False)
+                self._save_print_state("hard-stop", force=True)
             if out.strip():
                 self._post("log", out.strip())
             elif error_text:
@@ -5098,6 +5152,7 @@ class K9ControlCenter:
             self.post_print_pose_known = False
             self.post_print_pose = None
             self.stopped_print_live_return_available = False
+            self._clear_preheat_lift_recovery(save=False)
             self._clear_predicted_print_end()
             self._post(
                 "log",
@@ -5116,6 +5171,7 @@ class K9ControlCenter:
             self.stopped_print_pose = None
             self.stopped_print_display = "-"
             self.stopped_print_live_return_available = False
+            self._clear_preheat_lift_recovery(save=False)
             self.post_print_pose_known = False
             self.post_print_pose = None
             had_active_print = self.current_print_file != "-"
@@ -5361,6 +5417,35 @@ class K9ControlCenter:
         )
         return bool(messagebox.askyesno("Little Hands", prompt))
 
+    def _confirm_failed_preheat_lift_recovery(self) -> bool:
+        lang = self.lang_var.get().strip() or "ru"
+        lift_text = f"{self.preheat_lift_mm:g}"
+        prompt = {
+            "en": (
+                f"Little Hands lifted the nozzle by {lift_text} mm before hotend preheat, but preheat failed and "
+                "the first automatic return was not acknowledged.\n\n"
+                "Try to lower Z back by the same known relative distance?\n\n"
+                "Continue only if the print did not start, the head/bed were not moved by hand after the failure, "
+                "and there is no plastic or part under the nozzle. Keep a hand near printer power."
+            ),
+            "zh": (
+                f"Little Hands 在 hotend 预热前把喷嘴抬高了 {lift_text} mm，但预热失败，第一次自动返回没有收到确认。\n\n"
+                "尝试用相同的已知相对距离把 Z 降回去吗？\n\n"
+                "只有在打印没有开始、失败后没有手动移动喷头/平台、喷嘴下方没有塑料或模型时才继续。请把手放在电源附近。"
+            ),
+            "ru": (
+                f"Little Hands перед предпрогревом поднял сопло на {lift_text} мм, но предпрогрев сорвался, "
+                "а первый автоматический возврат не получил подтверждение.\n\n"
+                "Попробовать опустить Z обратно на тот же известный относительный ход?\n\n"
+                "Продолжай только если печать не началась, голову/стол после сбоя не двигали руками, "
+                "а под соплом нет пластика или детали. Держи руку рядом с питанием принтера."
+            ),
+        }.get(lang) or (
+            f"Little Hands поднял Z на {lift_text} мм перед сорванным предпрогревом.\n\n"
+            "Попробовать опустить Z обратно тем же относительным ходом?"
+        )
+        return bool(messagebox.askyesno("Little Hands", prompt))
+
     def _confirm_aborted_print_recovery(self, pose: tuple[float, float, float]) -> bool:
         lang = self.lang_var.get().strip() or "ru"
         pose_text = f"X{pose[0]:.2f} Y{pose[1]:.2f} Z{pose[2]:.2f}"
@@ -5442,7 +5527,12 @@ class K9ControlCenter:
         if not self._home_is_trusted():
             self._rehydrate_known_post_print_pose_from_state()
         if (
-            (self.predicted_print_end_valid or self.post_print_recovery_required or self.bed_clear_before_go_start_required)
+            (
+                self.predicted_print_end_valid
+                or self.post_print_recovery_required
+                or self.bed_clear_before_go_start_required
+                or self.preheat_lift_recovery_available
+            )
             and (not self._port() or self._selected_port_safety_error())
         ):
             self._select_single_safe_printer_port_for_recovery()
@@ -5460,15 +5550,26 @@ class K9ControlCenter:
                 "Вижу активный SD-маркер, но свежего SD-прогресса нет, home недоверенный, "
                 "а сохранённый print-end для этого файла валиден. Предлагаю guarded recovery вместо блокировки 'К сохранённому старту'."
             )
+        use_preheat_lift_recovery = False
+        if not self._home_is_trusted() and self.preheat_lift_recovery_available:
+            if not self._confirm_failed_preheat_lift_recovery():
+                return
+            use_preheat_lift_recovery = True
         use_stopped_print_pose = False
         stopped_pose = self.stopped_print_pose
-        if not self._home_is_trusted() and self.bed_clear_before_go_start_required and stopped_pose is not None:
+        if (
+            not use_preheat_lift_recovery
+            and not self._home_is_trusted()
+            and self.bed_clear_before_go_start_required
+            and stopped_pose is not None
+        ):
             if not self._confirm_aborted_print_recovery(stopped_pose):
                 return
             use_stopped_print_pose = True
         use_live_stopped_session_return = False
         if (
             not use_stopped_print_pose
+            and not use_preheat_lift_recovery
             and not self._home_is_trusted()
             and self.bed_clear_before_go_start_required
             and self.stopped_print_live_return_available
@@ -5479,6 +5580,7 @@ class K9ControlCenter:
         if (
             not use_stopped_print_pose
             and not use_live_stopped_session_return
+            and not use_preheat_lift_recovery
             and (self.post_print_recovery_required or self.bed_clear_before_go_start_required)
             and not confirm_model_removed
         ):
@@ -5487,7 +5589,12 @@ class K9ControlCenter:
         use_post_print_pose = False
         post_print_pose = self.post_print_pose
         use_predicted_print_end_pose = False
-        if use_stopped_print_pose:
+        if use_preheat_lift_recovery:
+            self.log(
+                "Выполняю recovery после сорванного предпрогрева: опускаю Z обратно на известный preheat-lift "
+                f"{self.preheat_lift_mm:g} мм относительным движением."
+            )
+        elif use_stopped_print_pose:
             self.log(
                 "Выполняю recovery к старту после остановленной печати: использую позицию, "
                 "снятую до M524, затем возвращаюсь в X0 Y0 Z0."
@@ -5522,7 +5629,11 @@ class K9ControlCenter:
                 self._clear_print_session_state("Печать: неполный print-end удалён", 0.0)
                 self.log("Неполный print-end удалён. Выставь стартовую позу вручную и нажми 'Запомнить старт'.")
             return
-        elif (self.post_print_recovery_required or self.bed_clear_before_go_start_required) and not self._home_is_trusted():
+        elif (
+            self.post_print_recovery_required
+            or self.bed_clear_before_go_start_required
+            or self.preheat_lift_recovery_available
+        ) and not self._home_is_trusted():
             msg = (
                 "После завершения или остановки печати нет надёжной сохранённой позы для автоматического возврата к старту. "
                 "Чтобы не увести сопло в модель или за край, выставь стартовую позу ручными кнопками и нажми 'Запомнить старт'."
@@ -5530,7 +5641,7 @@ class K9ControlCenter:
             self.log(msg)
             messagebox.showerror("Little Hands", msg)
             return
-        elif self.post_print_recovery_required or self.bed_clear_before_go_start_required:
+        elif self.post_print_recovery_required or self.bed_clear_before_go_start_required or self.preheat_lift_recovery_available:
             self.log(
                 "Текущая Marlin-сессия ещё хранит сохранённый ноль: возвращаюсь обычным G1 X0 Y0 Z0 "
                 "без переобъявления координат через послепечатный M114."
@@ -5541,7 +5652,9 @@ class K9ControlCenter:
 
         def task() -> None:
             try:
-                if use_stopped_print_pose:
+                if use_preheat_lift_recovery:
+                    out = sdtool.return_from_preheat_lift(self._port(), self._baud(), per_command_timeout=20.0)
+                elif use_stopped_print_pose:
                     assert stopped_pose is not None
                     out = sdtool.goto_print_home_from_predicted_end(
                         self._port(),
@@ -5575,7 +5688,9 @@ class K9ControlCenter:
             except Exception:
                 self._set_home_trust(HOME_TRUST_UNCERTAIN, "go-to-start failed; physical position is not trusted", log_change=True)
                 raise
-            if use_stopped_print_pose or use_post_print_pose or use_predicted_print_end_pose:
+            if use_preheat_lift_recovery:
+                self._set_home_trust(HOME_TRUST_TRUSTED, "returned from failed preheat lift", log_change=True)
+            elif use_stopped_print_pose or use_post_print_pose or use_predicted_print_end_pose:
                 self._set_home_trust(HOME_TRUST_TRUSTED, "recovered to saved start", log_change=True)
             elif use_live_stopped_session_return:
                 self._set_home_trust(
@@ -5590,9 +5705,16 @@ class K9ControlCenter:
             self.stopped_print_pose = None
             self.stopped_print_display = "-"
             self.stopped_print_live_return_available = False
+            self._clear_preheat_lift_recovery(save=False)
             self.post_print_pose_known = False
             self.post_print_pose = None
-            if use_stopped_print_pose:
+            if use_preheat_lift_recovery:
+                self._clear_predicted_print_end(save=False)
+                self._save_print_state("recovered-from-preheat-lift", force=True)
+                self._post("progress", ("Recovery preheat-lift: старт восстановлен", 0.0))
+                self._post("log", out.strip() or "Recovery после сорванного предпрогрева выполнен: Z опущен обратно к сохранённому старту")
+                self._post("log", "Проверь физически, что сопло снова в стартовой высоте; если всё верно, можно запускать следующую печать.")
+            elif use_stopped_print_pose:
                 self._clear_predicted_print_end(save=False)
                 self._save_print_state("recovered-to-start", force=True)
                 self._post("progress", ("Recovery после стопа: старт восстановлен", 0.0))
@@ -5659,6 +5781,7 @@ class K9ControlCenter:
             self.post_print_pose_known = False
             self.post_print_pose = None
             self.stopped_print_live_return_available = False
+            self._clear_preheat_lift_recovery(save=False)
             self._clear_predicted_print_end()
             out = sdtool.query_command(self._port(), self._baud(), "M18", wait_before_read=0.4, read_seconds=1.0)
             self._post("log", out.strip() or "Моторы отключены")
@@ -5696,6 +5819,7 @@ class K9ControlCenter:
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
             self.post_print_pose = None
+            self._clear_preheat_lift_recovery(save=False)
             self._clear_predicted_print_end()
             self._post(
                 "log",
