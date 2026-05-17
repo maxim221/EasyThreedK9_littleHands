@@ -61,7 +61,7 @@ DEFAULT_PRINT_HOTEND_TARGET_C = 218.0
 PRINT_PREHEAT_BLOCKING_M109_EXTRA_C = 7.0
 PRINT_PREHEAT_MARGIN_C = 2.0
 PRINT_PREHEAT_TIMEOUT_SEC = 420.0
-PRINT_PREHEAT_POLL_SEC = 3.0
+PRINT_PREHEAT_NO_REPLY_GRACE_SEC = 60.0
 PRINT_PREHEAT_TARGET_GRACE_SEC = 25.0
 PRINT_PREHEAT_HEATER_ZERO_GRACE_SEC = 45.0
 PRINT_PREHEAT_NO_RISE_GRACE_SEC = 75.0
@@ -1243,7 +1243,7 @@ class K9ControlCenter:
         target = float(target)
         if target <= 0:
             return
-        self._post("log", f"Предпрогрев hotend до {target:.0f}C перед SD-стартом.")
+        self._post("log", f"Предпрогрев hotend до {target:.0f}C перед SD-стартом через M109.")
         self._post("files-status", f"Предпрогрев hotend: цель {target:.0f}C")
         self._post("progress", (f"Предпрогрев hotend: цель {target:.0f}C", 0.0))
         deadline = time.monotonic() + PRINT_PREHEAT_TIMEOUT_SEC
@@ -1251,6 +1251,7 @@ class K9ControlCenter:
         last_temp: float | None = None
         first_temp: float | None = None
         first_temp_ts = 0.0
+        last_reply_ts = 0.0
         target_zero_since = 0.0
         heater_zero_since = 0.0
         heater_positive_seen = False
@@ -1264,10 +1265,22 @@ class K9ControlCenter:
             hotend_off_sent = True
             try:
                 if ser is not None:
+                    sdtool.send_line(ser, "M108")
+                    time.sleep(0.2)
+                    sdtool.read_for(ser, 0.4)
                     sdtool.send_line(ser, "M104 S0")
                     time.sleep(0.2)
                     sdtool.read_for(ser, 0.5)
                 else:
+                    sdtool.query_command(
+                        self._port(),
+                        self._baud(),
+                        "M108",
+                        wait_before_read=0.2,
+                        read_seconds=0.4,
+                        sync=False,
+                        reset_input=False,
+                    )
                     sdtool.query_command(
                         self._port(),
                         self._baud(),
@@ -1281,21 +1294,37 @@ class K9ControlCenter:
                 pass
 
         try:
-            with sdtool.open_serial(self._port(), self._baud(), timeout=0.5, reset_input=True) as ser:
+            with sdtool.open_serial(self._port(), self._baud(), timeout=1.0, reset_input=True) as ser:
                 sdtool.sync_ascii(ser)
                 sdtool.send_line(ser, "T0")
                 time.sleep(0.2)
-                sdtool.send_line(ser, f"M104 S{target:.0f}")
-                time.sleep(0.4)
-                sdtool.read_for(ser, 0.8)
+                sdtool.read_for(ser, 0.4)
+                try:
+                    ser.reset_input_buffer()
+                except Exception:
+                    pass
+                sdtool.send_line(ser, f"M109 S{target:.0f}")
+                last_reply_ts = time.monotonic()
 
                 while time.monotonic() < deadline:
-                    sdtool.send_line(ser, "M105")
-                    time.sleep(0.25)
-                    temp_reply = sdtool.read_for(ser, 1.0)
+                    raw = ser.readline()
+                    now = time.monotonic()
+                    if not raw:
+                        if now - last_reply_ts >= PRINT_PREHEAT_NO_REPLY_GRACE_SEC:
+                            send_hotend_off(ser)
+                            raise RuntimeError(
+                                "Hotend preheat M109 не даёт температурных строк и не отвечает. "
+                                "Нагрев выключен командой M108/M104 S0; нужен power cycle принтера перед новой попыткой."
+                            )
+                        continue
+                    temp_reply = raw.decode("utf-8", "replace")
+                    last_reply_ts = now
+                    lowered_reply = temp_reply.lower()
+                    if "error:" in lowered_reply or "printer halted" in lowered_reply or "kill()" in lowered_reply:
+                        send_hotend_off(ser)
+                        raise RuntimeError(f"Marlin сообщил ошибку во время M109 preheat: {temp_reply.strip()}")
                     match = TEMP_RE.search(temp_reply)
                     if match:
-                        now = time.monotonic()
                         current = float(match.group(1))
                         seen_target = float(match.group(2))
                         last_temp = current
@@ -1314,7 +1343,7 @@ class K9ControlCenter:
                         if now - last_logged >= 8.0:
                             last_logged = now
                             self._post("log", f"Предпрогрев: {current:.1f}/{seen_target:.0f}C{heater_text}")
-                        if current >= target - PRINT_PREHEAT_MARGIN_C:
+                        if current >= target - PRINT_PREHEAT_MARGIN_C and "ok" in lowered_reply:
                             self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
                             self._post("log", f"Предпрогрев завершён: {current:.1f}/{seen_target:.0f}C{heater_text}. Запускаю SD-файл.")
                             return
@@ -1323,8 +1352,8 @@ class K9ControlCenter:
                             if now - target_zero_since >= PRINT_PREHEAT_TARGET_GRACE_SEC:
                                 send_hotend_off(ser)
                                 raise RuntimeError(
-                                    "Hotend не принял цель нагрева перед SD-стартом: M105 показывает /0C. "
-                                    "Нагрев выключен командой M104 S0; нужен power cycle принтера перед новой попыткой."
+                                    "Hotend не принял цель нагрева перед SD-стартом: M109 сообщает /0C. "
+                                    "Нагрев выключен командой M108/M104 S0; нужен power cycle принтера перед новой попыткой."
                                 )
                         else:
                             target_zero_since = 0.0
@@ -1340,7 +1369,7 @@ class K9ControlCenter:
                                 send_hotend_off(ser)
                                 raise RuntimeError(
                                     f"Hotend получил цель {seen_target:.0f}C, но нагреватель остаётся @0 "
-                                    f"при температуре {current:.1f}C. Нагрев выключен командой M104 S0; "
+                                    f"при температуре {current:.1f}C. Нагрев выключен командой M108/M104 S0; "
                                     "сделай power cycle принтера и проверь, что вентилятор/hotend оживают при старте."
                                 )
                         else:
@@ -1366,10 +1395,17 @@ class K9ControlCenter:
                                 raise RuntimeError(
                                     f"Hotend почти не греется: {first_temp:.1f}C -> {current:.1f}C "
                                     f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд, и положительный heater output не подтверждён. "
-                                    "Нагрев выключен командой M104 S0; печать не запускаю. "
+                                    "Нагрев выключен командой M108/M104 S0; печать не запускаю. "
                                     "Проверь питание/hotend и сделай power cycle принтера перед новой попыткой."
                                 )
-                    time.sleep(PRINT_PREHEAT_POLL_SEC)
+                    elif "ok" in lowered_reply and last_temp is not None and last_temp >= target - PRINT_PREHEAT_MARGIN_C:
+                        self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
+                        self._post("log", f"Предпрогрев завершён: {last_temp:.1f}/{target:.0f}C. Запускаю SD-файл.")
+                        return
+                    elif "ok" in lowered_reply and last_temp is None:
+                        self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
+                        self._post("log", "Предпрогрев M109 завершён без отдельной температурной строки. Запускаю SD-файл.")
+                        return
                 send_hotend_off(ser)
         except Exception:
             send_hotend_off(None)
@@ -1377,11 +1413,11 @@ class K9ControlCenter:
         if last_temp is None:
             raise RuntimeError(
                 "Не удалось получить температуру hotend перед SD-стартом. "
-                "Нагрев выключен командой M104 S0; нужен power cycle принтера перед новой попыткой."
+                "Нагрев выключен командой M108/M104 S0; нужен power cycle принтера перед новой попыткой."
             )
         raise RuntimeError(
             f"Hotend не вышел на температуру перед SD-стартом: {last_temp:.1f}/{target:.0f}C. "
-            "Нагрев выключен командой M104 S0; не запускаю печать вслепую. "
+            "Нагрев выключен командой M108/M104 S0; не запускаю печать вслепую. "
             "Проверь силовое питание/hotend и сделай power cycle принтера перед новой попыткой."
         )
 

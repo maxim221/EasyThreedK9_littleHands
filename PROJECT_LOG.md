@@ -2775,3 +2775,9 @@ After each test print, append:
   - the K9 hotend/sensor can report only a small temperature rise during the first `75s` even when Marlin accepts the target and heater output is positive (`@` nonzero)
   - Little Hands now treats that as a slow-start warning instead of an immediate abort, and waits up to the full `420s` preheat timeout
   - fast abort remains for `/0C` target loss or heater output stuck at `@0`
+- Host-side M109 preheat correction:
+  - repeated field attempts showed the `M104` + repeated `M105` host-preheat loop could leave the hotend around warm-bed / room temperature while Marlin still reported a target and positive `@`, then the controller stopped acknowledging `M105`, `M115`, `M114`, and `M17`
+  - Little Hands now performs the pre-`M24` hotend preheat as one host-side blocking `M109` session and passively parses Marlin temperature lines instead of actively polling `M105`
+  - uploaded / prepared SD files still rewrite early file-local `M109` to `M104`; the blocking wait is now owned by the controlled app preheat stage before the model is selected and started
+  - if this stage has to abort, Little Hands sends `M108` before `M104 S0` so a blocking heat wait can be interrupted cleanly
+  - the local recovery marker was restored for the current failed attempt because the nozzle is physically known to be at the `10 mm` preheat lift and the relative return failed only because USB/Marlin was silent

@@ -146,7 +146,8 @@ So:
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 - SD start must always return to the saved `X0 Y0 Z0` immediately before `M24`; if Little Hands lifted the nozzle for hotend preheat and the preheat fails, it first undoes the known lift with a relative Z-down move before showing the error
 - if that relative return is not acknowledged, Little Hands preserves a failed-preheat-lift recovery marker; `Go to saved start` can retry only after the operator confirms that the print did not start and the axes were not moved by hand
-- if Marlin shows a hotend target and positive heater output but the first minute of temperature rise is small, treat it as this K9's slow-start hotend/sensor behavior: log a warning and keep waiting up to the full preheat timeout; still abort quickly if the target drops to `/0C` or heater output stays `@0`
+- Little Hands hotend preheat before `M24` uses one host-side `M109` session and passively reads Marlin temperature lines. Do not change this back to `M104` plus repeated `M105` polling; that mode can leave this K9 near warm-bed temperature and then non-responsive.
+- if Marlin shows a hotend target and positive heater output but the first minute of temperature rise is small, treat it as this K9's slow-start hotend/sensor behavior: log a warning and keep waiting up to the full preheat timeout; still abort quickly if the target drops to `/0C`, heater output stays `@0`, or `M109` stops producing temperature lines
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 
@@ -187,7 +188,7 @@ Important G-code rules:
 - do not use startup `G28`
 - the start G-code must use the Little Hands manual-zero `G92 X0 Y0 Z0` workflow
 - the generated file must contain a hotend target command such as `M104` / `M109`
-- when a file is uploaded through Little Hands, early blocking `M109` is rewritten to `M104`; the app preheats the hotend before the SD start
+- when a file is uploaded through Little Hands, early blocking `M109` is rewritten to `M104`; the app preheats the hotend with a host-side `M109` before the SD start
 - use `Check G-code` before upload; the same validation also runs automatically before `Upload G-code` and `Upload & start`
 - reject or re-slice files with `Filament used: 0m`, impossible bounds, motion outside `100 x 100 x 100 mm`, bed heat `M140/M190 S>0`, `M18/M84`, missing hotend target, or aggressive body `M204`
 - `14 mm` brim is now the current default after the anti-warp profile tuning; the old start failure was tied to heat / SD-start sequencing, not to brim width itself
@@ -218,8 +219,8 @@ If a different slicer version is used, configure it from `docs/cura/SETTINGS.md`
 6. Set the physical start pose.
 7. Press `Save start`.
 8. Press `Go to saved start` and confirm it returns correctly.
-9. Start printing from SD. Manual hotend preheat is not needed: if the nozzle is still at saved `Z0`, Little Hands first lifts it to a safe clearance; before `M24`, it preheats the hotend to the target found in the G-code, returns to the saved start, then sends `M23`, waits for `File selected`, and sends `M24`.
-10. If the file was uploaded through Little Hands or exported by the bundled helper, the early `M109` has been rewritten to `M104` so SD start does not get stuck in a blocking heat wait.
+9. Start printing from SD. Manual hotend preheat is not needed: if the nozzle is still at saved `Z0`, Little Hands first lifts it to a safe clearance; before `M24`, it preheats the hotend to the target found in the G-code using host-side `M109`, returns to the saved start, then sends `M23`, waits for `File selected`, and sends `M24`.
+10. If the file was uploaded through Little Hands or exported by the bundled helper, the early SD-file `M109` has been rewritten to `M104`; the blocking wait happens in the controlled host preheat stage instead.
 11. After `M24`, Little Hands keeps USB fully quiet for `180` seconds. This is expected and helps this K9 enter SD printing reliably.
 12. During any remaining `M109` in older G-code, firmware may not answer ordinary `M105` / `M27`; Little Hands first listens passively for `M109` temperature lines and avoids stuffing the queue with extra commands.
 13. If there are no temperature lines, no SD progress, and physically no heating, fan, or motion for about `5` minutes after `M24`, the app treats the start as unconfirmed and offers power-cycle recovery.

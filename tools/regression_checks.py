@@ -123,6 +123,15 @@ def main() -> int:
         failures,
     )
     require(
+        'sdtool.send_line(ser, f"M109 S{target:.0f}")' in app
+        and 'sdtool.send_line(ser, "M105")' not in app[
+            app.find("def _preheat_hotend_for_sd_start") : app.find("def _lift_from_saved_start_for_preheat_if_needed")
+        ]
+        and "PRINT_PREHEAT_POLL_SEC" not in app,
+        "Host hotend preheat must use one blocking M109 session, not M104 plus repeated M105 polling.",
+        failures,
+    )
+    require(
         app.count("_preheat_hotend_for_sd_start_with_clearance(target)") >= 3,
         "Every GUI SD-start path must use the clearance-aware preheat wrapper.",
         failures,
