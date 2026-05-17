@@ -210,61 +210,92 @@ LH_FIRMWARE_CATALOG = {
 
 MANUAL_TEXT = textwrap.dedent(
     """
-    Little Hands baseline printing mode
+    Руководство Little Hands
 
-    Current working hardware setup
-    - Firmware: LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin
-    - Fan: the only fan is connected to FAN1 and works as hotend auto-fan
-      below 45C = off, above 45C = on
-    - External hotbed / warm mat is not controlled by the printer firmware
-    - Motor routing in the validated public K9 baseline behaves as Y/Z swapped
-      relative to stock operator naming
-    - Effective motion:
-      X = printhead left / right
-      Y = printhead up / down
-      Z = bed in the print plane
+    Для чего это приложение
+    Little Hands — центр управления рабочим процессом EasyThreed K9 / ET-4000+ в этом проекте. Приложение готовит и загружает Cura G-code, запускает печать с SD-карты, показывает температуру и статус SD, ведёт кольцевой лог и помогает вернуть принтер к сохранённой стартовой позе после печати.
 
-    Fixed print home
-    - X fully left
-    - Z bed fully back / away from the operator
-    - Y nozzle touching the bed
-    - This pose is the print zero for the current power-on session
-    - Cura start G-code uses G92 and treats this pose as X0 Y0 Z0 in the
-      operator-facing Little Hands convention
-    - Do not use plain G28 in normal print workflow
+    Аппаратная база
+    - Прошивка: LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin.
+    - Единственный вентилятор принтера используется как hotend auto-fan на FAN1: ниже примерно 45C выключен, выше примерно 45C включён.
+    - Внешний warm bed / hotbed не управляется прошивкой принтера.
+    - В этом workflow не используется обычный Marlin G28. У этого K9 в проверенной конфигурации нет надёжного home по концевикам.
+    - Оси с точки зрения пользователя: X двигает голову влево/вправо, Y двигает голову вверх/вниз, Z двигает стол к себе/от себя в плоскости печати.
 
-    Normal workflow
-    1. Slice in Cura on the validated machine/profile.
-    2. Upload G-code to SD from this app or copy it by card.
-    3. Move the printer into the fixed print-start pose.
-    4. Press "Save start" to save this pose as print zero.
-    5. Use "Go to start" to return to this saved zero.
-    6. Use "Start print"; the app preheats the hotend first, then returns to the saved zero and sends M24.
-    7. Files uploaded by Little Hands have early blocking M109 rewritten to M104.
-    8. After M24 the app keeps USB fully quiet for 180 seconds so this K9 can enter SD printing reliably.
+    Стартовая поза и модель home
+    Принтер не находит home сам. Пользователь выставляет стартовую позу печати, а Little Hands объявляет её логическим нулём командой G92 X0 Y0 Z0.
 
-    Bed leveling
-    - Use the four corners and the center.
-    - Move between points with the app.
-    - The app lifts Z before XY moves and lowers back to Z0 at each point.
-    - If the center is slightly lower than the corners, leave it for now and test the first layer.
+    Стартовая поза печати:
+    - голова находится в левой стартовой стороне печати
+    - стол находится в дальней / от пользователя стартовой позиции
+    - сопло едва касается стола в выбранной точке нуля
 
-    Diagnostics
-    - This printer does not have a reliable standard Marlin endstop-based home.
-    - "Save start" stores the current physical pose as print zero for this session.
-    - "Go to start" returns to that stored print zero.
-    - "Start print" returns to that stored print zero and starts the selected SD file.
-    - "Reset USB" pauses polling and reopens a clean short serial session without restarting the whole app.
-    - "Capture all metrics" dumps M115 / M503 / M114 / M105 / M27.
-    - If USB telemetry is silent during a real SD start but the printer is heating,
-      moving, or printing, do not power-cycle it; visually monitor the print and let
-      Little Hands wait for USB to recover.
+    Обычный сценарий печати
+    1. Нарежь модель в Cura с профилем Little Hands K9.
+    2. Вставь SD-карту в принтер или загрузи подготовленный G-code через Little Hands.
+    3. Выставь принтер в физическую стартовую позу.
+    4. Нажми "Запомнить старт".
+    5. Выбери файл в блоке "Файлы на SD принтера".
+    6. Нажми "Старт печати".
+    7. Little Hands прогреет hotend, вернётся к сохранённому X0 Y0 Z0 и запустит SD-печать.
+    8. После старта печати USB-телеметрия может временно молчать. Если принтер греется, двигается или печатает, не делай power cycle только из-за молчания телеметрии.
 
-    Exports
-    - "Export Cura profile" saves the current validated printer profile and Cura settings into the project.
-    - Runtime log folder: /home/maxim/draftCode/littleHands/monitor_logs/
-    - Ring log file: /home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
-    - "Save log" saves a timestamped copy of the current runtime log into gui_exports.
+    После штатного завершения печати
+    1. Сними модель, brim, нитки и мусор со стола.
+    2. Нажми "Вернуть к старту" в SD-блоке.
+    3. Подтверди, что стол свободен.
+    4. Little Hands вернётся из известной послепечатной позы в X0 Y0 Z0 через защищённые recovery-движения.
+    5. Когда принтер физически стоит в стартовой позе, перед следующей печатью нажми "Запомнить старт".
+
+    Если Little Hands был закрыт, компьютер спал или USB отвалился во время печати
+    - Если у приложения есть сохранённая послепечатная поза, "Вернуть к старту" может использовать её после подтверждения, что деталь снята и оси не двигали руками.
+    - Если приложение только знает, что печать, вероятно, завершилась, используй "Печать завершена" после снятия детали. Это записывает подтверждение пользователя и включает guarded recovery, если достаточно данных о print-end.
+    - Если доверенной сохранённой позы нет, Little Hands откажется возвращать автоматически. Выставь старт вручную и нажми "Запомнить старт".
+
+    Если печать остановлена или сорвалась
+    - "Стоп" — это управляемая остановка, а не аварийный путь. Он пытается поставить печать на паузу, снять M114, безопасно поднять Z, остановить SD-печать и выключить нагрев.
+    - После управляемого Stop сначала убери неудачный пластик, затем нажимай "К старту" или "Вернуть к старту".
+    - "Жёсткий стоп" нужен для срочных остановок. После него доверие к home сбрасывается, стартовую позу нужно заново выставить вручную.
+
+    Верхние кнопки
+    - "Файлы и прошивка" открывает окно загрузки G-code и прошивки.
+    - "Manual" открывает это руководство. Текст соответствует выбранному языку интерфейса.
+    - "Сброс USB-сессии" — мягкий сброс serial-сессии: приложение ставит опрос на паузу, отправляет M110 N0 и M105, затем возобновляет опрос. Это не физический USB reset и не power cycle принтера.
+    - "Экспорт профиля Cura" сохраняет текущий проверенный профиль и настройки Cura в проект.
+    - "Звук ПК" проигрывает компьютерный звук завершения.
+
+    Блок "Файлы на SD принтера"
+    - "Обновить список" перечитывает список файлов на SD принтера.
+    - "Старт печати" запускает выбранный SD-файл только при доверенной стартовой позе.
+    - "Удалить" удаляет выбранный SD-файл.
+    - "Пауза" и "Продолжить" отправляют SD pause/resume.
+    - "Стоп" выполняет управляемую остановку.
+    - "Печать завершена" — подтверждение пользователя для печати, завершившейся при ненадёжном USB/app-состоянии.
+    - "Вернуть к старту" запускает защищённый послепечатный recovery.
+    - "Старт" показывает время начала печати.
+    - "Ожидаемое завершение" считает время конца по Cura ;TIME или предыдущей реальной длительности этого файла.
+    - "Известное время" показывает Cura-время и/или фактическую длительность, если они известны.
+
+    Блок ручного управления
+    - "Запомнить старт" объявляет текущую физическую позу как X0 Y0 Z0.
+    - "К старту" возвращает к сохранённому нулю или предлагает guarded recovery после остановленной/завершённой печати.
+    - "Моторы выкл" выключает моторы и сбрасывает доверие к home.
+    - Кнопки движения перемещают выбранную ось на выбранный шаг. Ось стола намеренно двигается мягко, чтобы не ловить пропуски шагов.
+    - Калибровка стола двигает по известным точкам; используй её только когда текущий старт доверенный.
+
+    USB-метрики и логи
+    - Вкладка "Журнал" показывает понятные события.
+    - Вкладка "USB-метрики" показывает raw-ответы статуса и прошивки.
+    - "Снять все метрики" запрашивает M115, M503, M114, M105 и M27.
+    - "Сохранить лог" сохраняет копию кольцевого лога с датой.
+    - Папка логов: /home/maxim/draftCode/littleHands/monitor_logs/
+    - Кольцевой лог: /home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
+
+    Правила безопасности
+    - Во время проверки recovery держи руку рядом с питанием принтера.
+    - Не возвращай к старту, пока модель или неудачный первый слой лежит на столе.
+    - Если движение выглядит неправильным, выключи питание и заново выставь старт вручную.
+    - После завершённой печати перед следующей печатью сделай power cycle принтера, если USB/SD выглядит полуживым или новая печать отказывается стартовать.
     """
 ).strip()
 
@@ -298,83 +329,182 @@ MANUAL_TEXTS = {
     "ru": MANUAL_TEXT,
     "en": textwrap.dedent(
         """
-        Little Hands baseline printing mode
+        Little Hands Manual
 
-        Current working hardware setup
+        What this app is for
+        Little Hands is a control center for the EasyThreed K9 / ET-4000+ workflow used in this project. It prepares and uploads Cura G-code, starts SD-card prints, watches temperature and SD status, keeps a ring log, and helps recover the printer to the saved start pose after a print.
+
+        Hardware baseline
         - Firmware: LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin
-        - Fan: the only fan is connected to FAN1 and works as the hotend auto-fan
-          below 45C = off, above 45C = on
-        - External hotbed / warm mat is not controlled by the printer firmware
-        - Effective operator motion:
-          X = printhead left / right
-          Y = printhead up / down
-          Z = bed in the print plane
+        - The single printer fan is used as the hotend auto-fan on FAN1: off below about 45C, on above about 45C.
+        - The warm bed / hotbed is external and is not controlled by the printer firmware.
+        - Do not use normal Marlin G28 homing in this workflow. This K9 has no reliable endstop-based home in the validated setup.
+        - Operator-facing motion: X moves the head left/right, Y moves the head up/down, Z moves the bed toward/away in the print plane.
 
-        Fixed print home
-        - X fully left
-        - Z bed fully back / away from the operator
-        - Y nozzle touching the bed
-        - This pose is the print zero for the current power-on session
-        - Cura start G-code uses G92 and treats this pose as X0 Y0 Z0 in the
-          operator-facing Little Hands convention
-        - Do not use plain G28 in the normal print workflow
+        Start pose and home model
+        The printer does not find home by itself. The operator sets the print start pose and Little Hands declares it as logical zero with G92 X0 Y0 Z0.
 
-        Normal workflow
-        1. Slice in Cura on the validated machine/profile.
-        2. Upload G-code to SD from this app or copy it by card.
-        3. Move the printer into the fixed print-start pose.
-        4. Press "Save start" to save this pose as print zero.
-        5. Use "Go to start" to return to this saved zero.
-        6. Use "Start print"; the app preheats the hotend first, then returns to the saved zero and sends M24.
-        7. Files uploaded by Little Hands have early blocking M109 rewritten to M104.
-        8. After M24 the app keeps USB fully quiet for 180 seconds so this K9 can enter SD printing reliably.
+        Print start pose:
+        - head at the left print start side
+        - bed in the back/away print start position
+        - nozzle just touching the bed at the selected print zero
 
-        Diagnostics
-        - This printer does not have a reliable standard Marlin endstop-based home.
-        - "Save start" stores the current physical pose as print zero for this session.
-        - "Go to start" returns to that stored print zero.
-        - If USB telemetry is silent during a real SD start but the printer is heating,
-          moving, or printing, do not power-cycle it; visually monitor the print and let
-          Little Hands wait for USB to recover.
+        Normal print workflow
+        1. Slice in Cura with the Little Hands K9 profile.
+        2. Put the SD card in the printer, or upload the prepared G-code through Little Hands.
+        3. Move the printer to the physical print start pose.
+        4. Press "Save start".
+        5. Select a file in "Printer SD files".
+        6. Press "Start print".
+        7. Little Hands preheats the hotend, returns to the saved X0 Y0 Z0, and starts SD printing.
+        8. After the print begins, USB telemetry can be quiet for a while. If the printer is heating, moving, or printing, do not power-cycle just because telemetry is quiet.
+
+        After a normal print finish
+        1. Remove the printed part, brim, strings, and debris from the bed.
+        2. Press "Return to start" in the SD panel.
+        3. Confirm that the bed is clear.
+        4. Little Hands returns from the known post-print pose to X0 Y0 Z0 using guarded recovery moves.
+        5. When the printer is physically at the start pose, press "Save start" before the next print.
+
+        If Little Hands was closed, asleep, or USB dropped during the print
+        - If the app has a saved post-print pose, "Return to start" can use it after you confirm that the part is removed and the axes were not moved by hand.
+        - If the app only knows that the print probably ended, use "Print finished" after removing the part. That records operator-confirmed completion and enables guarded recovery when enough print-end data exists.
+        - If there is no trusted saved pose, Little Hands will refuse automatic return. Jog manually to the start pose and press "Save start".
+
+        If a print is stopped or fails
+        - "Stop" is a controlled stop, not the emergency path. It tries to pause, capture M114, lift safely, stop SD printing, and turn heaters off.
+        - After a controlled stop, remove the failed plastic before pressing "Go to start" or "Return to start".
+        - "Hard stop" is for urgent stop situations. After hard stop, home trust is invalid and the start pose must be established again manually.
+
+        Top buttons
+        - "Files & Firmware" opens the upload/firmware window.
+        - "Manual" opens this manual. The text follows the selected interface language.
+        - "Reset USB session" is a soft serial-session reset: it pauses polling, sends M110 N0 and M105, and resumes polling. It is not a physical USB hub reset and not a printer power cycle.
+        - "Export Cura profile" exports the current validated Cura profile/settings into the project.
+        - "PC sound" plays the computer completion sound.
+
+        Printer SD files panel
+        - "Refresh list" rereads the printer SD file list.
+        - "Start print" starts the selected SD file only when the saved start pose is trusted.
+        - "Delete" removes the selected SD file.
+        - "Pause" and "Resume" send SD pause/resume commands.
+        - "Stop" performs the controlled stop workflow.
+        - "Print finished" is an operator confirmation for prints that completed while USB/app state was unreliable.
+        - "Return to start" runs the guarded post-print recovery path.
+        - "Start" shows print start time.
+        - "Expected finish" uses Cura ;TIME or the previous real duration for this file.
+        - "Known time" shows Cura and/or actual duration when known.
+
+        Manual control panel
+        - "Save start" declares the current physical pose as X0 Y0 Z0.
+        - "Go to start" returns to the saved zero or offers a guarded recovery path after a stopped/finished print.
+        - "Motors off" disables motors and invalidates home trust.
+        - Jog buttons move the selected axis by the selected step. The bed axis is deliberately gentle to avoid missed steps.
+        - Bed leveling moves through known calibration points; use it only when the current start pose is trusted.
+
+        USB metrics and logs
+        - The "Journal" tab shows human-readable events.
+        - The "USB metrics" tab shows raw metrics and firmware/status replies.
+        - "Capture all metrics" requests M115, M503, M114, M105, and M27.
+        - "Save log" saves a timestamped copy of the ring log.
+        - Runtime log folder: /home/maxim/draftCode/littleHands/monitor_logs/
+        - Ring log file: /home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
+
+        Safety rules
+        - Keep a hand near printer power when testing recovery movement.
+        - Never press return-to-start while a model or failed first layer is still on the bed.
+        - If motion looks wrong, cut power and re-establish the start pose manually.
+        - Power cycle the printer after a completed print before the next print if USB/SD becomes half-alive or a new print refuses to start.
         """
     ).strip(),
     "zh": textwrap.dedent(
         """
-        Little Hands 当前基线打印模式
+        Little Hands 使用说明
 
-        当前可工作的硬件配置
+        这个程序用于什么
+        Little Hands 是本项目 EasyThreed K9 / ET-4000+ 工作流的控制中心。它可以准备和上传 Cura G-code、从 SD 卡启动打印、观察温度和 SD 状态、保存环形日志，并在打印结束后帮助打印机回到保存的起点。
+
+        硬件基线
         - 固件：LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin
-        - 风扇：唯一风扇接在 FAN1，上端热端 45C 以上自动开启，以下关闭
-        - 外部热床 / 保温垫不由打印机固件控制
-        - 面向操作者的运动定义：
-          X = 喷头左右
-          Y = 喷头上下
-          Z = 平台前后
+        - 打印机唯一风扇接在 FAN1，作为 hotend auto-fan：约 45C 以下关闭，约 45C 以上开启。
+        - 外部 warm bed / hotbed 不由打印机固件控制。
+        - 此工作流不要使用普通 Marlin G28 回零。当前验证配置中，这台 K9 没有可靠的限位开关 home。
+        - 面向操作者的运动：X 是喷头左右，Y 是喷头上下，Z 是平台前后。
 
-        固定打印起点
-        - X 最左
-        - Z 平台最靠后 / 远离操作者
-        - Y 喷嘴刚好接触床面
-        - 这个姿态作为当前上电会话中的打印零点
-        - Cura 起始 G-code 使用 G92，并按 Little Hands 的操作者坐标把它当作 X0 Y0 Z0
-        - 正常打印流程不要使用普通 G28
+        起点和 home 模型
+        打印机不会自己寻找 home。操作者把机器移动到打印起点，Little Hands 用 G92 X0 Y0 Z0 把该姿态声明为逻辑零点。
 
-        正常流程
-        1. 在已验证的 Cura 机器/配置上切片。
-        2. 通过本程序上传 G-code 到 SD，或手动拷卡。
-        3. 将打印机移动到固定起始姿态。
-        4. 点击“Save start”保存当前零点。
-        5. 点击“Go to start”返回该零点。
-        6. 点击“Start print”；程序会先预热热端，然后回到零点并发送 M24。
-        7. 通过 Little Hands 上传的文件会把早期阻塞式 M109 改写为 M104。
-        8. 发送 M24 后，程序会让 USB 完全安静 180 秒，以便这台 K9 稳定进入 SD 打印。
+        打印起点姿态：
+        - 喷头在左侧打印起点
+        - 平台在后方 / 远离操作者的打印起点
+        - 喷嘴刚好接触平台上的选定零点
 
-        诊断说明
-        - 这台打印机没有可靠的标准 Marlin 限位回零。
-        - “Save start”会把当前物理姿态设为本次会话的打印零点。
-        - “Go to start”会回到这个零点。
-        - 如果 SD 启动时 USB 遥测暂时沉默，但打印机正在加热、运动或打印，
-          不要断电；目视观察打印，让 Little Hands 等待 USB 恢复。
+        正常打印流程
+        1. 使用 Little Hands K9 Cura 配置切片。
+        2. 将 SD 卡插入打印机，或通过 Little Hands 上传准备好的 G-code。
+        3. 将打印机移动到物理打印起点。
+        4. 点击 "Save start"。
+        5. 在 "Printer SD files" 中选择文件。
+        6. 点击 "Start print"。
+        7. Little Hands 会先预热 hotend，回到保存的 X0 Y0 Z0，然后启动 SD 打印。
+        8. 打印开始后，USB 遥测可能会安静一段时间。如果打印机正在加热、移动或出料，不要仅因遥测安静就断电。
+
+        正常打印完成后
+        1. 从平台上取下模型、brim、拉丝和碎屑。
+        2. 点击 SD 面板中的 "Return to start"。
+        3. 确认平台已清空。
+        4. Little Hands 会从已知的打印后位置用受保护 recovery 移动回到 X0 Y0 Z0。
+        5. 当打印机实际位于起点时，在下一次打印前点击 "Save start"。
+
+        如果打印期间 Little Hands 关闭、电脑睡眠或 USB 掉线
+        - 如果应用有保存的打印后位置，"Return to start" 可在你确认模型已取下且各轴没有被手动移动后使用。
+        - 如果应用只知道打印可能已经结束，取下模型后使用 "Print finished"。它会记录操作者确认，并在有足够 print-end 数据时允许受保护 recovery。
+        - 如果没有可信保存位置，Little Hands 会拒绝自动返回。请手动点动到起点，然后点击 "Save start"。
+
+        如果打印被停止或失败
+        - "Stop" 是受控停止，不是紧急停止。它会尝试暂停、读取 M114、安全抬 Z、停止 SD 打印并关闭加热。
+        - 受控停止后，请先清除失败塑料，再点击 "Go to start" 或 "Return to start"。
+        - "Hard stop" 用于紧急停止。硬停止后 home 信任无效，必须重新手动建立起点。
+
+        顶部按钮
+        - "Files & Firmware" 打开上传 / 固件窗口。
+        - "Manual" 打开本说明。文本会跟随当前界面语言。
+        - "Reset USB session" 是软串口会话重置：暂停轮询，发送 M110 N0 和 M105，然后恢复轮询。它不是物理 USB hub reset，也不是打印机断电重启。
+        - "Export Cura profile" 将当前验证过的 Cura 配置导出到项目中。
+        - "PC sound" 播放电脑完成提示音。
+
+        Printer SD files 面板
+        - "Refresh list" 重新读取打印机 SD 文件列表。
+        - "Start print" 仅在保存的起点可信时启动选中的 SD 文件。
+        - "Delete" 删除选中的 SD 文件。
+        - "Pause" / "Resume" 发送 SD 暂停 / 继续命令。
+        - "Stop" 执行受控停止流程。
+        - "Print finished" 用于 USB 或应用状态不可靠时由操作者确认打印完成。
+        - "Return to start" 执行受保护的打印后 recovery。
+        - "Start" 显示打印开始时间。
+        - "Expected finish" 使用 Cura ;TIME 或该文件上次真实打印时长。
+        - "Known time" 显示 Cura 和 / 或已知真实时长。
+
+        Manual control 面板
+        - "Save start" 将当前物理姿态声明为 X0 Y0 Z0。
+        - "Go to start" 返回保存的零点，或在停止 / 完成打印后提供受保护 recovery。
+        - "Motors off" 关闭电机并使 home 信任失效。
+        - Jog 按钮按所选步长移动对应轴。平台轴故意较温和，以避免丢步。
+        - Bed leveling 会移动到已知校准点；仅在当前起点可信时使用。
+
+        USB metrics 和日志
+        - "Journal" 标签显示人类可读事件。
+        - "USB metrics" 标签显示原始指标和固件 / 状态响应。
+        - "Capture all metrics" 请求 M115、M503、M114、M105、M27。
+        - "Save log" 保存当前环形日志的带时间戳副本。
+        - 运行日志目录：/home/maxim/draftCode/littleHands/monitor_logs/
+        - 环形日志文件：/home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
+
+        安全规则
+        - 测试 recovery 移动时，手要靠近打印机电源。
+        - 模型或失败首层仍在平台上时，不要执行 return-to-start。
+        - 如果运动看起来不对，立即断电，然后手动重新建立起点。
+        - 如果打印完成后 USB/SD 处于半可用状态，或下一次打印拒绝启动，请在下一次打印前对打印机断电重启。
         """
     ).strip(),
 }

@@ -2759,3 +2759,6 @@ After each test print, append:
   - Little Hands parses Cura `;TIME:<seconds>` from uploaded/known G-code files and stores it in the SD profile
   - the SD panel shows `Expected finish` from print start plus either the previous real duration for that file or Cura time adjusted by observed successful-print ratios
   - the known-time line now shows both real duration and Cura estimate when available
+- Manual update:
+  - the in-app `Manual` text was rewritten as a real workflow guide covering normal print start, post-print return, sleep/USB-drop recovery, stopped-print recovery, button meanings, logs, metrics, and safety rules
+  - the manual now has full Russian, English, and Chinese variants and updates immediately when the interface language changes
