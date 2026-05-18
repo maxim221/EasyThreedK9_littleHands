@@ -250,7 +250,7 @@ MANUAL_TEXT = textwrap.dedent(
     4. Нажми "Запомнить старт".
     5. Выбери файл в блоке "Файлы на SD принтера".
     6. Нажми "Старт печати".
-    7. Little Hands вернётся к сохранённому X0 Y0 Z0 и запустит SD-печать. В нормальном сценарии ранний M109 остаётся в SD-файле, и hotend греется внутри самого G-code.
+    7. Если принтер уже подтверждён в сохранённом X0 Y0 Z0, Little Hands не двигает оси перед M24: он выбирает файл, запускает SD-печать, а ранний M109 греет hotend внутри самого G-code.
     8. После старта печати USB-телеметрия может временно молчать. Если принтер греется, двигается или печатает, не делай power cycle только из-за молчания телеметрии.
 
     После штатного завершения печати
@@ -258,7 +258,7 @@ MANUAL_TEXT = textwrap.dedent(
     2. Нажми "После печати: к старту" в SD-блоке.
     3. Подтверди, что стол свободен.
     4. Little Hands вернётся из известной послепечатной позы в X0 Y0 Z0 через защищённые recovery-движения.
-    5. Когда принтер физически стоит в стартовой позе, перед следующей печатью нажми "Запомнить старт".
+    5. Когда принтер физически стоит в стартовой позе, сделай power cycle принтера на 5–10 секунд, проверь старт и перед следующей печатью нажми "Запомнить старт".
 
     Если Little Hands был закрыт, компьютер спал или USB отвалился во время печати
     - Если у приложения есть сохранённая послепечатная поза, "После печати: к старту" может использовать её после подтверждения, что деталь снята и оси не двигали руками.
@@ -309,7 +309,7 @@ MANUAL_TEXT = textwrap.dedent(
     - Во время проверки recovery держи руку рядом с питанием принтера.
     - Не возвращай к старту, пока модель или неудачный первый слой лежит на столе.
     - Если движение выглядит неправильным, выключи питание и заново выставь старт вручную.
-    - После завершённой печати перед следующей печатью сделай power cycle принтера, если USB/SD выглядит полуживым или новая печать отказывается стартовать.
+    - После завершённой, остановленной или сорванной SD-печати приложение потребует подтверждённый power cycle и повторный "Запомнить старт" перед новым M24.
     """
 ).strip()
 
@@ -370,7 +370,7 @@ MANUAL_TEXTS = {
         4. Press "Save start".
         5. Select a file in "Printer SD files".
         6. Press "Start print".
-        7. Little Hands returns to the saved X0 Y0 Z0 and starts SD printing. In the normal workflow the early M109 stays in the SD file, and the hotend heats inside the G-code.
+        7. If the printer is already confirmed at the saved X0 Y0 Z0, Little Hands does not move axes before M24: it selects the file, starts SD printing, and the early M109 heats the hotend inside the G-code.
         8. After the print begins, USB telemetry can be quiet for a while. If the printer is heating, moving, or printing, do not power-cycle just because telemetry is quiet.
 
         After a normal print finish
@@ -378,7 +378,7 @@ MANUAL_TEXTS = {
         2. Press "After print: return" in the SD panel.
         3. Confirm that the bed is clear.
         4. Little Hands returns from the known post-print pose to X0 Y0 Z0 using guarded recovery moves.
-        5. When the printer is physically at the start pose, press "Save start" before the next print.
+        5. When the printer is physically at the start pose, power-cycle the printer for 5-10 seconds, re-check the start, and press "Save start" before the next print.
 
         If Little Hands was closed, asleep, or USB dropped during the print
         - If the app has a saved post-print pose, "After print: return" can use it after you confirm that the part is removed and the axes were not moved by hand.
@@ -429,7 +429,7 @@ MANUAL_TEXTS = {
         - Keep a hand near printer power when testing recovery movement.
         - Never press return-to-start while a model or failed first layer is still on the bed.
         - If motion looks wrong, cut power and re-establish the start pose manually.
-        - Power cycle the printer after a completed print before the next print if USB/SD becomes half-alive or a new print refuses to start.
+        - After a completed, stopped, or failed SD print/start, the app requires a confirmed power cycle and a fresh "Save start" before the next M24.
         """
     ).strip(),
     "zh": textwrap.dedent(
@@ -461,7 +461,7 @@ MANUAL_TEXTS = {
         4. 点击 "Save start"。
         5. 在 "Printer SD files" 中选择文件。
         6. 点击 "Start print"。
-        7. Little Hands 会回到保存的 X0 Y0 Z0 并启动 SD 打印。正常流程中，早期 M109 保留在 SD 文件里，hotend 在 G-code 内部加热。
+        7. 如果打印机已确认在保存的 X0 Y0 Z0，Little Hands 不会在 M24 前移动各轴：它会选择文件、启动 SD 打印，早期 M109 会在 G-code 内部加热 hotend。
         8. 打印开始后，USB 遥测可能会安静一段时间。如果打印机正在加热、移动或出料，不要仅因遥测安静就断电。
 
         正常打印完成后
@@ -469,7 +469,7 @@ MANUAL_TEXTS = {
         2. 点击 SD 面板中的 "打印后返回"。
         3. 确认平台已清空。
         4. Little Hands 会从已知的打印后位置用受保护 recovery 移动回到 X0 Y0 Z0。
-        5. 当打印机实际位于起点时，在下一次打印前点击 "Save start"。
+        5. 当打印机实际位于起点时，关闭打印机电源 5-10 秒再打开，重新检查起点，并在下一次打印前点击 "Save start"。
 
         如果打印期间 Little Hands 关闭、电脑睡眠或 USB 掉线
         - 如果应用有保存的打印后位置，"打印后返回" 可在你确认模型已取下且各轴没有被手动移动后使用。
@@ -520,7 +520,7 @@ MANUAL_TEXTS = {
         - 测试 recovery 移动时，手要靠近打印机电源。
         - 模型或失败首层仍在平台上时，不要执行 return-to-start。
         - 如果运动看起来不对，立即断电，然后手动重新建立起点。
-        - 如果打印完成后 USB/SD 处于半可用状态，或下一次打印拒绝启动，请在下一次打印前对打印机断电重启。
+        - 在完成、停止或失败的 SD 打印 / 启动之后，应用会要求确认断电重启并重新 "Save start"，然后才允许下一次 M24。
         """
     ).strip(),
 }
@@ -597,6 +597,8 @@ class K9ControlCenter:
         self.print_start_watchdog_alerted = False
         self.post_print_recovery_required = False
         self.bed_clear_before_go_start_required = False
+        self.next_sd_start_requires_power_cycle = False
+        self.next_sd_start_power_cycle_reason = ""
         self.stopped_print_pose: tuple[float, float, float] | None = None
         self.stopped_print_display = "-"
         self.stopped_print_live_return_available = False
@@ -852,7 +854,15 @@ class K9ControlCenter:
         profiles = data.get("sd_gcode_profiles")
         if isinstance(profiles, dict):
             self.sd_gcode_profiles.update(profiles)
+        if data.get("next_sd_start_requires_power_cycle"):
+            self.next_sd_start_requires_power_cycle = True
+            self.next_sd_start_power_cycle_reason = str(
+                data.get("next_sd_start_power_cycle_reason")
+                or "restored post-print / failed-start power-cycle gate"
+            )
         phase = str(data.get("phase") or "")
+        if phase in {"completed", "stopped", "stopped-jog-updated", "hard-stop", "preheat-lift-failed", "failed-start"}:
+            self._require_power_cycle_before_next_sd_start(f"restored {phase} state", save=False)
         predicted = data.get("predicted_end")
         predicted_has_recovery_pose = predicted_print_end_has_recovery_pose(predicted)
         restore_active_print_marker = True
@@ -872,7 +882,7 @@ class K9ControlCenter:
                 self.bed_clear_before_go_start_required = True
                 self.home_trust = HOME_TRUST_INVALID
                 self.home_trust_reason = "operator-confirmed completion restored as predicted print-end recovery"
-        if phase == "stopped" and data.get("bed_clear_before_go_start_required"):
+        if phase.startswith("stopped") and data.get("bed_clear_before_go_start_required"):
             pose = data.get("stopped_print_pose")
             if isinstance(pose, list) and len(pose) == 3:
                 try:
@@ -999,6 +1009,8 @@ class K9ControlCenter:
             "stopped_print_live_return_available": self.stopped_print_live_return_available,
             "preheat_lift_recovery_available": self.preheat_lift_recovery_available,
             "preheat_lift_mm": self.preheat_lift_mm,
+            "next_sd_start_requires_power_cycle": self.next_sd_start_requires_power_cycle,
+            "next_sd_start_power_cycle_reason": self.next_sd_start_power_cycle_reason,
             "sd_gcode_profiles": self.sd_gcode_profiles,
         }
 
@@ -1030,6 +1042,18 @@ class K9ControlCenter:
     def _clear_preheat_lift_recovery(self, *, save: bool = False) -> None:
         self.preheat_lift_recovery_available = False
         self.preheat_lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
+        if save:
+            self._save_print_state("idle", force=True)
+
+    def _require_power_cycle_before_next_sd_start(self, reason: str, *, save: bool = False) -> None:
+        self.next_sd_start_requires_power_cycle = True
+        self.next_sd_start_power_cycle_reason = reason
+        if save:
+            self._save_print_state("idle", force=True)
+
+    def _clear_next_sd_start_power_cycle_requirement(self, *, save: bool = False) -> None:
+        self.next_sd_start_requires_power_cycle = False
+        self.next_sd_start_power_cycle_reason = ""
         if save:
             self._save_print_state("idle", force=True)
 
@@ -1270,7 +1294,8 @@ class K9ControlCenter:
             self._post(
                 "log",
                 f"{reason}: не делаю отдельный host-preheat до M24. "
-                "Little Hands вернётся в сохранённый старт, запустит SD-файл, а hotend будет греться внутри самого G-code.",
+                "Little Hands не будет двигать оси перед M24: он только выберет SD-файл и запустит его, "
+                "а hotend будет греться внутри самого G-code.",
             )
             self._post("files-status", "SD-start: hotend будет греться внутри G-code (M109)")
             self._post("progress", ("SD-start: прогрев будет внутри G-code", 0.0))
@@ -1519,6 +1544,33 @@ class K9ControlCenter:
             "если был reset порта или есть сомнение по высоте, проверь физически и нажми 'Запомнить старт' заново.",
         )
 
+    def _return_to_saved_start_after_successful_preheat(self, *, lifted_for_preheat: bool) -> None:
+        if not lifted_for_preheat:
+            return
+        self._post("log", "Предпрогрев завершён: опускаю сопло обратно в сохранённый старт перед M24.")
+        try:
+            out = sdtool.return_from_preheat_lift(self._port(), self._baud(), per_command_timeout=20.0)
+        except Exception as exc:
+            self.at_saved_start_pose = False
+            self.preheat_lift_recovery_available = True
+            self.preheat_lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
+            self._set_home_trust(HOME_TRUST_UNCERTAIN, "successful preheat left lifted Z; return to start failed", log_change=True)
+            self._save_print_state("preheat-lift-failed", force=True)
+            raise RuntimeError(
+                f"Hotend прогрет, но сопло не вернулось в сохранённый старт перед M24: {exc}. "
+                "Печать не запущена, чтобы не начать в воздухе. Нажми 'К сохранённому старту' после проверки стола."
+            ) from exc
+        useful_lines = [
+            line.strip()
+            for line in out.splitlines()
+            if line.strip() and line.strip().lower() != "ok"
+        ]
+        if useful_lines:
+            self._post("log", "\n".join(useful_lines))
+        self.at_saved_start_pose = True
+        self._clear_preheat_lift_recovery(save=False)
+        self._save_print_state("returned-to-start", force=True)
+
     def _preheat_hotend_for_sd_start_with_clearance(self, target: float) -> None:
         lifted_for_preheat = self._lift_from_saved_start_for_preheat_if_needed()
         try:
@@ -1540,6 +1592,7 @@ class K9ControlCenter:
                 raise
             self._return_to_saved_start_after_failed_preheat(lifted_for_preheat=lifted_for_preheat)
             raise
+        self._return_to_saved_start_after_successful_preheat(lifted_for_preheat=lifted_for_preheat)
 
     def _prime_print_end_contract(self, sd_path: str, display: str, source: Path | None = None) -> None:
         profile = self._profile_for_print(sd_path, display, source)
@@ -2915,6 +2968,7 @@ class K9ControlCenter:
                         )
                 if sdtool.is_transient_serial_error(text):
                     self.post_print_recovery_required = True
+                    self._require_power_cycle_before_next_sd_start("transient USB/serial error during printer command", save=True)
                     self._show_post_print_recovery_window("failed-start")
                 messagebox.showerror("K9 Control Center", text)
             elif kind == "info":
@@ -3010,6 +3064,7 @@ class K9ControlCenter:
             elif kind == "post-print-recovery":
                 reason = str(payload or "completion")
                 self.post_print_recovery_required = True
+                self._require_power_cycle_before_next_sd_start(reason, save=True)
                 self.log(self._post_print_recovery_text(reason))
                 self._show_post_print_recovery_window(reason)
             elif kind == "post-print-recovery-clear":
@@ -3527,6 +3582,7 @@ class K9ControlCenter:
         self.last_sd_progress_ts = None
         self.post_print_recovery_required = True
         self.bed_clear_before_go_start_required = True
+        self._require_power_cycle_before_next_sd_start("operator-confirmed completed SD print", save=False)
         self.post_print_pose_known = False
         self.post_print_pose = None
         self.stopped_print_pose = None
@@ -4766,10 +4822,7 @@ class K9ControlCenter:
         self._run_task("Заливка G-code на SD", task)
 
     def upload_and_start_gcode(self) -> None:
-        if not self._guard_post_print_recovery():
-            return
-        if not self._home_is_trusted():
-            self._show_missing_start_zero()
+        if not self._guard_sd_start_preconditions():
             return
         source = Path(self.local_gcode_var.get().strip()).expanduser().resolve()
         if not source.is_file():
@@ -4820,11 +4873,12 @@ class K9ControlCenter:
             self._preheat_hotend_or_defer_to_sd_file(dest, source.name, upload_source)
             self._prime_print_end_contract(dest, source.name, upload_source)
             try:
-                out = sdtool.start_sd_print_from_home(self._port(), self._baud(), dest)
-                self.at_saved_start_pose = True
+                out = self._start_sd_print_from_saved_start(dest)
             except Exception:
                 self._clear_predicted_print_end()
-                self._set_home_trust(HOME_TRUST_UNCERTAIN, "upload-and-start failed after motion/start attempt", log_change=True)
+                self._require_power_cycle_before_next_sd_start("upload-and-start failed before or during SD start", save=False)
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "upload-and-start failed before or during SD start", log_change=True)
+                self._save_print_state("failed-start", force=True)
                 raise
             self._mark_sd_start_sent(dest, source.name)
             self._post("log", out.strip() or f"Печать запущена от сохранённого старта: {source.name}")
@@ -4911,22 +4965,96 @@ class K9ControlCenter:
         return self.sd_display_to_path.get(display, display)
 
     def _guard_post_print_recovery(self) -> bool:
-        if not self.post_print_recovery_required:
+        if not (self.post_print_recovery_required or self.bed_clear_before_go_start_required):
             return True
         self.log("Старт печати заблокирован: сначала выполни послепечатный цикл из инструкции.")
         self._show_post_print_recovery_window("blocked-start")
         return False
 
-    def start_selected_print(self) -> None:
+    def _confirm_power_cycle_before_next_sd_start(self) -> bool:
+        if not self.next_sd_start_requires_power_cycle:
+            return True
+        reason = self.next_sd_start_power_cycle_reason or "previous print/stop/start recovery"
+        lang = self.lang_var.get().strip() or "ru"
+        prompt = {
+            "en": (
+                "Before the next SD print, confirm the printer power-cycle.\n\n"
+                f"Reason: {reason}\n\n"
+                "This K9 can leave SD/USB half-alive after a completed, stopped, or failed start. "
+                "In that state the firmware may skip the file's M109 heat wait and begin cold movements.\n\n"
+                "Continue only if you have powered the printer off for 5-10 seconds, powered it on again, "
+                "checked that the nozzle is physically at the saved start, and pressed 'Save start'."
+            ),
+            "zh": (
+                "下一次 SD 打印前，请确认打印机已经断电重启。\n\n"
+                f"原因：{reason}\n\n"
+                "这台 K9 在完成、停止或异常启动后，SD/USB 可能处于半工作状态。"
+                "这种状态下固件可能跳过文件里的 M109 加热等待并开始冷态运动。\n\n"
+                "只有在已经关闭电源 5-10 秒、重新打开、确认喷嘴实际在保存起点，并点击过“保存起点”后才继续。"
+            ),
+            "ru": (
+                "Перед следующей SD-печатью подтверди power cycle принтера.\n\n"
+                f"Причина: {reason}\n\n"
+                "Эта K9 после завершения, остановки или сорванного старта может оставить SD/USB в полуживом состоянии. "
+                "В таком состоянии прошивка иногда пропускает файловый M109 и начинает холодные движения.\n\n"
+                "Продолжай только если ты выключал питание принтера на 5–10 секунд, включал снова, "
+                "проверил что сопло физически стоит в сохранённом старте, и нажал 'Запомнить старт'."
+            ),
+        }.get(lang) or (
+            "Перед следующей SD-печатью подтверди power cycle принтера.\n\n"
+            f"Причина: {reason}\n\n"
+            "Продолжай только если питание принтера было выключено на 5–10 секунд, "
+            "стартовая поза проверена физически и снова нажато 'Запомнить старт'."
+        )
+        if not messagebox.askyesno("Little Hands", prompt):
+            self.log("Старт SD заблокирован: power cycle после предыдущего состояния не подтверждён.")
+            return False
+        self._clear_next_sd_start_power_cycle_requirement(save=True)
+        self.log("Power cycle после предыдущей печати/остановки подтверждён оператором; SD-старт разблокирован.")
+        return True
+
+    def _guard_sd_start_preconditions(self) -> bool:
         if not self._guard_post_print_recovery():
-            return
+            return False
+        if not self._home_is_trusted():
+            self._show_missing_start_zero()
+            return False
+        if not self.at_saved_start_pose:
+            msg = {
+                "en": (
+                    "The saved start is trusted, but the printer is not marked as physically standing at that start. "
+                    "Press 'Go to saved start' first, or if it is already exactly at start, press 'Save start'. "
+                    "Little Hands will not move axes automatically right before M24."
+                ),
+                "zh": "已保存起点可信，但程序没有确认打印机当前实际停在该起点。请先点击“回到保存起点”，或如果已在起点则点击“保存起点”。Little Hands 不会在 M24 前自动移动各轴。",
+                "ru": (
+                    "Сохранённый старт доверенный, но приложение не считает, что принтер физически стоит именно в нём. "
+                    "Сначала нажми 'К сохранённому старту' или, если он уже точно в старте, нажми 'Запомнить старт'. "
+                    "Little Hands больше не будет автоматически двигать оси прямо перед M24."
+                ),
+            }.get(self.lang_var.get().strip() or "ru") or (
+                "Сначала верни принтер к сохранённому старту или заново нажми 'Запомнить старт'."
+            )
+            self.log(msg)
+            messagebox.showwarning("Little Hands", msg)
+            return False
+        return self._confirm_power_cycle_before_next_sd_start()
+
+    def _start_sd_print_from_saved_start(self, path: str) -> str:
+        if not self.at_saved_start_pose:
+            raise RuntimeError(
+                "Принтер не подтверждён в сохранённом старте перед M24. "
+                "Печать не запускаю, чтобы не делать преднагревные движения вслепую."
+            )
+        return sdtool.start_sd_print(self._port(), self._baud(), path)
+
+    def start_selected_print(self) -> None:
         path = self._selected_print_sd_path()
         display = self._selected_sd_display() or path or "-"
         if not path:
             messagebox.showerror("K9 Control Center", "Выбери файл в секции 'Файлы для печати'.")
             return
-        if not self._home_is_trusted():
-            self._show_missing_start_zero()
+        if not self._guard_sd_start_preconditions():
             return
 
         def task() -> None:
@@ -4934,11 +5062,12 @@ class K9ControlCenter:
             self._preheat_hotend_or_defer_to_sd_file(path, display, source_for_profile)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
-                out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
-                self.at_saved_start_pose = True
+                out = self._start_sd_print_from_saved_start(path)
             except Exception:
                 self._clear_predicted_print_end()
-                self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD print start failed after motion/start attempt", log_change=True)
+                self._require_power_cycle_before_next_sd_start("SD print start failed before or during M24", save=False)
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD print start failed before or during M24", log_change=True)
+                self._save_print_state("failed-start", force=True)
                 raise
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"Печать запущена: {display}")
@@ -4951,15 +5080,12 @@ class K9ControlCenter:
         self._run_task("Запуск SD-печати", task)
 
     def start_selected_print_with_home(self) -> None:
-        if not self._guard_post_print_recovery():
-            return
         path = self._selected_print_sd_path()
         display = self._selected_sd_display() or path or "-"
         if not path:
             messagebox.showerror("Little Hands", "Выбери файл в секции 'Файлы для печати'.")
             return
-        if not self._home_is_trusted():
-            self._show_missing_start_zero()
+        if not self._guard_sd_start_preconditions():
             return
 
         def task() -> None:
@@ -4967,12 +5093,13 @@ class K9ControlCenter:
             self._preheat_hotend_or_defer_to_sd_file(path, display, source_for_profile)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
-                out = sdtool.start_sd_print_from_home(self._port(), self._baud(), path)
-                self.at_saved_start_pose = True
+                out = self._start_sd_print_from_saved_start(path)
                 start_note = "Печать с SD запущена от сохранённого старта"
             except Exception:
                 self._clear_predicted_print_end()
-                self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD print start failed after motion/start attempt", log_change=True)
+                self._require_power_cycle_before_next_sd_start("SD print start failed before or during M24", save=False)
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD print start failed before or during M24", log_change=True)
+                self._save_print_state("failed-start", force=True)
                 raise
             self._mark_sd_start_sent(path, display)
             self._post("log", out.strip() or f"{start_note}: {display}")
@@ -5090,6 +5217,7 @@ class K9ControlCenter:
             finally:
                 self._clear_print_session_state("Печать: остановлена", 0.0)
                 self.bed_clear_before_go_start_required = True
+                self._require_power_cycle_before_next_sd_start("print stopped by operator", save=False)
                 self._set_home_trust(
                     HOME_TRUST_UNCERTAIN if stop_pose is not None else HOME_TRUST_INVALID,
                     "print stopped; physical position must be recovered or start must be re-saved",
@@ -5181,6 +5309,7 @@ class K9ControlCenter:
             finally:
                 self._clear_print_session_state("Печать: жёсткий стоп", 0.0)
                 self.bed_clear_before_go_start_required = True
+                self._require_power_cycle_before_next_sd_start("hard stop disabled steppers", save=False)
                 self._set_home_trust(HOME_TRUST_INVALID, "hard stop disabled steppers", log_change=True)
                 self.stopped_print_pose = None
                 self.stopped_print_display = "-"
@@ -5231,6 +5360,11 @@ class K9ControlCenter:
     def set_current_home_zero(self) -> None:
         def task() -> None:
             out = sdtool.set_current_home_zero(self._port(), self._baud())
+            had_post_print_cycle = bool(
+                self.post_print_recovery_required
+                or self.bed_clear_before_go_start_required
+                or self.next_sd_start_requires_power_cycle
+            )
             self._set_home_trust(HOME_TRUST_TRUSTED, "operator saved current physical start", log_change=True)
             self.at_saved_start_pose = True
             self.bed_clear_before_go_start_required = False
@@ -5259,9 +5393,17 @@ class K9ControlCenter:
             self._save_print_state("idle", force=True)
             if self.post_print_recovery_required:
                 self._post("post-print-recovery-clear", None)
-                self._post("log", "Стартовая поза записана после послепечатного цикла: следующая печать разрешена.")
+            if had_post_print_cycle and self.next_sd_start_requires_power_cycle:
+                self._post(
+                    "log",
+                    "Стартовая поза записана. Так как до этого была печать/остановка/сорванный старт, "
+                    "перед следующей SD-печатью приложение попросит подтвердить power cycle принтера.",
+                )
             self._post("log", out.strip() or "Стартовая поза запомнена")
-            self._post("log", "Теперь можно нажимать 'К сохранённому старту' и 'Печать с SD'.")
+            if self.next_sd_start_requires_power_cycle:
+                self._post("log", "После power cycle и подтверждения в окне старта можно запускать 'Печать с SD'.")
+            else:
+                self._post("log", "Теперь можно нажимать 'К сохранённому старту' и 'Печать с SD'.")
 
         self._run_task("Запоминание стартовой позы", task)
 
@@ -6380,6 +6522,7 @@ class K9ControlCenter:
                             self._post("log", "Печать завершена: автоматические движения не выполнялись")
                         self._post("log", finish_message)
                         self.post_print_recovery_required = True
+                        self._require_power_cycle_before_next_sd_start("completed SD print", save=False)
                         self._post("post-print-recovery", "completion")
                     duration_log = duration_s if duration_s is not None else "?"
                     self._remember_print_duration(self.current_print_file, finished_file, start_ts, finish_ts)

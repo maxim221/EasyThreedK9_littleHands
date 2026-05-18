@@ -144,9 +144,11 @@ So:
 - if USB is lost during SD printing but the print finishes normally, the operator can use `Print finished` after removing the part; Little Hands then keeps the saved predicted final pose for guarded `After print: return`
 - the SD panel has a dedicated `After print: return` button; it does not perform a separate unsafe home, but runs the same guarded recovery path as the manual `Go to saved start` button, including the clear-bed confirmation
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
-- SD start must always return to the saved `X0 Y0 Z0` immediately before `M24`; if Little Hands lifted the nozzle for hotend preheat and the preheat fails, it first undoes the known lift with a relative Z-down move before showing the error
+- SD start is now blocked unless the app knows the printer is physically at the saved `X0 Y0 Z0`; once that start is confirmed, Little Hands does not run extra service axis moves before `M24`
+- if an old `M104`-only file needs host-side preheat and Little Hands lifted the nozzle for safe heatup, the app explicitly returns the nozzle to the saved start before `M24`; if the preheat fails, it first undoes the known lift with a relative Z-down move before showing the error
 - if that relative return is not acknowledged, Little Hands preserves a failed-preheat-lift recovery marker; `Go to saved start` can retry only after the operator confirms that the print did not start and the axes were not moved by hand; after a successful retry Little Hands immediately re-declares the recovered physical start with `G92 X0 Y0 Z0`, because Marlin's logical Z may be stale after a power cycle; a failed manual jog must not clear this marker because no motion was acknowledged
-- for existing SD files that still contain an early blocking `M109`, Little Hands does not run a separate host-side preheat before `M24`: it returns to the saved start, selects the file, starts SD printing, and lets the G-code heat the hotend
+- for existing SD files that still contain an early blocking `M109`, Little Hands does not run a separate host-side preheat before `M24`: if the printer is already confirmed at the saved start, the app only selects the file and starts SD printing, and lets the G-code heat the hotend
+- after a completed, stopped, hard-stopped, or failed SD print/start, the next SD start requires explicit confirmation that the printer was power-cycled for `5–10` seconds and the start pose was saved again; pressing `Save start` alone does not clear this gate
 - new Little Hands files must not rewrite early `M109` to `M104`; only old already-prepared `M104`-only files need host preheat before `M24`. If that fallback is used, it must be one `M109` session with passive temperature parsing. Do not change this back to `M104` plus repeated `M105` polling; that mode can leave this K9 near warm-bed temperature and then non-responsive.
 - if Marlin shows a hotend target and positive heater output but the first minute of temperature rise is small, treat it as this K9's slow-start hotend/sensor behavior: log a warning and keep waiting up to the full preheat timeout; still abort quickly if the target drops to `/0C`, heater output stays `@0`, or `M109` stops producing temperature lines
 
@@ -221,7 +223,7 @@ If a different slicer version is used, configure it from `docs/cura/SETTINGS.md`
 6. Set the physical start pose.
 7. Press `Save start`.
 8. Press `Go to saved start` and confirm it returns correctly.
-9. Start printing from SD. Manual hotend preheat is not needed. If the selected SD file contains its own early `M109`, Little Hands returns to the saved start, sends `M23`/`M24`, and heatup happens inside the G-code.
+9. Start printing from SD. Manual hotend preheat is not needed. If the selected SD file contains its own early `M109`, Little Hands sends only `M23`/`M24` from the already-confirmed saved start, and heatup happens inside the G-code.
 10. If the file was uploaded through current Little Hands or exported by the bundled helper, the early `M109` stays in the SD file; this is the normal path. Old prepared `M104`-only files should be regenerated, but the app can still heat them through the host-side fallback.
 11. After `M24`, Little Hands keeps USB fully quiet for `180` seconds. This is expected and helps this K9 enter SD printing reliably.
 12. During any remaining `M109` in older G-code, firmware may not answer ordinary `M105` / `M27`; Little Hands first listens passively for `M109` temperature lines and avoids stuffing the queue with extra commands.
@@ -238,7 +240,7 @@ After a successful SD print, use this order before starting the next one:
 5. Press `Save start`.
 6. Start the next SD print.
 
-The app blocks repeated SD starts after completion until this recovery cycle is acknowledged.
+The app blocks repeated SD starts after completion until this recovery cycle and the power cycle are acknowledged.
 
 ## 11. Recovery Rule
 

@@ -89,6 +89,7 @@ This means:
 - if hotend preheat fails after Little Hands lifted Z for clearance, `Go to saved start` can offer a guarded retry that lowers Z by the same known preheat lift; accept it only if the print did not start and the axes were not moved by hand
 - if the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet
 - after a normal print finish, the SD panel `After print: return` button runs the same guarded recovery path as `Go to saved start` and requires a clear bed
+- after a completed, stopped, or failed SD print/start, the app requires a confirmed printer power cycle and a fresh `Save start` before the next `M24`, so this K9 cannot skip the file-local `M109` and begin cold movements
 
 ## External Warm Bed / Hotbed Note
 

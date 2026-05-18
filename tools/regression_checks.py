@@ -84,14 +84,21 @@ def main() -> int:
     )
     require("_lift_from_saved_start_for_preheat_if_needed" in app, "App must lift from saved Z0 before long SD preheat.", failures)
     require(
-        "sdtool.start_sd_print(" not in app,
-        "GUI SD-start paths must not bypass start_sd_print_from_home after a preheat clearance lift.",
+        "_start_sd_print_from_saved_start" in app
+        and "return sdtool.start_sd_print(self._port(), self._baud(), path)" in app,
+        "GUI SD-start paths must use the no-service-move M23/M24 helper once saved start is confirmed.",
+        failures,
+    )
+    require(
+        "sdtool.start_sd_print_from_home(" not in app,
+        "GUI SD-start paths must not run extra service axis moves immediately before M24.",
         failures,
     )
     require(
         "_preheat_hotend_for_sd_start_with_clearance" in app
-        and "_return_to_saved_start_after_failed_preheat" in app,
-        "Failed hotend preheat after a clearance lift must return to saved start.",
+        and "_return_to_saved_start_after_failed_preheat" in app
+        and "_return_to_saved_start_after_successful_preheat" in app,
+        "Hotend preheat after a clearance lift must return to saved start before M24 or before surfacing failure.",
         failures,
     )
     require(
@@ -144,6 +151,13 @@ def main() -> int:
         and "hotend будет греться внутри G-code" in app
         and "_file_owns_blocking_hotend_wait" in app,
         "Every GUI SD-start path must either use clearance-aware host preheat or defer to a file-local blocking M109.",
+        failures,
+    )
+    require(
+        "next_sd_start_requires_power_cycle" in app
+        and "_confirm_power_cycle_before_next_sd_start" in app
+        and "одного `Save start` без этого подтверждения недостаточно" in read("docs/PRINTER_AND_FIRMWARE.ru.md"),
+        "Post-print/stop/failed-start restart must require explicit power-cycle confirmation before the next M24.",
         failures,
     )
     require(

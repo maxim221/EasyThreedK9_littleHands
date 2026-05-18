@@ -2796,3 +2796,22 @@ After each test print, append:
   - the app now mirrors that workflow for known SD files that still contain an early blocking `M109`: it does not duplicate a separate host preheat before `M24`, and lets the G-code own hotend heatup
   - new app uploads and Cura helper exports no longer rewrite early `M109` to `M104`; old `M104`-only prepared files remain supported by a host-preheat fallback, but should be regenerated when possible
   - failed-preheat recovery now re-declares the recovered physical start with `G92 X0 Y0 Z0` after the known `Z-10` return, because after a power cycle Marlin's logical Z may be stale even when the physical nozzle is back at start
+
+## 2026-05-18 Guarded Post-Print Restart And No-Move M24 Start
+
+- Field observation:
+  - after a previous print/stop cycle, the operator saved a new start and pressed SD start
+  - instead of entering a clear hotend heatup, the printer made short cold-looking movements and the hotend target stayed `/0`
+  - logs showed Little Hands had allowed the next print after `Save start` even though the K9 had just been in a post-print/stop recovery state
+- Fix:
+  - after completed, stopped, hard-stopped, or failed SD starts, Little Hands now keeps a separate `next SD start requires power cycle` gate
+  - `Save start` records the physical start but does not clear that gate by itself
+  - the next SD start asks the operator to confirm a real 5-10 second printer power cycle, physical start check, and fresh `Save start`
+  - if the app does not know that the printer is physically at the saved start, SD start is blocked instead of auto-moving axes before `M24`
+- SD start behavior:
+  - for files with their own early blocking `M109`, Little Hands now sends the no-service-move `M23`/`M24` path from the already-confirmed start
+  - this removes the previous pre-`M24` axis dance that could look like chaotic cold motion
+  - legacy `M104`-only files still use host-side `M109` preheat, but if Little Hands lifted Z for that preheat it now explicitly returns the nozzle to saved start before `M24`
+- Manual recovery performed:
+  - the current printer was returned from the saved stopped pose `X7.98 Y69.40 Z6.70` back to `X0 Y0 Z0`
+  - `G92 X0 Y0 Z0` was re-sent after the return, and `M105` showed the hotend idle around `44.6C /0`
