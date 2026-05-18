@@ -1,0 +1,13 @@
+diff --git a/Marlin/Configuration.h b/Marlin/Configuration.h
+--- a/Marlin/Configuration.h
++++ b/Marlin/Configuration.h
+@@
+-#define LH_FIRMWARE_LABEL "LH v4 YZSwap AutoFan45 FAN1 Z600 E1040"
++#define LH_FIRMWARE_LABEL "LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180"
+diff --git a/Marlin/Configuration_adv.h b/Marlin/Configuration_adv.h
+--- a/Marlin/Configuration_adv.h
++++ b/Marlin/Configuration_adv.h
+@@
+-  #define WATCH_TEMP_PERIOD  60               // Seconds
++  #define WATCH_TEMP_PERIOD  180              // Seconds. K9 hotend/sensor can look slow during cold starts.
+   #define WATCH_TEMP_INCREASE 2               // Degrees Celsius

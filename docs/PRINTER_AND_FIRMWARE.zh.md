@@ -12,19 +12,20 @@
 
 - 这并不意味着所有 `K9` 都完全相同
 - 在开发过程中，不同 `K9` 已经表现出不同的行为
-- 当前最安全的公开基线使用 `LH v4`
+- 当前安全公开候选版本使用 `LH v5`，它基于已验证的 `LH v4` 运动基线
 
 ## 2. 当前推荐固件
 
 请使用：
 
-- `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- `firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 
 选择它的原因：
 
 - 固件会在 `M115` 中给出明确的 `LH` 身份
 - 已验证与 `Little Hands` 兼容
 - `FAN1` 在 `45C` 自动启停
+- hotend `WATCH_TEMP_PERIOD 180s`，用于避免 K9 冷启动慢升温时误报 `Heating failed`，同时保留热保护
 - 使用接近 stock 的运动参数：
   - `X606`
   - `Y606`
@@ -39,7 +40,7 @@
 
 刷写成功后，应用应能识别出类似：
 
-- `LH v4 YZSwap AutoFan45 FAN1 Z600 E1040`
+- `LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180`
 
 ## 4. 安全刷写流程
 
@@ -47,7 +48,7 @@
 
 1. 打开 `Files & Firmware`
 2. 选择：
-   - `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+   - `firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 3. 上传固件到打印机 SD
 4. 等待打印机完成刷写 / 重启
 5. 之后从卡上删除 `mksLite.bin` 或 `mksLite.CUR`
@@ -91,13 +92,13 @@
 
 已确认：
 
-- 已验证的 `LH v4` 在 `M503` 中显示正确步进比例：`M92 X606 Y606 Z600 E1040`
+- 已验证的 `LH v4` / `LH v5` 运动基线在 `M503` 中显示正确步进比例：`M92 X606 Y606 Z600 E1040`
 - 慢速 `G1 Y5 F300` 测试可以让平台双向移动
 - 使用 EEPROM 中保存的激进 profile `M201 Y1000` / `M204 T1000` 做快速手动 jog 时会丢步：Marlin 认为 20 mm 已完成，但平台实际几乎没有移动
 
 错误速度/动态的来源：
 
-- 当前公开 `LH v4` 对应 `firmware_src/ECF-Marlin-upstream/Marlin/Configuration.h`
+- 当前公开 `LH v5` 对应 `firmware_src/ECF-Marlin-upstream/Marlin/Configuration.h`
 - 这个源码树里默认加速度是 `DEFAULT_MAX_ACCELERATION {1000,1000,100,1000}` 和 `DEFAULT_TRAVEL_ACCELERATION 1000`
 - 这些值被保存进 EEPROM/设置，并会在断电重启后继续存在
 
@@ -107,7 +108,9 @@
 - Little Hands 对 recovery 移动保持柔和的 `M204 T80` service-idle 状态，长距离平台 service/recovery 移动约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右约 `F900`
 - `5 mm` 短距离诊断移动中，平台到 `F600` 也可工作，现在 UI 会遵循已验证的手动移动上下文，而不是过度放慢移动
 - Cura baseline 将 travel acceleration 保持在 `200 mm/s^2` 或更低
-- 下一次重新构建固件时，应用已跟踪的补丁：`docs/firmware/LH-v4-safe-motion.patch`
+- 后续固件重建应保留 `WATCH_TEMP_PERIOD 180s`，除非单独冷启动加热测试证明有更安全的替代值
+- 下一次重新构建固件时，保留 `docs/firmware/LH-v4-safe-motion.patch` 中的 safe-motion 假设
+- 同时应用 `docs/firmware/LH-v5-watch180.patch`，保证固件身份和 hotend thermal-watch 行为可复现
 - 如果平台或喷头嗡嗡响、丢步或几乎不动，先检查速度/加速度，再怀疑电机或驱动
 
 ## 6. Home 的工作方式
@@ -208,7 +211,7 @@ G92 X0 Y0 Z0
 
 ## 9. 首次安全打印流程
 
-1. 刷写 `LH v4`
+1. 刷写 `LH v5`
 2. 确认 tiny jog 映射正确
 3. 确认外部热床已经预热
 4. 在已验证的 Cura 机器/配置中切片

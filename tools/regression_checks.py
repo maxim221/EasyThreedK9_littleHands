@@ -35,6 +35,7 @@ def main() -> int:
     cura_quality = read("docs/cura/quality_changes/codex_k9_warmmat_quality.inst.cfg")
     cura_extruder = read("docs/cura/quality_changes/codex_k9_warmmat_extruder_quality.inst.cfg")
     cura_machine = read("docs/cura/definition_changes/lilHands_k9_warmmat_settings.inst.cfg")
+    firmware_watch_patch = read("docs/firmware/LH-v5-watch180.patch")
 
     require("SOFT_TRAVEL_ACCEL = 80" in marlin, "K9 service travel acceleration must remain M204 T80.", failures)
     require(
@@ -48,6 +49,21 @@ def main() -> int:
     require('"M204 T1000"' not in marlin, "k9_marlin_sd.py must not hard-code M204 T1000.", failures)
     require('"M204 T1000"' not in app, "k9_control_center.py must not hard-code M204 T1000.", failures)
     require("JOG_RESTORE_TRAVEL_ACCEL = 80" in app, "Manual jog must leave service travel acceleration at T80.", failures)
+    require(
+        "LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin" in app,
+        "App default firmware must point at the current LH v5 Watch180 build.",
+        failures,
+    )
+    require(
+        'LH_FIRMWARE_LABEL "LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180"' in firmware_watch_patch,
+        "Tracked LH v5 firmware patch must expose the Watch180 identity through M115.",
+        failures,
+    )
+    require(
+        "WATCH_TEMP_PERIOD  180" in firmware_watch_patch and "WATCH_TEMP_INCREASE 2" in firmware_watch_patch,
+        "Tracked LH v5 firmware patch must keep thermal protection enabled but give the slow K9 hotend a 180s heating watch window.",
+        failures,
+    )
     require("SERVICE_BED_FEEDRATE = 240" in app, "App long bed service moves must remain F240.", failures)
     require("JOG_BED_FEEDRATE = 600" in app, "App manual bed jog must match the validated manual F600 test.", failures)
     require("BED_JOG_SEGMENT_MM" not in app, "Manual bed jog must honor the selected UI step as a single move.", failures)

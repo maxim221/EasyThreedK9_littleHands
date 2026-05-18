@@ -4,7 +4,7 @@ Little Hands — это Linux-приложение для управления �
 
 - принтер: `EasyThreeD K9`
 - семейство плат: `ET4000+ / ET4000PLUS`
-- текущая проверенная прошивка: `LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- текущая кандидатная прошивка: `LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - базовый слайсер: `Cura 5.11`
 - нагрев стола: внешний `hotbed / warm mat`, не подключённый электрически к плате принтера
 
@@ -55,7 +55,7 @@ Little Hands — это Linux-приложение для управления �
 
 - протестированный принтер: `EasyThreeD K9`
 - протестированное семейство плат: `ET4000+ / ET4000PLUS`
-- протестированная прошивка: `LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- базовая прошивка для тестов: `LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - протестированное приложение: `tools/k9_control_center.py`
 - протестированная машина Cura: `lilHands K9 warm mat`
 - протестированный профиль Cura: `codex - K9 warm mat cautious`
@@ -134,7 +134,7 @@ python3 tools/k9_control_center.py
 
 Текущий публичный рекомендуемый baseline:
 
-- [`firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`](firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin)
+- [`firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`](firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin)
 
 Исторические и экспериментальные прошивки тоже лежат в `firmware/`, но это не лучший старт для нового пользователя.
 

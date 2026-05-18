@@ -12,20 +12,21 @@ Important:
 
 - this is **not** a blanket claim that every `K9` is identical
 - different `K9` units already showed different behavior during development
-- the current safe public baseline uses `LH v4`
+- the current safe public candidate uses `LH v5`, based on the validated `LH v4` motion baseline
 - the safe claim here is the `ET4000+ / ET4000PLUS` board family; an exact silkscreen subrevision was not separately frozen in this public doc pack
 
 ## 2. Current Recommended Firmware
 
 Use:
 
-- `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- `firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 
-This build is the current public default because it matches the validated public K9 baseline:
+This build is the current public default candidate because it matches the validated public K9 motion baseline and extends the hotend heating watchdog window:
 
 - explicit `LH` firmware label in `M115`
 - working `Little Hands` compatibility
 - `FAN1` auto-fan at `45C`
+- hotend `WATCH_TEMP_PERIOD 180s` to avoid false `Heating failed` on slow K9 cold starts while keeping thermal protection enabled
 - stock-like motion values:
   - `X606`
   - `Y606`
@@ -40,7 +41,7 @@ This build is the current public default because it matches the validated public
 
 After a successful flash, the app should recognize something like:
 
-- `LH v4 YZSwap AutoFan45 FAN1 Z600 E1040`
+- `LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180`
 
 That identity comes from the firmware itself through `M115`.
 
@@ -50,7 +51,7 @@ That identity comes from the firmware itself through `M115`.
 
 1. Open `Files & Firmware`.
 2. Select:
-   - `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+   - `firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 3. Upload the firmware to the printer SD.
 4. Let the printer reboot / complete the flash.
 5. Remove `mksLite.bin` or `mksLite.CUR` from the card afterward.
@@ -94,13 +95,13 @@ The previous printer was most likely not killed by a bad Y motor or a dead drive
 
 What was confirmed:
 
-- `M503` on the validated `LH v4` reports correct step scaling: `M92 X606 Y606 Z600 E1040`
+- `M503` on the validated `LH v4` / `LH v5` motion baseline reports correct step scaling: `M92 X606 Y606 Z600 E1040`
 - a slow `G1 Y5 F300` test moves the bed both ways
 - fast manual jog with the saved EEPROM profile `M201 Y1000` / `M204 T1000` can skip steps: Marlin believes the 20 mm move completed, but the bed physically barely moves
 
 Where the bad speed/dynamics came from:
 
-- the current public `LH v4` matches `firmware_src/ECF-Marlin-upstream/Marlin/Configuration.h`
+- the current public `LH v5` matches `firmware_src/ECF-Marlin-upstream/Marlin/Configuration.h`
 - that tree had `DEFAULT_MAX_ACCELERATION {1000,1000,100,1000}` and `DEFAULT_TRAVEL_ACCELERATION 1000`
 - those values were saved in EEPROM/settings and survive power cycles
 
@@ -110,7 +111,9 @@ Current rule:
 - Little Hands now leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service/recovery paths around `F240`, uses the validated `F600` / `M204 P80 T80` context for manual bed jogs, and moves the head left/right around `F900`
 - short diagnostic bed moves up to `F600` worked over `5 mm`, and the UI now follows the validated manual context instead of over-softening the move
 - the Cura baseline keeps travel acceleration at or below `200 mm/s^2`
-- for the next firmware rebuild, apply the tracked patch: `docs/firmware/LH-v4-safe-motion.patch`
+- keep `WATCH_TEMP_PERIOD 180s` in future firmware rebuilds unless a physical cold-start heat test proves a safer replacement
+- for the next firmware rebuild, preserve the tracked safe-motion patch assumptions from `docs/firmware/LH-v4-safe-motion.patch`
+- also apply `docs/firmware/LH-v5-watch180.patch` so firmware identity and hotend thermal-watch behavior stay reproducible
 - if the bed or head buzzes, skips, or barely moves, check speed/acceleration first, before blaming the motor or driver
 
 ## 6. How Home Works Here
@@ -216,7 +219,7 @@ If a different slicer version is used, configure it from `docs/cura/SETTINGS.md`
 
 ## 9. First Safe Print Workflow
 
-1. Flash `LH v4`.
+1. Flash `LH v5`.
 2. Confirm tiny jog mapping.
 3. Confirm the external warm bed is preheated.
 4. Slice in the validated Cura machine/profile.

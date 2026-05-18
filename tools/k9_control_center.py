@@ -33,7 +33,7 @@ import k9_marlin_sd as sdtool
 
 PROJECT_ROOT = Path("/home/maxim/draftCode/littleHands")
 CURA_ROOT = Path.home() / ".local/share/cura/5.11"
-DEFAULT_FIRMWARE = PROJECT_ROOT / "firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin"
+DEFAULT_FIRMWARE = PROJECT_ROOT / "firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin"
 LOG_DIR = PROJECT_ROOT / "monitor_logs"
 GUI_EXPORT_DIR = LOG_DIR / "gui_exports"
 RUNTIME_LOG_PATH = LOG_DIR / "little_hands_runtime.log"
@@ -214,6 +214,12 @@ LH_FIRMWARE_CATALOG = {
         "marlin": "2.1.2.5",
         "m92": (606.0, 606.0, 600.0, 1040.0),
     },
+    "LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin": {
+        "lh_version": "LH v5",
+        "label": "LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 600.0, 1040.0),
+    },
     "ecf-k9-et4000plus-mksLite.bin": {
         "lh_version": "LH ECF",
         "label": "LH ECF Baseline",
@@ -230,7 +236,7 @@ MANUAL_TEXT = textwrap.dedent(
     Little Hands — центр управления рабочим процессом EasyThreed K9 / ET-4000+ в этом проекте. Приложение готовит и загружает Cura G-code, запускает печать с SD-карты, показывает температуру и статус SD, ведёт кольцевой лог и помогает вернуть принтер к сохранённой стартовой позе после печати.
 
     Аппаратная база
-    - Прошивка: LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin.
+    - Прошивка: LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin.
     - Единственный вентилятор принтера используется как hotend auto-fan на FAN1: ниже примерно 45C выключен, выше примерно 45C включён.
     - Внешний warm bed / hotbed не управляется прошивкой принтера.
     - В этом workflow не используется обычный Marlin G28. У этого K9 в проверенной конфигурации нет надёжного home по концевикам.
@@ -350,7 +356,7 @@ MANUAL_TEXTS = {
         Little Hands is a control center for the EasyThreed K9 / ET-4000+ workflow used in this project. It prepares and uploads Cura G-code, starts SD-card prints, watches temperature and SD status, keeps a ring log, and helps recover the printer to the saved start pose after a print.
 
         Hardware baseline
-        - Firmware: LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin
+        - Firmware: LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin
         - The single printer fan is used as the hotend auto-fan on FAN1: off below about 45C, on above about 45C.
         - The warm bed / hotbed is external and is not controlled by the printer firmware.
         - Do not use normal Marlin G28 homing in this workflow. This K9 has no reliable endstop-based home in the validated setup.
@@ -441,7 +447,7 @@ MANUAL_TEXTS = {
         Little Hands 是本项目 EasyThreed K9 / ET-4000+ 工作流的控制中心。它可以准备和上传 Cura G-code、从 SD 卡启动打印、观察温度和 SD 状态、保存环形日志，并在打印结束后帮助打印机回到保存的起点。
 
         硬件基线
-        - 固件：LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin
+        - 固件：LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin
         - 打印机唯一风扇接在 FAN1，作为 hotend auto-fan：约 45C 以下关闭，约 45C 以上开启。
         - 外部 warm bed / hotbed 不由打印机固件控制。
         - 此工作流不要使用普通 Marlin G28 回零。当前验证配置中，这台 K9 没有可靠的限位开关 home。
@@ -4356,7 +4362,7 @@ class K9ControlCenter:
             return [f"Не удалось прочитать файл: {info['read_error']}"], warnings, info
 
         if source.name.lower().endswith("_k9xz.gcode"):
-            errors.append("Файл похож на старый `_k9xz.gcode` с ремапом плоскости. Для текущей LH-v4 нужен обычный Cura G-code.")
+            errors.append("Файл похож на старый `_k9xz.gcode` с ремапом плоскости. Для текущей LH-v5 нужен обычный Cura G-code.")
         filament_m = info.get("filament_m")
         if "modulebot" in source.name.lower() and isinstance(filament_m, (int, float)) and filament_m > 15.0:
             errors.append(
@@ -6636,7 +6642,7 @@ class K9ControlCenter:
 def main() -> int:
     root = tk.Tk(className="little-hands-control-center")
     app = K9ControlCenter(root)
-    app.log("Little Hands готов. Baseline: LH v4, auto-fan FAN1 45C, operator-facing manual-zero workflow, печать с SD от сохранённого старта.")
+    app.log("Little Hands готов. Baseline: LH v5, auto-fan FAN1 45C, Watch180, operator-facing manual-zero workflow, печать с SD от сохранённого старта.")
     app.log("Порт должен быть свободен от Cura и других мониторов.")
     root.mainloop()
     return 0

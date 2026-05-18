@@ -2832,3 +2832,19 @@ After each test print, append:
   - `M23/M24` still uses the no-service-move start path from confirmed saved start, so no extra axis dance happens immediately before the file starts
   - the early file-local `M109` remains in G-code as a second safety wait, but Little Hands no longer relies on it as the only heat gate
   - the UI hard stop now includes `M410` and terminal `M112` so chaotic motion can be halted from the application
+
+## 2026-05-18 LH v5 Watch180 Thermal-Watch Candidate
+
+- Field observation:
+  - a cold host-side `M109 S226` preheat climbed only from about `40.5C` to `42.6C` during the first minute while Marlin reported positive heater output `@:127`
+  - the firmware then halted itself with `Error:Heating failed, system stopped! Heater_ID: E0`
+  - Little Hands correctly refused to send `M24`, preserved the known `10 mm` preheat-lift recovery marker, and left the operator to power-cycle before axis recovery
+- Root cause:
+  - the public `LH v4` firmware kept Marlin's hotend `WATCH_TEMP_PERIOD` at `60s`
+  - this K9 hotend/sensor path can look slower than that on a cold start, so the firmware can false-trip `Heating failed` before the real temperature rise becomes visible
+- Fix / candidate:
+  - built `firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
+  - the only intended thermal behavior change is `WATCH_TEMP_PERIOD 60s -> 180s`; thermal protection remains enabled and `WATCH_TEMP_INCREASE` remains `2C`
+  - firmware identity is now `LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180`
+  - Little Hands default firmware selection and docs now point at `LH v5`
+  - after flashing, the required physical validation is: power-cycle, recover from preheat lift if needed, confirm `M115` reports `LH v5`, run a cold preheat/start, and verify that the hotend reaches target before `M24` starts SD printing

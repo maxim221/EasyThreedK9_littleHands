@@ -4,7 +4,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 
 - 打印机：`EasyThreeD K9`
 - 主板家族：`ET4000+ / ET4000PLUS`
-- 当前验证通过的固件：`LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- 当前候选固件：`LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - 切片器基线：`Cura 5.11`
 - 热床基线：外部 warm mat / hotbed，不直接连接到打印机主板
 
@@ -55,7 +55,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 
 - 已验证打印机：`EasyThreeD K9`
 - 已验证主板家族：`ET4000+ / ET4000PLUS`
-- 已验证固件：`LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- 测试基线固件：`LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - 已验证应用：`tools/k9_control_center.py`
 - 已验证 Cura 机器：`lilHands K9 warm mat`
 - 已验证 Cura 配置：`codex - K9 warm mat cautious`
@@ -118,4 +118,4 @@ python3 tools/k9_control_center.py
 
 ## 推荐固件
 
-- [`firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`](firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin)
+- [`firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`](firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin)

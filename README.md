@@ -4,7 +4,7 @@ Little Hands is a Linux desktop control center for a very specific 3D-printer se
 
 - printer: `EasyThreeD K9`
 - board family: `ET4000+ / ET4000PLUS`
-- current validated firmware: `LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- current firmware candidate: `LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - slicer baseline: `Cura 5.11`
 - heated bed baseline: external warm mat / hotbed, not electrically wired into the printer mainboard
 
@@ -55,7 +55,7 @@ The current public baseline is a validated `EasyThreeD K9` setup with:
 
 - tested printer family: `EasyThreeD K9`
 - tested board family: `ET4000+ / ET4000PLUS`
-- tested firmware: `LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- tested firmware baseline: `LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - tested app: `tools/k9_control_center.py`
 - tested Cura machine: `lilHands K9 warm mat`
 - tested Cura profile: `codex - K9 warm mat cautious`
@@ -135,7 +135,7 @@ Manual settings for other slicer versions are in [docs/cura/SETTINGS.md](docs/cu
 
 Use this file for the current public baseline:
 
-- [`firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`](firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin)
+- [`firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`](firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin)
 
 Archive and historical firmware files are kept in `firmware/`, but they are not the recommended default for new users.
 
