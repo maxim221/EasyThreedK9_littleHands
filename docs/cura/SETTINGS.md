@@ -177,8 +177,8 @@ The generated G-code must satisfy all of these:
 - no real startup `G28`
 - contains `G92 X0 Y0 Z0` near the start
 - contains a hotend target command such as `M104` / `M109`
-- early blocking `M109` should stay in the SD file; Little Hands starts the SD file and lets that file own the hotend heat wait instead of duplicating host preheat before `M24`
-- old already-prepared `M104`-only files should be regenerated; the app keeps host-preheat fallback only for compatibility with them
+- early blocking `M109` should stay in the SD file; Little Hands still confirms hotend heatup with a host-side `M109` before `M24`, and the file-local `M109` remains as an extra safety wait
+- old already-prepared `M104`-only files are also supported by the same host preheat before `M24`
 - bed target remains `0C`
 - Cura / slicer bounds are sane and fit inside the `100 x 100 mm` bed
 - height fits inside `100 mm`

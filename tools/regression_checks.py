@@ -146,11 +146,11 @@ def main() -> int:
         failures,
     )
     require(
-        "_preheat_hotend_or_defer_to_sd_file" in app
-        and app.count("_preheat_hotend_or_defer_to_sd_file(") >= 4
-        and "hotend будет греться внутри G-code" in app
-        and "_file_owns_blocking_hotend_wait" in app,
-        "Every GUI SD-start path must either use clearance-aware host preheat or defer to a file-local blocking M109.",
+        "_preheat_hotend_before_sd_start" in app
+        and app.count("_preheat_hotend_before_sd_start(") >= 4
+        and "сначала доказываю нагрев hotend" in app
+        and "Если нагрев не подтвердится, M24 не будет отправлен" in app,
+        "Every GUI SD-start path must prove host-side hotend preheat before M24.",
         failures,
     )
     require(

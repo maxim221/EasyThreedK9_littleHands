@@ -90,6 +90,7 @@ This means:
 - if the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet
 - after a normal print finish, the SD panel `After print: return` button runs the same guarded recovery path as `Go to saved start` and requires a clear bed
 - after a completed, stopped, or failed SD print/start, the app requires a confirmed printer power cycle and a fresh `Save start` before the next `M24`, so this K9 cannot skip the file-local `M109` and begin cold movements
+- before `M24`, Little Hands confirms hotend heatup itself with a host-side `M109`; if heatup is not confirmed, SD print is not started
 
 ## External Warm Bed / Hotbed Note
 

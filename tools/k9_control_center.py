@@ -58,6 +58,7 @@ PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC = 30 * 60
 PRINT_END_CONTRACT = "LH_END_GCODE_V1"
 PRINT_END_MAX_Z = 100.0
 DEFAULT_PRINT_HOTEND_TARGET_C = 218.0
+PRINT_PREHEAT_BLOCKING_M109_EXTRA_C = 7.0
 PRINT_PREHEAT_MARGIN_C = 2.0
 PRINT_PREHEAT_TIMEOUT_SEC = 420.0
 PRINT_PREHEAT_NO_REPLY_GRACE_SEC = 60.0
@@ -250,7 +251,7 @@ MANUAL_TEXT = textwrap.dedent(
     4. Нажми "Запомнить старт".
     5. Выбери файл в блоке "Файлы на SD принтера".
     6. Нажми "Старт печати".
-    7. Если принтер уже подтверждён в сохранённом X0 Y0 Z0, Little Hands не двигает оси перед M24: он выбирает файл, запускает SD-печать, а ранний M109 греет hotend внутри самого G-code.
+    7. Little Hands сначала подтверждает нагрев hotend через собственный M109, затем возвращает сопло в сохранённый X0 Y0 Z0 и только после этого отправляет M23/M24. Если нагрев не подтверждён, печать не стартует.
     8. После старта печати USB-телеметрия может временно молчать. Если принтер греется, двигается или печатает, не делай power cycle только из-за молчания телеметрии.
 
     После штатного завершения печати
@@ -370,7 +371,7 @@ MANUAL_TEXTS = {
         4. Press "Save start".
         5. Select a file in "Printer SD files".
         6. Press "Start print".
-        7. If the printer is already confirmed at the saved X0 Y0 Z0, Little Hands does not move axes before M24: it selects the file, starts SD printing, and the early M109 heats the hotend inside the G-code.
+        7. Little Hands first confirms hotend heatup with its own M109, then returns the nozzle to the saved X0 Y0 Z0 and only then sends M23/M24. If heatup is not confirmed, the print does not start.
         8. After the print begins, USB telemetry can be quiet for a while. If the printer is heating, moving, or printing, do not power-cycle just because telemetry is quiet.
 
         After a normal print finish
@@ -461,7 +462,7 @@ MANUAL_TEXTS = {
         4. 点击 "Save start"。
         5. 在 "Printer SD files" 中选择文件。
         6. 点击 "Start print"。
-        7. 如果打印机已确认在保存的 X0 Y0 Z0，Little Hands 不会在 M24 前移动各轴：它会选择文件、启动 SD 打印，早期 M109 会在 G-code 内部加热 hotend。
+        7. Little Hands 先用自己的 M109 确认 hotend 已加热，然后把喷嘴返回保存的 X0 Y0 Z0，最后才发送 M23/M24。如果加热没有确认，打印不会启动。
         8. 打印开始后，USB 遥测可能会安静一段时间。如果打印机正在加热、移动或出料，不要仅因遥测安静就断电。
 
         正常打印完成后
@@ -1271,36 +1272,25 @@ class K9ControlCenter:
             base_target = float(target)
         else:
             base_target = DEFAULT_PRINT_HOTEND_TARGET_C
+        has_blocking_m109 = True if profile is None else bool(isinstance(profile, dict) and profile.get("has_blocking_m109"))
+        if has_blocking_m109 and base_target < 220.0:
+            return base_target + PRINT_PREHEAT_BLOCKING_M109_EXTRA_C
         return base_target
 
-    def _file_owns_blocking_hotend_wait(self, sd_path: str, display: str, source: Path | None = None) -> bool:
+    def _preheat_hotend_before_sd_start(self, sd_path: str, display: str, source: Path | None = None) -> None:
         profile = self._profile_for_print(sd_path, display, source)
         if profile is None:
-            # Unknown SD files from Cura usually own their startup M109.
-            # Duplicating host preheat before M24 is riskier for this K9 than
-            # letting the SD file run its own heat wait.
-            return True
-        return bool(isinstance(profile, dict) and profile.get("has_blocking_m109"))
-
-    def _preheat_hotend_or_defer_to_sd_file(self, sd_path: str, display: str, source: Path | None = None) -> None:
-        profile = self._profile_for_print(sd_path, display, source)
-        file_owns_heat_wait = profile is None or bool(profile.get("has_blocking_m109"))
-        if file_owns_heat_wait:
-            reason = (
-                "профиль этого SD-файла неизвестен, поэтому безопаснее считать, что startup M109 остался в G-code"
-                if profile is None
-                else "в этом G-code есть ранний блокирующий M109"
-            )
-            self._post(
-                "log",
-                f"{reason}: не делаю отдельный host-preheat до M24. "
-                "Little Hands не будет двигать оси перед M24: он только выберет SD-файл и запустит его, "
-                "а hotend будет греться внутри самого G-code.",
-            )
-            self._post("files-status", "SD-start: hotend будет греться внутри G-code (M109)")
-            self._post("progress", ("SD-start: прогрев будет внутри G-code", 0.0))
-            return
-        target = self._hotend_target_for_print(sd_path, display, None)
+            reason = "профиль SD-файла неизвестен"
+        elif bool(profile.get("has_blocking_m109")):
+            reason = "в G-code есть ранний блокирующий M109"
+        else:
+            reason = "старый/подготовленный G-code не содержит ранний M109"
+        target = self._hotend_target_for_print(sd_path, display, source)
+        self._post(
+            "log",
+            f"{reason}: сначала доказываю нагрев hotend на стороне Little Hands до {target:.0f}C. "
+            "Если нагрев не подтвердится, M24 не будет отправлен и принтер не начнёт холодные движения.",
+        )
         self._preheat_hotend_for_sd_start_with_clearance(target)
 
     def _preheat_hotend_for_sd_start(self, target: float) -> None:
@@ -3490,8 +3480,8 @@ class K9ControlCenter:
         self._post("progress", ("Печать: старт отправлен, жду вход в SD-печать", 0.0))
         self._post(
             "log",
-            "Старт SD отправлен. Hotend либо уже прогрет Little Hands, либо сейчас греется внутри SD-файла через M109; "
-            "теперь K9 может несколько минут отвечать busy или молчать, пока входит в SD-печать. "
+            "Старт SD отправлен только после подтверждённого предпрогрева hotend на стороне Little Hands. "
+            "Теперь K9 может несколько минут отвечать busy или молчать, пока входит в SD-печать. "
             "Не обновляй список SD в этот момент.",
         )
         self._post(
@@ -4603,7 +4593,7 @@ class K9ControlCenter:
             return source, False
         changes: list[str] = []
         if info.get("has_blocking_m109"):
-            changes.append("ранний блокирующий M109 сохранён; hotend будет греться внутри SD G-code после M24")
+            changes.append("ранний блокирующий M109 сохранён; Little Hands прогреет hotend перед M24, а файловый M109 останется страховкой")
         if removed_fan_commands:
             changes.append(f"удалены команды вентилятора M106/M107 ({removed_fan_commands}), потому что у K9 один firmware-managed hotend fan")
         self._post("log", "G-code подготовлен для K9: " + "; ".join(changes) + ".")
@@ -4870,7 +4860,7 @@ class K9ControlCenter:
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
             self._post("upload-cancel-visible", (False, False))
-            self._preheat_hotend_or_defer_to_sd_file(dest, source.name, upload_source)
+            self._preheat_hotend_before_sd_start(dest, source.name, upload_source)
             self._prime_print_end_contract(dest, source.name, upload_source)
             try:
                 out = self._start_sd_print_from_saved_start(dest)
@@ -5059,7 +5049,7 @@ class K9ControlCenter:
 
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
-            self._preheat_hotend_or_defer_to_sd_file(path, display, source_for_profile)
+            self._preheat_hotend_before_sd_start(path, display, source_for_profile)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
                 out = self._start_sd_print_from_saved_start(path)
@@ -5090,7 +5080,7 @@ class K9ControlCenter:
 
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
-            self._preheat_hotend_or_defer_to_sd_file(path, display, source_for_profile)
+            self._preheat_hotend_before_sd_start(path, display, source_for_profile)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
                 out = self._start_sd_print_from_saved_start(path)
@@ -5299,8 +5289,8 @@ class K9ControlCenter:
                 out = sdtool.run_commands(
                     self._port(),
                     self._baud(),
-                    ["M108", "M524", "M104 S0", "M140 S0", "M107", "M400", "M18"],
-                    settle_after_each=0.4,
+                    ["M410", "M108", "M524", "M104 S0", "M140 S0", "M107", "M400", "M18", "M112"],
+                    settle_after_each=0.25,
                     final_wait=1.2,
                     read_seconds=2.5,
                 )

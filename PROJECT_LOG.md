@@ -2815,3 +2815,20 @@ After each test print, append:
 - Manual recovery performed:
   - the current printer was returned from the saved stopped pose `X7.98 Y69.40 Z6.70` back to `X0 Y0 Z0`
   - `G92 X0 Y0 Z0` was re-sent after the return, and `M105` showed the hotend idle around `44.6C /0`
+
+## 2026-05-18 Revert Dangerous SD-Owned M109 Assumption
+
+- Field observation:
+  - after the guard/no-move change, the next start still accepted `M23/M24` and then the printer began cold-looking motion instead of a verified heatup
+  - the current log showed no confirmed hotend target before motion; the printer had been at roughly `43C /0`
+  - the operator requested an emergency stop; Little Hands was killed to free the port, then `M410`, `M108`, `M524`, heater/fan-off commands, `M18`, and `M112` were sent; Marlin answered `M112 Shutdown` / `Printer halted`
+- Root cause from history:
+  - the successful long `MODULEBO.GCO` print on `2026-05-17` used host-side preheat before `M24`: log line `09:28:03 Предпрогрев завершён: 224.5/226C`, then `09:28:15 PRINT_START`
+  - commit `74a6e46` changed known early-`M109` files to skip host preheat and rely on the SD file's `M109`
+  - that assumption is unsafe on this K9 after post-print / stopped / recovered sessions because firmware can enter a state where the file-local heat wait is not a reliable first gate
+- Fix:
+  - all GUI SD-start paths now prove hotend heatup with one host-side blocking `M109` session before `M24`
+  - if the app lifted Z for safe preheat, it returns the nozzle to the saved start before `M24`
+  - `M23/M24` still uses the no-service-move start path from confirmed saved start, so no extra axis dance happens immediately before the file starts
+  - the early file-local `M109` remains in G-code as a second safety wait, but Little Hands no longer relies on it as the only heat gate
+  - the UI hard stop now includes `M410` and terminal `M112` so chaotic motion can be halted from the application
