@@ -111,6 +111,7 @@ Current rule:
 - Little Hands now leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service/recovery paths around `F240`, uses the validated `F600` / `M204 P80 T80` context for manual bed jogs, and moves the head left/right around `F900`
 - short diagnostic bed moves up to `F600` worked over `5 mm`, and the UI now follows the validated manual context instead of over-softening the move
 - the Cura baseline keeps travel acceleration at or below `200 mm/s^2`
+- Little Hands SD start uses staged hotend preheat: `M104` stages around `60/100/150/200C`, then the final blocking `M109` before `M24`
 - keep `WATCH_TEMP_PERIOD 180s` in future firmware rebuilds unless a physical cold-start heat test proves a safer replacement
 - for the next firmware rebuild, preserve the tracked safe-motion patch assumptions from `docs/firmware/LH-v4-safe-motion.patch`
 - also apply `docs/firmware/LH-v5-watch180.patch` so firmware identity and hotend thermal-watch behavior stay reproducible

@@ -66,6 +66,9 @@ PRINT_PREHEAT_TARGET_GRACE_SEC = 25.0
 PRINT_PREHEAT_HEATER_ZERO_GRACE_SEC = 45.0
 PRINT_PREHEAT_NO_RISE_GRACE_SEC = 75.0
 PRINT_PREHEAT_MIN_RISE_C = 8.0
+PRINT_PREHEAT_STAGE_TARGETS_C = (60.0, 100.0, 150.0, 200.0)
+PRINT_PREHEAT_STAGE_MARGIN_C = 5.0
+PRINT_PREHEAT_STAGE_POLL_SEC = 5.0
 K9_PRINT_BED_SIZE_MM = 100.0
 K9_MAX_PRINT_Z_MM = 100.0
 K9_GCODE_BOUNDS_TOLERANCE_MM = 0.2
@@ -257,7 +260,7 @@ MANUAL_TEXT = textwrap.dedent(
     4. Нажми "Запомнить старт".
     5. Выбери файл в блоке "Файлы на SD принтера".
     6. Нажми "Старт печати".
-    7. Little Hands сначала подтверждает нагрев hotend через собственный M109, затем возвращает сопло в сохранённый X0 Y0 Z0 и только после этого отправляет M23/M24. Если нагрев не подтверждён, печать не стартует.
+    7. Little Hands сначала подтверждает нагрев hotend ступенями M104 и финальным M109, затем возвращает сопло в сохранённый X0 Y0 Z0 и только после этого отправляет M23/M24. Если нагрев не подтверждён, печать не стартует.
     8. После старта печати USB-телеметрия может временно молчать. Если принтер греется, двигается или печатает, не делай power cycle только из-за молчания телеметрии.
 
     После штатного завершения печати
@@ -377,7 +380,7 @@ MANUAL_TEXTS = {
         4. Press "Save start".
         5. Select a file in "Printer SD files".
         6. Press "Start print".
-        7. Little Hands first confirms hotend heatup with its own M109, then returns the nozzle to the saved X0 Y0 Z0 and only then sends M23/M24. If heatup is not confirmed, the print does not start.
+        7. Little Hands first confirms hotend heatup with staged M104 warmup and a final M109, then returns the nozzle to the saved X0 Y0 Z0 and only then sends M23/M24. If heatup is not confirmed, the print does not start.
         8. After the print begins, USB telemetry can be quiet for a while. If the printer is heating, moving, or printing, do not power-cycle just because telemetry is quiet.
 
         After a normal print finish
@@ -468,7 +471,7 @@ MANUAL_TEXTS = {
         4. 点击 "Save start"。
         5. 在 "Printer SD files" 中选择文件。
         6. 点击 "Start print"。
-        7. Little Hands 先用自己的 M109 确认 hotend 已加热，然后把喷嘴返回保存的 X0 Y0 Z0，最后才发送 M23/M24。如果加热没有确认，打印不会启动。
+        7. Little Hands 先用分段 M104 预热和最终 M109 确认 hotend 已加热，然后把喷嘴返回保存的 X0 Y0 Z0，最后才发送 M23/M24。如果加热没有确认，打印不会启动。
         8. 打印开始后，USB 遥测可能会安静一段时间。如果打印机正在加热、移动或出料，不要仅因遥测安静就断电。
 
         正常打印完成后
@@ -1303,7 +1306,11 @@ class K9ControlCenter:
         target = float(target)
         if target <= 0:
             return
-        self._post("log", f"Предпрогрев hotend до {target:.0f}C перед SD-стартом через M109.")
+        self._post(
+            "log",
+            f"Предпрогрев hotend до {target:.0f}C перед SD-стартом: "
+            "ступенчатый M104-прогрев, затем финальный M109.",
+        )
         self._post("files-status", f"Предпрогрев hotend: цель {target:.0f}C")
         self._post("progress", (f"Предпрогрев hotend: цель {target:.0f}C", 0.0))
         deadline = time.monotonic() + PRINT_PREHEAT_TIMEOUT_SEC
@@ -1353,120 +1360,200 @@ class K9ControlCenter:
             except Exception:
                 pass
 
+        def parse_temperature_reply(reply: str) -> tuple[float | None, float | None, int | None]:
+            match = TEMP_RE.search(reply)
+            if not match:
+                return None, None, None
+            current = float(match.group(1))
+            seen_target = float(match.group(2))
+            heater_match = HEATER_RE.search(reply)
+            heater = int(heater_match.group(1)) if heater_match else None
+            return current, seen_target, heater
+
+        def record_temperature(current: float, seen_target: float, heater: int | None, *, label: str) -> None:
+            nonlocal last_logged, last_temp, first_temp, first_temp_ts
+            nonlocal heater_positive_seen, heater_zero_since, slow_rise_warned
+
+            now = time.monotonic()
+            last_temp = current
+            if first_temp is None:
+                first_temp = current
+                first_temp_ts = now
+            if heater is not None and heater > 0:
+                heater_positive_seen = True
+                heater_zero_since = 0.0
+
+            self._post("temp", (current, seen_target, heater))
+            pct = max(0.0, min(100.0, (current / max(target, 1.0)) * 100.0))
+            heater_text = f" @:{heater}" if heater is not None else " @:?"
+            self._post("progress", (f"Предпрогрев hotend: {current:.1f}/{seen_target:.0f}C{heater_text}", pct))
+            if now - last_logged >= 8.0:
+                last_logged = now
+                self._post("log", f"Предпрогрев {label}: {current:.1f}/{seen_target:.0f}C{heater_text}")
+
+            if (
+                first_temp is not None
+                and first_temp_ts
+                and now - first_temp_ts >= PRINT_PREHEAT_NO_RISE_GRACE_SEC
+                and current < first_temp + PRINT_PREHEAT_MIN_RISE_C
+                and current < target - PRINT_PREHEAT_MARGIN_C
+            ):
+                if heater_positive_seen:
+                    if not slow_rise_warned:
+                        slow_rise_warned = True
+                        self._post(
+                            "log",
+                            f"Предпрогрев hotend идёт медленно: {first_temp:.1f}C -> {current:.1f}C "
+                            f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд при положительном @. "
+                            "Для этой K9 это допустимый slow-start; продолжаю ступенчатый прогрев.",
+                        )
+                else:
+                    raise RuntimeError(
+                        f"Hotend почти не греется: {first_temp:.1f}C -> {current:.1f}C "
+                        f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд, и положительный heater output не подтверждён. "
+                        "Нагрев выключен командой M108/M104 S0; печать не запускаю. "
+                        "Проверь питание/hotend и сделай power cycle принтера перед новой попыткой."
+                    )
+
+        def wait_for_m104_stage(ser: object, stage_target: float) -> None:
+            nonlocal target_zero_since, heater_zero_since
+
+            stage_goal = min(stage_target - PRINT_PREHEAT_STAGE_MARGIN_C, target - PRINT_PREHEAT_MARGIN_C)
+            if last_temp is not None and last_temp >= stage_goal:
+                return
+
+            self._post("log", f"Ступень прогрева: M104 S{stage_target:.0f}, жду примерно {stage_goal:.0f}C.")
+            sdtool.send_line(ser, f"M104 S{stage_target:.0f}")
+            time.sleep(0.4)
+            sdtool.read_for(ser, 0.5)
+            next_poll = 0.0
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                if now < next_poll:
+                    time.sleep(0.1)
+                    continue
+                next_poll = now + PRINT_PREHEAT_STAGE_POLL_SEC
+                sdtool.send_line(ser, "M105")
+                time.sleep(0.2)
+                temp_reply = sdtool.read_for(ser, 1.0)
+                lowered_reply = temp_reply.lower()
+                if "error:" in lowered_reply or "printer halted" in lowered_reply or "kill()" in lowered_reply:
+                    raise RuntimeError(f"Marlin сообщил ошибку во время M104 stage preheat: {temp_reply.strip()}")
+
+                current, seen_target, heater = parse_temperature_reply(temp_reply)
+                if current is None or seen_target is None:
+                    continue
+                record_temperature(current, seen_target, heater, label=f"M104 S{stage_target:.0f}")
+
+                if current >= stage_goal:
+                    return
+                if seen_target <= 0.0:
+                    target_zero_since = target_zero_since or time.monotonic()
+                    if time.monotonic() - target_zero_since >= PRINT_PREHEAT_TARGET_GRACE_SEC:
+                        raise RuntimeError(
+                            "Hotend не принял цель нагрева перед SD-стартом: M105 показывает /0C. "
+                            "Нагрев выключен командой M108/M104 S0; нужен power cycle принтера перед новой попыткой."
+                        )
+                else:
+                    target_zero_since = 0.0
+
+                if (
+                    heater is not None
+                    and heater <= 0
+                    and seen_target > 0.0
+                    and current < stage_goal
+                    and not heater_positive_seen
+                ):
+                    heater_zero_since = heater_zero_since or time.monotonic()
+                    if time.monotonic() - heater_zero_since >= PRINT_PREHEAT_HEATER_ZERO_GRACE_SEC:
+                        raise RuntimeError(
+                            f"Hotend получил цель {seen_target:.0f}C, но нагреватель остаётся @0 "
+                            f"при температуре {current:.1f}C. Нагрев выключен командой M108/M104 S0; "
+                            "сделай power cycle принтера и проверь, что вентилятор/hotend оживают при старте."
+                        )
+                else:
+                    heater_zero_since = 0.0
+
+            raise RuntimeError(
+                f"Hotend не дошёл до промежуточной ступени {stage_goal:.0f}C перед SD-стартом. "
+                "Нагрев выключен командой M108/M104 S0; печать не запускаю вслепую."
+            )
+
+        def wait_for_final_m109(ser: object) -> None:
+            nonlocal last_reply_ts, target_zero_since, heater_zero_since
+
+            self._post("log", f"Финальная проверка: M109 S{target:.0f}, жду подтверждения перед M24.")
+            try:
+                ser.reset_input_buffer()
+            except Exception:
+                pass
+            sdtool.send_line(ser, f"M109 S{target:.0f}")
+            last_reply_ts = time.monotonic()
+
+            while time.monotonic() < deadline:
+                raw = ser.readline()
+                now = time.monotonic()
+                if not raw:
+                    if now - last_reply_ts >= PRINT_PREHEAT_NO_REPLY_GRACE_SEC:
+                        raise RuntimeError(
+                            "Hotend preheat M109 не даёт температурных строк и не отвечает. "
+                            "Нагрев выключен командой M108/M104 S0; нужен power cycle принтера перед новой попыткой."
+                        )
+                    continue
+                temp_reply = raw.decode("utf-8", "replace")
+                last_reply_ts = now
+                lowered_reply = temp_reply.lower()
+                if "error:" in lowered_reply or "printer halted" in lowered_reply or "kill()" in lowered_reply:
+                    raise RuntimeError(f"Marlin сообщил ошибку во время M109 preheat: {temp_reply.strip()}")
+
+                current, seen_target, heater = parse_temperature_reply(temp_reply)
+                if current is not None and seen_target is not None:
+                    record_temperature(current, seen_target, heater, label="M109 final")
+                    heater_text = f" @:{heater}" if heater is not None else " @:?"
+                    if current >= target - PRINT_PREHEAT_MARGIN_C and "ok" in lowered_reply:
+                        self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
+                        self._post("log", f"Предпрогрев завершён: {current:.1f}/{seen_target:.0f}C{heater_text}. Запускаю SD-файл.")
+                        return
+                    if seen_target <= 0.0:
+                        target_zero_since = target_zero_since or now
+                        if now - target_zero_since >= PRINT_PREHEAT_TARGET_GRACE_SEC:
+                            raise RuntimeError(
+                                "Hotend не принял цель нагрева перед SD-стартом: M109 сообщает /0C. "
+                                "Нагрев выключен командой M108/M104 S0; нужен power cycle принтера перед новой попыткой."
+                            )
+                    else:
+                        target_zero_since = 0.0
+                elif "ok" in lowered_reply and last_temp is not None and last_temp >= target - PRINT_PREHEAT_MARGIN_C:
+                    self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
+                    self._post("log", f"Предпрогрев завершён: {last_temp:.1f}/{target:.0f}C. Запускаю SD-файл.")
+                    return
+                elif "ok" in lowered_reply and last_temp is None:
+                    self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
+                    self._post("log", "Предпрогрев M109 завершён без отдельной температурной строки. Запускаю SD-файл.")
+                    return
+
+            raise RuntimeError(
+                f"Hotend не вышел на температуру перед SD-стартом: {last_temp or 0.0:.1f}/{target:.0f}C. "
+                "Нагрев выключен командой M108/M104 S0; не запускаю печать вслепую."
+            )
+
         try:
             with sdtool.open_serial(self._port(), self._baud(), timeout=1.0, reset_input=True) as ser:
                 sdtool.sync_ascii(ser)
                 sdtool.send_line(ser, "T0")
                 time.sleep(0.2)
                 sdtool.read_for(ser, 0.4)
-                try:
-                    ser.reset_input_buffer()
-                except Exception:
-                    pass
-                sdtool.send_line(ser, f"M109 S{target:.0f}")
-                last_reply_ts = time.monotonic()
+                sdtool.send_line(ser, "M105")
+                first_reply = sdtool.read_for(ser, 1.0)
+                current, seen_target, heater = parse_temperature_reply(first_reply)
+                if current is not None and seen_target is not None:
+                    record_temperature(current, seen_target, heater, label="initial")
 
-                while time.monotonic() < deadline:
-                    raw = ser.readline()
-                    now = time.monotonic()
-                    if not raw:
-                        if now - last_reply_ts >= PRINT_PREHEAT_NO_REPLY_GRACE_SEC:
-                            send_hotend_off(ser)
-                            raise RuntimeError(
-                                "Hotend preheat M109 не даёт температурных строк и не отвечает. "
-                                "Нагрев выключен командой M108/M104 S0; нужен power cycle принтера перед новой попыткой."
-                            )
-                        continue
-                    temp_reply = raw.decode("utf-8", "replace")
-                    last_reply_ts = now
-                    lowered_reply = temp_reply.lower()
-                    if "error:" in lowered_reply or "printer halted" in lowered_reply or "kill()" in lowered_reply:
-                        send_hotend_off(ser)
-                        raise RuntimeError(f"Marlin сообщил ошибку во время M109 preheat: {temp_reply.strip()}")
-                    match = TEMP_RE.search(temp_reply)
-                    if match:
-                        current = float(match.group(1))
-                        seen_target = float(match.group(2))
-                        last_temp = current
-                        if first_temp is None:
-                            first_temp = current
-                            first_temp_ts = now
-                        heater_match = HEATER_RE.search(temp_reply)
-                        heater = int(heater_match.group(1)) if heater_match else None
-                        if heater is not None and heater > 0:
-                            heater_positive_seen = True
-                            heater_zero_since = 0.0
-                        self._post("temp", (current, seen_target, heater))
-                        pct = max(0.0, min(100.0, (current / max(target, 1.0)) * 100.0))
-                        heater_text = f" @:{heater}" if heater is not None else " @:?"
-                        self._post("progress", (f"Предпрогрев hotend: {current:.1f}/{seen_target:.0f}C{heater_text}", pct))
-                        if now - last_logged >= 8.0:
-                            last_logged = now
-                            self._post("log", f"Предпрогрев: {current:.1f}/{seen_target:.0f}C{heater_text}")
-                        if current >= target - PRINT_PREHEAT_MARGIN_C and "ok" in lowered_reply:
-                            self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
-                            self._post("log", f"Предпрогрев завершён: {current:.1f}/{seen_target:.0f}C{heater_text}. Запускаю SD-файл.")
-                            return
-                        if seen_target <= 0.0:
-                            target_zero_since = target_zero_since or now
-                            if now - target_zero_since >= PRINT_PREHEAT_TARGET_GRACE_SEC:
-                                send_hotend_off(ser)
-                                raise RuntimeError(
-                                    "Hotend не принял цель нагрева перед SD-стартом: M109 сообщает /0C. "
-                                    "Нагрев выключен командой M108/M104 S0; нужен power cycle принтера перед новой попыткой."
-                                )
-                        else:
-                            target_zero_since = 0.0
-                        if (
-                            heater is not None
-                            and heater <= 0
-                            and seen_target > 0.0
-                            and current < target - PRINT_PREHEAT_MARGIN_C
-                            and not heater_positive_seen
-                        ):
-                            heater_zero_since = heater_zero_since or now
-                            if now - heater_zero_since >= PRINT_PREHEAT_HEATER_ZERO_GRACE_SEC:
-                                send_hotend_off(ser)
-                                raise RuntimeError(
-                                    f"Hotend получил цель {seen_target:.0f}C, но нагреватель остаётся @0 "
-                                    f"при температуре {current:.1f}C. Нагрев выключен командой M108/M104 S0; "
-                                    "сделай power cycle принтера и проверь, что вентилятор/hotend оживают при старте."
-                                )
-                        else:
-                            heater_zero_since = 0.0
-                        if (
-                            first_temp is not None
-                            and first_temp_ts
-                            and now - first_temp_ts >= PRINT_PREHEAT_NO_RISE_GRACE_SEC
-                            and current < first_temp + PRINT_PREHEAT_MIN_RISE_C
-                            and current < target - PRINT_PREHEAT_MARGIN_C
-                        ):
-                            if heater_positive_seen:
-                                if not slow_rise_warned:
-                                    slow_rise_warned = True
-                                    self._post(
-                                        "log",
-                                        f"Предпрогрев hotend идёт медленно: {first_temp:.1f}C -> {current:.1f}C "
-                                        f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд при положительном @. "
-                                        "Для этой K9 это допустимый slow-start; продолжаю ждать резкого подъёма температуры.",
-                                    )
-                            else:
-                                send_hotend_off(ser)
-                                raise RuntimeError(
-                                    f"Hotend почти не греется: {first_temp:.1f}C -> {current:.1f}C "
-                                    f"за {PRINT_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд, и положительный heater output не подтверждён. "
-                                    "Нагрев выключен командой M108/M104 S0; печать не запускаю. "
-                                    "Проверь питание/hotend и сделай power cycle принтера перед новой попыткой."
-                                )
-                    elif "ok" in lowered_reply and last_temp is not None and last_temp >= target - PRINT_PREHEAT_MARGIN_C:
-                        self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
-                        self._post("log", f"Предпрогрев завершён: {last_temp:.1f}/{target:.0f}C. Запускаю SD-файл.")
-                        return
-                    elif "ok" in lowered_reply and last_temp is None:
-                        self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
-                        self._post("log", "Предпрогрев M109 завершён без отдельной температурной строки. Запускаю SD-файл.")
-                        return
-                send_hotend_off(ser)
+                stage_targets = [s for s in PRINT_PREHEAT_STAGE_TARGETS_C if s < target - PRINT_PREHEAT_MARGIN_C]
+                for stage_target in stage_targets:
+                    wait_for_m104_stage(ser, stage_target)
+                wait_for_final_m109(ser)
+                return
         except Exception:
             send_hotend_off(None)
             raise

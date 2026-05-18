@@ -108,6 +108,7 @@
 - Little Hands 对 recovery 移动保持柔和的 `M204 T80` service-idle 状态，长距离平台 service/recovery 移动约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右约 `F900`
 - `5 mm` 短距离诊断移动中，平台到 `F600` 也可工作，现在 UI 会遵循已验证的手动移动上下文，而不是过度放慢移动
 - Cura baseline 将 travel acceleration 保持在 `200 mm/s^2` 或更低
+- Little Hands 的 SD 启动使用分段 hotend 预热：`M104` 约 `60/100/150/200C`，然后在 `M24` 前执行最终阻塞 `M109`
 - 后续固件重建应保留 `WATCH_TEMP_PERIOD 180s`，除非单独冷启动加热测试证明有更安全的替代值
 - 下一次重新构建固件时，保留 `docs/firmware/LH-v4-safe-motion.patch` 中的 safe-motion 假设
 - 同时应用 `docs/firmware/LH-v5-watch180.patch`，保证固件身份和 hotend thermal-watch 行为可复现

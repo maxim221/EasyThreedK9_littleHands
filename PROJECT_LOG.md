@@ -2848,3 +2848,21 @@ After each test print, append:
   - firmware identity is now `LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180`
   - Little Hands default firmware selection and docs now point at `LH v5`
   - after flashing, the required physical validation is: power-cycle, recover from preheat lift if needed, confirm `M115` reports `LH v5`, run a cold preheat/start, and verify that the hotend reaches target before `M24` starts SD printing
+
+## 2026-05-18 Staged Hotend Preheat After False Cold M109
+
+- Field observation:
+  - after `LH v5` was flashed, a direct cold `M109 S226` still showed `@:127` but the reported hotend temperature stayed around `39-41C`
+  - manual no-motion `M104` tests proved the heater path was alive:
+    - `S60` reached about `58C`
+    - `S100` reached about `96C`
+    - `S150` reached about `145C`
+    - `S200` reached about `192C`
+- Interpretation:
+  - in this Marlin tree, `@:127` is the displayed full hotend output (`PID_MAX 255` shifted right by one before `M105` output)
+  - the failure is therefore not simply "heater power too low"; it is a bad cold-start protocol for this K9 when a single blocking high `M109` is used from the Little Hands SD-start path
+- Fix:
+  - Little Hands now performs host preheat as staged `M104` targets `60 -> 100 -> 150 -> 200C` with `M105` verification
+  - only after those stages does it send the final blocking `M109 S<print target>` gate before `M24`
+  - if any stage fails, heat is turned off and the SD print is not started
+  - this keeps the safety property that SD printing never starts cold, while avoiding the observed false/stuck cold `M109 S226` behavior

@@ -46,6 +46,7 @@ If a physical printer test is needed, ask the operator before moving axes or sta
 - Do not let Cura control the single K9 fan as part cooling. Slicer `M106/M107` must be stripped or disabled.
 - Do not directly slice raw `moduleBot.STL` without checking orientation. Use the validated oriented STL or explicitly inspect Cura Preview.
 - Current firmware baseline is `LH v5 ... Watch180`. Do not reduce hotend `WATCH_TEMP_PERIOD` below `180s` unless a cold-start physical heat test proves the K9 no longer false-trips `Heating failed`.
+- SD-start hotend preheat must stay staged: prove heat with `M104` stages around `60/100/150/200C`, then use final blocking `M109` as the last gate before `M24`. Do not go back to a single cold `M109 S226` start without a new physical validation.
 - Keep the current cautious Cura baseline for this small K9 mechanics unless a new physical test proves a faster profile is safe: print/infill `11 mm/s`, wall/top-bottom `8 mm/s`, travel `25 mm/s`, first layer `6 mm/s`, skirt/brim `21 mm/s`, bridge `7 mm/s`. Do not drop first-layer/brim to `4 mm/s` without an explicit physical test; it made the print crawl rather than simply reducing speed by 30%.
 - Keep Cura `Preferences -> General -> Add machine prefix to job name` disabled (`[cura] jobname_prefix = False`). The K9 workflow should save `model.gcode`, not `CFFFP_model.gcode`.
 

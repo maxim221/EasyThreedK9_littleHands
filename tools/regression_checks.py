@@ -146,12 +146,11 @@ def main() -> int:
         failures,
     )
     require(
-        'sdtool.send_line(ser, f"M109 S{target:.0f}")' in app
-        and 'sdtool.send_line(ser, "M105")' not in app[
-            app.find("def _preheat_hotend_for_sd_start") : app.find("def _lift_from_saved_start_for_preheat_if_needed")
-        ]
-        and "PRINT_PREHEAT_POLL_SEC" not in app,
-        "Host hotend preheat must use one blocking M109 session, not M104 plus repeated M105 polling.",
+        "PRINT_PREHEAT_STAGE_TARGETS_C = (60.0, 100.0, 150.0, 200.0)" in app
+        and 'sdtool.send_line(ser, f"M104 S{stage_target:.0f}")' in app
+        and 'sdtool.send_line(ser, f"M109 S{target:.0f}")' in app
+        and "ступенчатый M104-прогрев" in app,
+        "Host hotend preheat must use staged M104 warmup before the final blocking M109 gate.",
         failures,
     )
     require(
