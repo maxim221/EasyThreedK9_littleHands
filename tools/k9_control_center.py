@@ -320,6 +320,8 @@ MANUAL_TEXT = textwrap.dedent(
     - Не возвращай к старту, пока модель или неудачный первый слой лежит на столе.
     - Если движение выглядит неправильным, выключи питание и заново выставь старт вручную.
     - После завершённой, остановленной или сорванной SD-печати приложение потребует подтверждённый power cycle и повторный "Запомнить старт" перед новым M24.
+    - Тихие щелчки в начале прогрева hotend допустимы только если дальше температура проходит ступени и резко растёт. При запахе, громких щелчках, потере цели или отсутствии роста температуры останавливай нагрев.
+    - Если после печати горизонтальная ось головы залипла, не сохраняй новый старт сразу. Сначала освободи/проверь ось короткими jog и убедись, что возврат к старту физически завершился.
     """
 ).strip()
 
@@ -440,6 +442,8 @@ MANUAL_TEXTS = {
         - Never press return-to-start while a model or failed first layer is still on the bed.
         - If motion looks wrong, cut power and re-establish the start pose manually.
         - After a completed, stopped, or failed SD print/start, the app requires a confirmed power cycle and a fresh "Save start" before the next M24.
+        - Faint clicks at the beginning of hotend warmup are acceptable only if the temperature later passes the staged gates and climbs rapidly. Stop heating for smell, loud clicks, target loss, or no temperature rise.
+        - If the head-left/right axis sticks after a print, do not save a new start immediately. First free/check the axis with short jogs and confirm that return-to-start physically completed.
         """
     ).strip(),
     "zh": textwrap.dedent(
@@ -531,6 +535,8 @@ MANUAL_TEXTS = {
         - 模型或失败首层仍在平台上时，不要执行 return-to-start。
         - 如果运动看起来不对，立即断电，然后手动重新建立起点。
         - 在完成、停止或失败的 SD 打印 / 启动之后，应用会要求确认断电重启并重新 "Save start"，然后才允许下一次 M24。
+        - Hotend 预热初期的轻微咔哒声只有在之后温度通过分段门槛并快速上升时才算可接受。若有异味、声音变大、目标丢失或温度不升，请停止加热。
+        - 如果打印后喷头左右轴卡住，不要立刻保存新起点。先用短 jog 释放/检查该轴，并确认 return-to-start 已经实际完成。
         """
     ).strip(),
 }

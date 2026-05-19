@@ -162,3 +162,8 @@ If a print start fails and the printer only clicks, does not heat, or telemetry 
 5. start again
 
 If the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet.
+
+Known validated-K9 quirks:
+
+- the first hotend warmup stage can be slow and may make faint clicks before the temperature rises rapidly
+- after a print, the head-left/right carriage can mechanically stick; free or inspect it before trusting home again

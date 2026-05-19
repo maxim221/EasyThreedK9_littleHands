@@ -229,14 +229,14 @@ Do not keep old mystery firmware files on the card.
 
 Current known-good firmware:
 
-- `firmware/LH-v4-YZSwap-AutoFan45-FAN1-z600-e1040-mksLite.bin`
+- `firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 
 Current known-good Cura setup:
 
 - machine: `lilHands K9 warm mat`
 - profile: `codex - K9 warm mat cautious`
-- brim width: `10 mm`
-- PLA temperature: `225C` first layer, then `220C`
+- brim width: `14 mm`
+- PLA temperature: `225C` first layer, then `224C`
 - bed temperature in G-code: `0C` because the bed is external
 - `mainFlasherTop.STL`: supports everywhere, support interface / roof enabled, support angle `35`
 
@@ -246,9 +246,11 @@ Important behavior assumptions:
 - bed is manually preheated outside the printer electronics
 - manual hotend preheat is not part of the normal workflow
 - `Little Hands` uses manual-zero workflow, not `G28`
-- before `M24`, Little Hands preheats the hotend to the target found in the G-code
-- during upload/export, early blocking `M109` is rewritten to non-blocking `M104`
+- before `M24`, Little Hands proves hotend heatup with staged `M104` targets around `60/100/150/200C`, then a final blocking `M109`
+- during upload/export, early blocking `M109` stays in the SD file as an extra safety wait; do not rewrite it to `M104`
 - after `M24`, Little Hands intentionally leaves USB quiet for `180` seconds so this K9 can enter SD printing reliably
+- a slow first hotend stage with faint clicks can be normal on the validated K9 if temperature later climbs through the staged gates
+- if post-print return misses the head-left/right move because the carriage mechanically sticks, free/inspect the axis before trusting home again; do not compensate by increasing recovery speed
 
 ## 11. What Not To Do
 

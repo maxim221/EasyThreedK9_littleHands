@@ -2866,3 +2866,17 @@ After each test print, append:
   - only after those stages does it send the final blocking `M109 S<print target>` gate before `M24`
   - if any stage fails, heat is turned off and the SD print is not started
   - this keeps the safety property that SD printing never starts cold, while avoiding the observed false/stuck cold `M109 S226` behavior
+
+## 2026-05-19 Field Baseline Confirmation
+
+- Current field result:
+  - the Little Hands SD workflow is working well enough for normal use again
+  - staged hotend preheat starts slowly, can produce faint clicks, then the reported temperature rises sharply and the print proceeds
+  - post-print return to home now works in the normal case
+  - one remaining oddity is mechanical head-left/right sticking after a print: the horizontal return can fail if the carriage sticks, but several short `head left` jogs free the axis and it then moves normally
+- Interpretation:
+  - do not change firmware, fan behavior, preheat timing, Cura temperature, or recovery speed only to remove faint early hotend clicks while staged preheat reaches its gates and prints are stable
+  - treat the post-print horizontal sticking as a mechanical carriage issue first, not as a reason to add more aggressive software movement
+  - if any return-to-start movement did not physically complete, home is not trustworthy until the bed is clear, the axis is free, and the nozzle is visually back at the intended start before `Save start`
+- Documentation action:
+  - README files, printer/firmware guides, Cura settings notes, Linux/Raspberry Pi checklist, in-app manual text, and `AGENTS.md` now document these field observations and protect against reintroducing the old `M109 -> M104` rewrite assumption

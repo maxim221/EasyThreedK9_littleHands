@@ -115,7 +115,8 @@ These limits are intentionally gentle for the small K9 mechanics and help reduce
 - Ironing acceleration: `120 mm/s^2`
 - Jerk control: `off`
 - Note: do not enable Cura jerk control for this RepRap-flavor profile yet; our Marlin firmware uses `M205`, while Cura emits `M566` for jerk in this mode.
-- K9 service-motion limit: the verified `LH-v4` currently stores `M201 X1000 Y1000` and `M204 T1000` in EEPROM/Marlin, which is too aggressive for manual and recovery moves on the tiny mechanics. Keep print travel acceleration at or below `200 mm/s^2`; Little Hands leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service moves around `F240`, uses the validated `F600` / `M204 P80 T80` manual bed jog context, and moves the head left/right around `F900`.
+- K9 service-motion limit: the verified `LH-v5` baseline can still have EEPROM/Marlin service dynamics such as `M201 X1000 Y1000` and `M204 T1000`, which are too aggressive for manual and recovery moves on the tiny mechanics. Keep print travel acceleration at or below `200 mm/s^2`; Little Hands leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service moves around `F240`, uses the validated `F600` / `M204 P80 T80` manual bed jog context, and moves the head left/right around `F900`.
+- Do not compensate for a sticky post-print head-left/right carriage by increasing Cura travel speed or recovery speed. Free / inspect the axis first; if it later moves normally after short jogs, it is a mechanical field issue, not a slicer-speed target.
 
 ## Adhesion
 
@@ -177,8 +178,8 @@ The generated G-code must satisfy all of these:
 - no real startup `G28`
 - contains `G92 X0 Y0 Z0` near the start
 - contains a hotend target command such as `M104` / `M109`
-- early blocking `M109` should stay in the SD file; Little Hands still confirms hotend heatup with a host-side `M109` before `M24`, and the file-local `M109` remains as an extra safety wait
-- old already-prepared `M104`-only files are also supported by the same host preheat before `M24`
+- early blocking `M109` should stay in the SD file; Little Hands still confirms hotend heatup with staged host-side preheat plus a final `M109` before `M24`, and the file-local `M109` remains as an extra safety wait
+- old already-prepared `M104`-only files are also supported by the same staged host preheat before `M24`
 - bed target remains `0C`
 - Cura / slicer bounds are sane and fit inside the `100 x 100 mm` bed
 - height fits inside `100 mm`

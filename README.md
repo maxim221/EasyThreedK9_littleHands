@@ -90,7 +90,15 @@ This means:
 - if the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet
 - after a normal print finish, the SD panel `After print: return` button runs the same guarded recovery path as `Go to saved start` and requires a clear bed
 - after a completed, stopped, or failed SD print/start, the app requires a confirmed printer power cycle and a fresh `Save start` before the next `M24`, so this K9 cannot skip the file-local `M109` and begin cold movements
-- before `M24`, Little Hands confirms hotend heatup itself with a host-side `M109`; if heatup is not confirmed, SD print is not started
+- before `M24`, Little Hands confirms hotend heatup itself with staged `M104` targets and a final blocking `M109`; if heatup is not confirmed, SD print is not started
+
+## Current Field Notes
+
+The current working baseline is intentionally conservative. Do not "improve" it just because it looks slow if real prints are starting and finishing correctly.
+
+- Hotend warmup can show a slow first phase with faint clicks, then a rapid temperature climb. This is a known observation on the validated K9. Keep watching it, but do not change firmware or preheat timing unless the hotend fails to reach the staged gates, the target drops, heater output stays at `@0`, or there are real electrical warning signs.
+- After a print, the head-left/right axis can mechanically stick. If post-print return misses the horizontal move but a few short `head left` jogs free the axis and it then moves normally, treat that as mechanical friction first, not a reason to increase service speeds or force recovery moves.
+- If any return-to-start motion did not physically complete, do not press `Save start` until the bed is clear, the axis is moving freely again, and the nozzle is visually back at the intended start pose.
 
 ## External Warm Bed / Hotbed Note
 

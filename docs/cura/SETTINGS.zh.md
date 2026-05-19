@@ -115,7 +115,8 @@ G1 Y95 F240 ;Move bed toward the operator
 - Ironing acceleration：`120 mm/s^2`
 - Jerk control：`off`
 - 注意：暂时不要为这个 RepRap-flavor 配置启用 Cura jerk control；我们的 Marlin 固件使用 `M205`，而 Cura 在此模式下会生成 `M566`。
-- K9 维护移动限制：当前验证的 `LH-v4` 在 EEPROM/Marlin 中保存了 `M201 X1000 Y1000` 和 `M204 T1000`，这对小型机械结构的手动和 recovery 移动过于激进。打印时把 travel acceleration 保持在 `200 mm/s^2` 或更低；Little Hands 对长距离 service / recovery 平台移动保持柔和的 `M204 T80` service-idle 状态并使用约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右约 `F900`。
+- K9 维护移动限制：当前验证的 `LH-v5` baseline 仍可能在 EEPROM/Marlin 中带有类似 `M201 X1000 Y1000` 和 `M204 T1000` 的 service dynamics，这对小型机械结构的手动和 recovery 移动过于激进。打印时把 travel acceleration 保持在 `200 mm/s^2` 或更低；Little Hands 对长距离 service / recovery 平台移动保持柔和的 `M204 T80` service-idle 状态并使用约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右约 `F900`。
+- 不要通过提高 Cura travel speed 或 recovery speed 来补偿打印后喷头左右滑车的机械卡滞。先释放 / 检查该轴；如果几次短 jog 后恢复正常运动，应按现场机械问题处理，而不是修改切片速度目标。
 
 ## 平台附着
 
@@ -177,8 +178,8 @@ G1 Y95 F240 ;Move bed toward the operator
 - 没有真正的启动 `G28`
 - 开头附近包含 `G92 X0 Y0 Z0`
 - 包含热端目标温度命令，例如 `M104` / `M109`
-- 早期阻塞 `M109` 应保留在 SD 文件中；Little Hands 仍会在 `M24` 前用 host-side `M109` 确认 hotend 已加热，文件中的 `M109` 作为额外安全等待保留
-- 旧的已准备 `M104`-only 文件也由同一个 `M24` 前 host preheat 支持
+- 早期阻塞 `M109` 应保留在 SD 文件中；Little Hands 仍会在 `M24` 前用分段 host-side 预热和最终 `M109` 确认 hotend 已加热，文件中的 `M109` 作为额外安全等待保留
+- 旧的已准备 `M104`-only 文件也由同一个 `M24` 前分段 host preheat 支持
 - bed target 保持 `0C`
 - slicer bounds 正常，并位于 `100 x 100 mm` 平台内
 - 高度位于 `100 mm` 内
