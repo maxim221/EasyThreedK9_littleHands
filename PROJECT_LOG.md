@@ -2894,3 +2894,20 @@ After each test print, append:
 - Safety/docs:
   - the in-app manual, printer/firmware docs, `AGENTS.md`, and regression checks now protect this as a manual diagnostic path separate from SD printing
   - no physical filament feed test was run in this code change; the operator should watch the extruder/nozzle and stop if the drive clicks loudly, filament grinds, or plastic does not flow once hot
+
+## 2026-05-21 Manual UI Layout And Localization Pass
+
+- UI change:
+  - the main window now keeps manual controls in a left work area and keeps the journal visible on the right instead of hiding it behind tabs or below the controls
+  - `USB metrics` now lives under `Manual control`, using the otherwise empty space below the motion controls
+  - manual buttons use wider readable columns, while the bed-level point buttons stay compact and now localize as `ПЛ/Ц/ПП/ЗЛ/ЗП`, `FL/C/FR/BL/BR`, or Chinese short labels
+  - USB metrics rendering now updates as one batch for the full capture and preserves the operator's scroll position; if the view is at the top, it stays at the top
+- Localization:
+  - a journal-localization layer was added for newer system events such as app startup, port search/selection/disconnect, task start/done messages, status capture, metrics capture, and log saving
+  - raw firmware replies remain unmodified because they are diagnostic output from Marlin
+- Documentation and screenshots:
+  - README files and printer/firmware guides now describe the new manual-control / metrics / journal layout
+  - English screenshots in `docs/screenshots/` were refreshed for the current UI
+- Verification:
+  - no physical printer motion was run for this UI/documentation pass
+  - regression checks and Python compilation were run before commit

@@ -1931,6 +1931,11 @@ class K9ControlCenter:
             "bed_level": {"ru": "Калибровка стола", "en": "Bed leveling", "zh": "平台调平"},
             "bed_level_short": {"ru": "Калибр.", "en": "Level", "zh": "调平"},
             "level_points": {"ru": "Точки X/Y", "en": "X/Y points", "zh": "X/Y 点位"},
+            "level_front_left": {"ru": "ПЛ", "en": "FL", "zh": "前左"},
+            "level_center": {"ru": "Ц", "en": "C", "zh": "中"},
+            "level_front_right": {"ru": "ПП", "en": "FR", "zh": "前右"},
+            "level_back_left": {"ru": "ЗЛ", "en": "BL", "zh": "后左"},
+            "level_back_right": {"ru": "ЗП", "en": "BR", "zh": "后右"},
             "journal": {"ru": "Журнал", "en": "Journal", "zh": "日志"},
             "usb_metrics": {"ru": "USB-метрики", "en": "USB metrics", "zh": "USB 指标"},
             "capture_metrics": {"ru": "Снять все метрики", "en": "Capture all metrics", "zh": "抓取全部指标"},
@@ -1963,11 +1968,152 @@ class K9ControlCenter:
                 "zh": "正在等待打印机在刷写 {source} 后重启，随后会自动执行 M502/M500。",
             },
             "not_connected": {"ru": "— не подключаться —", "en": "— do not connect —", "zh": "— 不连接 —"},
+            "usb_idle": {"ru": "USB: простой", "en": "USB: idle", "zh": "USB：空闲"},
+            "usb_busy": {"ru": "USB: занят", "en": "USB: busy", "zh": "USB：忙碌"},
+            "usb_disconnected": {"ru": "USB: отключен", "en": "USB: disconnected", "zh": "USB：已断开"},
         }
         return table.get(key, {}).get(lang, table.get(key, {}).get("ru", key))
 
     def _format_label_value(self, key: str, value: str) -> str:
         return f"{self._t(key)}: {value}"
+
+    def _task_label(self, label: str) -> str:
+        lang = self.lang_var.get().strip() or "ru"
+        table = {
+            "Поиск порта принтера": {"ru": "Поиск порта принтера", "en": "Printer port search", "zh": "查找打印机端口"},
+            "Проверка статуса": {"ru": "Проверка статуса", "en": "Status check", "zh": "状态检查"},
+            "Снятие всех USB-метрик": {"ru": "Снятие всех USB-метрик", "en": "USB metrics capture", "zh": "抓取 USB 指标"},
+            "Чтение списка SD": {"ru": "Чтение списка SD", "en": "Reading SD file list", "zh": "读取 SD 文件列表"},
+            "Заливка G-code на SD": {"ru": "Заливка G-code на SD", "en": "Uploading G-code to SD", "zh": "上传 G-code 到 SD"},
+            "Заливка и запуск G-code": {"ru": "Заливка и запуск G-code", "en": "Uploading and starting G-code", "zh": "上传并启动 G-code"},
+            "Заливка прошивки": {"ru": "Заливка прошивки", "en": "Flashing firmware", "zh": "刷写固件"},
+            "Создание EEPROM": {"ru": "Создание EEPROM", "en": "Creating EEPROM", "zh": "创建 EEPROM"},
+            "Запуск SD-печати": {"ru": "Запуск SD-печати", "en": "Starting SD print", "zh": "启动 SD 打印"},
+            "Запуск печати с SD": {"ru": "Запуск печати с SD", "en": "Starting print from SD", "zh": "从 SD 启动打印"},
+            "Пауза печати": {"ru": "Пауза печати", "en": "Pausing print", "zh": "暂停打印"},
+            "Продолжение печати": {"ru": "Продолжение печати", "en": "Resuming print", "zh": "继续打印"},
+            "Остановка печати": {"ru": "Остановка печати", "en": "Stopping print", "zh": "停止打印"},
+            "Жёсткий стоп": {"ru": "Жёсткий стоп", "en": "Hard stop", "zh": "强制停止"},
+            "Удаление файла": {"ru": "Удаление файла", "en": "Deleting file", "zh": "删除文件"},
+            "Home всех осей": {"ru": "Home всех осей", "en": "Homing all axes", "zh": "所有轴回零"},
+            "Запоминание стартовой позы": {"ru": "Запоминание стартовой позы", "en": "Saving start pose", "zh": "保存起点姿态"},
+            "Переход к сохранённому 0": {"ru": "Переход к сохранённому 0", "en": "Going to saved zero", "zh": "移动到保存零点"},
+            "Отключение моторов": {"ru": "Отключение моторов", "en": "Disabling motors", "zh": "关闭电机"},
+        }
+        exact = table.get(label)
+        if exact:
+            return exact.get(lang, exact["ru"])
+        m = re.fullmatch(r"Филамент (протяжка|откат) ([+-]?\S+) мм", label)
+        if m:
+            direction, distance = m.groups()
+            direction_text = {
+                "протяжка": {"ru": "протяжка", "en": "feed", "zh": "进料"},
+                "откат": {"ru": "откат", "en": "retract", "zh": "回抽"},
+            }[direction]
+            unit = "мм" if lang == "ru" else "mm"
+            return f"{self._t('filament')} {direction_text.get(lang, direction)} {distance} {unit}"
+        m = re.fullmatch(r"Сдвиг (.+) ([+-]?\S+) мм", label)
+        if m:
+            hint, distance = m.groups()
+            hint_text = {
+                "стол": {"ru": "стол", "en": "bed", "zh": "平台"},
+                "голова вверх/вниз": {"ru": "голова вверх/вниз", "en": "head up/down", "zh": "喷头上下"},
+                "голова влево/вправо": {"ru": "голова влево/вправо", "en": "head left/right", "zh": "喷头左右"},
+            }.get(hint, {"ru": hint, "en": hint, "zh": hint})
+            unit = "мм" if lang == "ru" else "mm"
+            return f"{ {'ru': 'Сдвиг', 'en': 'Jog', 'zh': '移动'}[lang] } {hint_text.get(lang, hint)} {distance} {unit}"
+        m = re.fullmatch(r"Переход к точке X([+-]?\d+(?:\.\d+)?) Y([+-]?\d+(?:\.\d+)?)", label)
+        if m:
+            x, y = m.groups()
+            return {
+                "ru": f"Переход к точке X{x} Y{y}",
+                "en": f"Moving to point X{x} Y{y}",
+                "zh": f"移动到点 X{x} Y{y}",
+            }[lang]
+        return label
+
+    def _log_t(self, key: str, **kwargs: object) -> str:
+        lang = self.lang_var.get().strip() or "ru"
+        table = {
+            "app_ready": {
+                "ru": "Little Hands готов. Baseline: LH v5, auto-fan FAN1 45C, Watch180, operator-facing manual-zero workflow, печать с SD от сохранённого старта.",
+                "en": "Little Hands is ready. Baseline: LH v5, auto-fan FAN1 45C, Watch180, operator-facing manual-zero workflow, SD printing from saved start.",
+                "zh": "Little Hands 已就绪。Baseline: LH v5，auto-fan FAN1 45C，Watch180，操作员手动零点流程，从保存起点进行 SD 打印。",
+            },
+            "port_must_be_free": {
+                "ru": "Порт должен быть свободен от Cura и других мониторов.",
+                "en": "The port must be free from Cura and other monitors.",
+                "zh": "端口必须未被 Cura 或其他监视器占用。",
+            },
+            "task_blocked_busy": {
+                "ru": "Команда '{label}' не запущена: предыдущая USB-команда ещё выполняется.",
+                "en": "Command '{label}' was not started: the previous USB command is still running.",
+                "zh": "命令“{label}”未启动：上一个 USB 命令仍在执行。",
+            },
+            "task_need_port": {
+                "ru": "Сначала выбери порт принтера, нажми 'Найти' или оставь 'не подключаться'.",
+                "en": "Choose a printer port first, press 'Find', or leave 'do not connect' selected.",
+                "zh": "请先选择打印机端口、点击“查找”，或保持“不要连接”。",
+            },
+            "task_not_started_safety": {
+                "ru": "Команда '{label}' не запущена: {reason}",
+                "en": "Command '{label}' was not started: {reason}",
+                "zh": "命令“{label}”未启动：{reason}",
+            },
+            "task_start": {"ru": "{label}...", "en": "{label}...", "zh": "{label}..."},
+            "task_done": {"ru": "{label}: готово", "en": "{label}: done", "zh": "{label}: 完成"},
+            "error_prefix": {"ru": "Ошибка: {text}", "en": "Error: {text}", "zh": "错误：{text}"},
+            "find_port_busy": {
+                "ru": "Поиск порта не запущен: предыдущая USB-команда ещё выполняется.",
+                "en": "Port search was not started: the previous USB command is still running.",
+                "zh": "端口查找未启动：上一个 USB 命令仍在执行。",
+            },
+            "find_port_start": {
+                "ru": "Ищу вероятный порт принтера среди USB/ACM serial...",
+                "en": "Looking for a likely printer port among USB/ACM serial devices...",
+                "zh": "正在 USB/ACM 串口中查找可能的打印机端口...",
+            },
+            "find_port_found": {
+                "ru": "Найден вероятный принтер: {device}",
+                "en": "Likely printer found: {device}",
+                "zh": "找到可能的打印机：{device}",
+            },
+            "find_port_uncertain": {
+                "ru": "USB-порт похож на принтер и выбран: {device}\n\nНо Marlin сейчас не ответил на M115/M105. После завершения предыдущей печати это обычно означает полуживое состояние USB/SD: сделай power cycle принтера на 5–10 секунд, затем нажми 'Найти' ещё раз.",
+                "en": "A USB port looks like a printer and was selected: {device}\n\nBut Marlin did not answer M115/M105 right now. After a previous print, this usually means a half-alive USB/SD state: power-cycle the printer for 5-10 seconds, then press 'Find' again.",
+                "zh": "USB 端口看起来像打印机，已选择：{device}\n\n但 Marlin 现在没有响应 M115/M105。若这是在上一次打印后，通常表示 USB/SD 处于半失效状态：请给打印机断电 5-10 秒后重新上电，然后再次点击“查找”。",
+            },
+            "find_port_none": {
+                "ru": "Автодетект не нашёл уверенный порт принтера. Оставляю ручной выбор.",
+                "en": "Auto-detect did not find a confident printer port. Leaving manual selection.",
+                "zh": "自动检测没有找到可靠的打印机端口，保留手动选择。",
+            },
+            "find_port_none_info": {
+                "ru": "Автопоиск не нашёл уверенный порт принтера.\nВыбери порт вручную из списка.",
+                "en": "Auto-search did not find a confident printer port.\nChoose a port manually from the list.",
+                "zh": "自动查找没有找到可靠的打印机端口。\n请从列表中手动选择端口。",
+            },
+            "port_selected": {"ru": "Выбран порт: {device}", "en": "Selected port: {device}", "zh": "已选择端口：{device}"},
+            "port_disconnected": {
+                "ru": "Порт отключён. Автоопрос и команды принтера остановлены до выбора нового порта.",
+                "en": "Port disconnected. Auto polling and printer commands are stopped until a new port is selected.",
+                "zh": "端口已断开。在选择新端口前，自动轮询和打印机命令已停止。",
+            },
+            "status_home_kept": {
+                "ru": "Статус снят: сохранённая стартовая поза в приложении оставлена активной.",
+                "en": "Status captured: the saved start pose in the app remains active.",
+                "zh": "状态已抓取：应用中的保存起点姿态保持有效。",
+            },
+            "status_resave_start": {
+                "ru": "Статус снят. Если был power cycle или перезапуск приложения, выставь стартовую позу и нажми 'Запомнить старт'.",
+                "en": "Status captured. If there was a power cycle or app restart, set the start pose and press 'Save start'.",
+                "zh": "状态已抓取。如果曾断电重启或重启应用，请设置起点姿态并点击“保存起点”。",
+            },
+            "log_save_cancelled": {"ru": "Сохранение лога отменено", "en": "Log save cancelled", "zh": "已取消保存日志"},
+            "log_saved": {"ru": "Лог сохранён: {path}", "en": "Log saved: {path}", "zh": "日志已保存：{path}"},
+        }
+        template = table.get(key, {}).get(lang, table.get(key, {}).get("ru", key))
+        return template.format(**kwargs)
 
     def _update_manual_controls_width(self) -> None:
         container = getattr(self, "controls_and_views", None)
@@ -2017,6 +2163,8 @@ class K9ControlCenter:
             self.files_status_var.set(self._t("files_status_flash_pending").format(source=source_name))
         if not self._port():
             self.port_display_var.set(self._t("not_connected"))
+            if self.busy_var.get() in {"USB: отключен", "USB: disconnected", "USB：已断开"}:
+                self.busy_var.set(self._t("usb_disconnected"))
 
     def _on_language_selected(self, _event=None) -> None:
         display = self.lang_display_var.get().strip()
@@ -2780,6 +2928,11 @@ class K9ControlCenter:
         self.head_up_button.configure(text=self._t("head_up"))
         self.hard_stop_button.configure(text=self._t("hard_stop"))
         self.level_points_label.configure(text=f"{self._t('bed_level_short')}:")
+        self.level_front_left_button.configure(text=self._t("level_front_left"))
+        self.level_center_button.configure(text=self._t("level_center"))
+        self.level_front_right_button.configure(text=self._t("level_front_right"))
+        self.level_back_left_button.configure(text=self._t("level_back_left"))
+        self.level_back_right_button.configure(text=self._t("level_back_right"))
         self._update_manual_controls_width()
         self.capture_metrics_button.configure(text=self._t("capture_metrics"))
         self.save_log_button.configure(text=self._t("save_log"))
@@ -3117,7 +3270,7 @@ class K9ControlCenter:
         return True, msg
 
     def _set_busy_ui(self, busy: bool, label: str | None = None) -> None:
-        self.busy_var.set(label or ("USB: busy" if busy else "USB: idle"))
+        self.busy_var.set(label or self._t("usb_busy" if busy else "usb_idle"))
         state = "disabled" if busy else "normal"
         for widget in self.action_widgets:
             try:
@@ -3147,9 +3300,12 @@ class K9ControlCenter:
 
             if kind == "log":
                 self.log(str(payload))
+            elif kind == "log-i18n":
+                key, params = payload  # type: ignore[misc]
+                self.log(self._log_t(str(key), **dict(params)))
             elif kind == "error":
                 text = str(payload)
-                self.log(f"Ошибка: {text}")
+                self.log(self._log_t("error_prefix", text=text))
                 if self._is_port_gone_error(text):
                     lost_port = self._port()
                     self.disconnect_port(log_change=False)
@@ -3165,6 +3321,11 @@ class K9ControlCenter:
             elif kind == "info":
                 messagebox.showinfo("Little Hands", str(payload))
                 self.log(str(payload))
+            elif kind == "info-i18n":
+                key, params = payload  # type: ignore[misc]
+                text = self._log_t(str(key), **dict(params))
+                messagebox.showinfo("Little Hands", text)
+                self.log(text)
             elif kind == "temp":
                 current, target, heater = payload  # type: ignore[misc]
                 self.last_temp_current = float(current)
@@ -3610,7 +3771,7 @@ class K9ControlCenter:
                 self.stopped_print_live_return_available = False
             self.port_var.set(device)
             self.preferred_port = device
-            self.log(f"Выбран порт: {device}")
+            self.log(self._log_t("port_selected", device=device))
             self._schedule_sd_refresh_after_port(device, force=True)
 
     def disconnect_port(self, log_change: bool = False) -> None:
@@ -3618,14 +3779,14 @@ class K9ControlCenter:
         self.port_var.set("")
         self.port_display_var.set(self._t("not_connected"))
         self.auto_sd_refresh_after_port = None
-        self.busy_var.set("USB: отключен")
+        self.busy_var.set(self._t("usb_disconnected"))
         if had_port:
             self._set_home_trust(HOME_TRUST_INVALID, "printer port disconnected", log_change=True)
             self.post_print_pose_known = False
             self.post_print_pose = None
             self.stopped_print_live_return_available = False
         if log_change:
-            self.log("Порт отключён. Автоопрос и команды принтера остановлены до выбора нового порта.")
+            self.log(self._log_t("port_disconnected"))
 
     def _schedule_sd_refresh_after_port(self, port: str, *, force: bool = False) -> None:
         if not port:
@@ -3854,32 +4015,26 @@ class K9ControlCenter:
 
     def detect_printer_port_action(self) -> None:
         if self.user_task_pending:
-            self.log("Поиск порта не запущен: предыдущая USB-команда ещё выполняется.")
+            self.log(self._log_t("find_port_busy"))
             return
         self._set_find_port_busy(True)
 
         def task() -> None:
             try:
-                self._post("log", "Ищу вероятный порт принтера среди USB/ACM serial...")
+                self._post("log-i18n", ("find_port_start", {}))
                 detected, ranked = sdtool.detect_printer_port(self._baud())
                 self.events.put(("ports", (ranked, detected)))
                 if detected:
                     detected_meta = next((meta for meta in ranked if meta.get("device") == detected), {})
                     detected_kind = str(detected_meta.get("detected") or "")
                     if detected_kind in {"marlin", "marlin-like"}:
-                        self._post("log", f"Найден вероятный принтер: {detected}")
+                        self._post("log-i18n", ("find_port_found", {"device": detected}))
                     else:
-                        msg = (
-                            f"USB-порт похож на принтер и выбран: {detected}\n\n"
-                            "Но Marlin сейчас не ответил на M115/M105. После завершения предыдущей печати "
-                            "это обычно означает полуживое состояние USB/SD: сделай power cycle принтера "
-                            "на 5–10 секунд, затем нажми 'Найти' ещё раз."
-                        )
-                        self._post("log", msg)
-                        self._post("info", msg)
+                        self._post("log-i18n", ("find_port_uncertain", {"device": detected}))
+                        self._post("info-i18n", ("find_port_uncertain", {"device": detected}))
                 else:
-                    self._post("log", "Автодетект не нашёл уверенный порт принтера. Оставляю ручной выбор.")
-                    self._post("info", "Автопоиск не нашёл уверенный порт принтера.\nВыбери порт вручную из списка.")
+                    self._post("log-i18n", ("find_port_none", {}))
+                    self._post("info-i18n", ("find_port_none_info", {}))
             finally:
                 self._post("find-port-ui", False)
 
@@ -4241,17 +4396,18 @@ class K9ControlCenter:
         return True, ""
 
     def _run_task(self, label: str, func, *, require_port: bool = True) -> None:
+        display_label = self._task_label(label)
         if self.user_task_pending:
-            self.log(f"Команда '{label}' не запущена: предыдущая USB-команда ещё выполняется.")
+            self.log(self._log_t("task_blocked_busy", label=display_label))
             return
         if require_port and not self._port():
-            messagebox.showerror("Little Hands", "Сначала выбери порт принтера, нажми 'Найти' или оставь 'не подключаться'.")
+            messagebox.showerror("Little Hands", self._log_t("task_need_port"))
             return
         if require_port:
             safety_error = self._selected_port_safety_error()
             if safety_error:
                 self.disconnect_port(log_change=False)
-                self.log(f"Команда '{label}' не запущена: {safety_error}")
+                self.log(self._log_t("task_not_started_safety", label=display_label, reason=safety_error))
                 messagebox.showerror("Little Hands", safety_error)
                 return
         self.user_task_pending = True
@@ -4260,10 +4416,10 @@ class K9ControlCenter:
             while not self.serial_lock.acquire(timeout=0.25):
                 pass
             try:
-                self._post("busy", (True, f"USB: {label.lower()}"))
-                self._post("log", f"{label}...")
+                self._post("busy", (True, f"USB: {display_label.lower()}"))
+                self._post("log-i18n", ("task_start", {"label": display_label}))
                 func()
-                self._post("log", f"{label}: готово")
+                self._post("log-i18n", ("task_done", {"label": display_label}))
             except sdtool.UploadCancelled as exc:
                 self._post("log", str(exc))
                 self._post("files-status", str(exc))
@@ -4847,9 +5003,9 @@ class K9ControlCenter:
             self._post("metrics", ("m115", caps))
             self._post("log", caps.strip())
             if self._home_is_trusted():
-                self._post("log", "Статус снят: сохранённая стартовая поза в приложении оставлена активной.")
+                self._post("log-i18n", ("status_home_kept", {}))
             else:
-                self._post("log", "Статус снят. Если был power cycle или перезапуск приложения, выставь стартовую позу и нажми 'Запомнить старт'.")
+                self._post("log-i18n", ("status_resave_start", {}))
 
         self._run_task("Проверка статуса", task)
 
@@ -4898,7 +5054,7 @@ class K9ControlCenter:
             filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
         )
         if not target_path:
-            self.log("Сохранение лога отменено")
+            self.log(self._log_t("log_save_cancelled"))
             return
         target = Path(target_path)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -4906,8 +5062,9 @@ class K9ControlCenter:
             shutil.copy2(RUNTIME_LOG_PATH, target)
         else:
             target.write_text("", encoding="utf-8")
-        self.log(f"Лог сохранён: {target}")
-        messagebox.showinfo("Little Hands", f"Лог сохранён:\n{target}")
+        saved_text = self._log_t("log_saved", path=target)
+        self.log(saved_text)
+        messagebox.showinfo("Little Hands", saved_text)
 
     def reset_usb_session(self) -> None:
         self.monitor_enabled = False
@@ -6461,7 +6618,7 @@ class K9ControlCenter:
 
     def _poll_status(self) -> None:
         if not self._port():
-            self.busy_var.set("USB: отключен")
+            self.busy_var.set(self._t("usb_disconnected"))
             self.root.after(1000, self._poll_status)
             return
         safety_error = self._selected_port_safety_error()
@@ -6989,8 +7146,8 @@ class K9ControlCenter:
 def main() -> int:
     root = tk.Tk(className="little-hands-control-center")
     app = K9ControlCenter(root)
-    app.log("Little Hands готов. Baseline: LH v5, auto-fan FAN1 45C, Watch180, operator-facing manual-zero workflow, печать с SD от сохранённого старта.")
-    app.log("Порт должен быть свободен от Cura и других мониторов.")
+    app.log(app._log_t("app_ready"))
+    app.log(app._log_t("port_must_be_free"))
     root.mainloop()
     return 0
 

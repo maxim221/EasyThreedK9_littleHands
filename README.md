@@ -24,9 +24,11 @@ What is still rough:
 - there is no true endstop-based auto-home yet
 - after a real failed print start with no heating / no motion, the safest recovery is still a printer power cycle
 - Windows packaging is only planned, not shipped
-- the app UI has RU / EN / ZH switching, but some rough edges are still being tested
+- the app UI has RU / EN / ZH switching; the main controls and newer journal events are localized, while raw firmware replies stay as the printer reports them
 
 ## Screenshot
+
+The screenshots below are captured with the English UI. The main window now keeps manual control on the left, shows USB metrics under it, and keeps the journal visible on the right.
 
 ![Little Hands main window](docs/screenshots/little-hands-main-window.png)
 

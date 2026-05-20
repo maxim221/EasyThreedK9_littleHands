@@ -24,9 +24,11 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 - 还没有真正基于限位开关的自动回零
 - 如果确实启动失败，并且没有加热 / 没有运动，目前最稳妥的恢复方式仍然是打印机断电重启
 - Windows 打包还只是计划
-- 程序界面支持 RU / EN / ZH 切换，但仍有一些界面细节在测试中
+- 程序界面支持 RU / EN / ZH 切换；主要控制项和较新的系统日志事件已经本地化，而固件原始回复会保持打印机返回的内容
 
 ## 截图
+
+下面的截图使用英文界面。主窗口现在左侧是 manual control，USB metrics 位于其下方，journal 固定显示在右侧。
 
 ![Little Hands main window](docs/screenshots/little-hands-main-window.png)
 

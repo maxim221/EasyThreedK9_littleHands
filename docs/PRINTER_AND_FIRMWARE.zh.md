@@ -156,6 +156,7 @@ G92 X0 Y0 Z0
 - 新的 Little Hands 文件不应再把早期 `M109` 改写为 `M104`；`M24` 前的 host-side 预热必须使用分段 `M104` 目标，然后用最终 `M109` 会话作为加热门槛，并被动读取温度行。不要把它改回单次冷态高温 `M109`，也不要改回旧的主动 `M104` 加重复 `M105` 轮询；这两种模式都已经在这台 K9 上失败过。
 - 如果 Marlin 显示 hotend 目标温度和正的加热输出，但第一分钟温度上升很小，应把它当作这台 K9 hotend / 传感器的 slow-start 特性：Little Hands 会记录警告并等待完整的预热超时；只有目标掉到 `/0C`、heater output 一直是 `@0` 或 `M109` 不再输出温度行时才快速中止
 - `Manual control` 面板中的手动耗材进料用于停止打印后的装载 / 诊断：`Hotend 200C` 设置手动 `M104` 目标，`Feed` / `Retract` 只用相对 `M83` + `G1 E...` + `M400` 移动 E，并恢复 `M82`；活动 SD 打印期间会被阻止，且只有 `M105` 确认 hotend 至少 `180C` 后才发送 E 移动
+- 当前主界面将 `Manual control` 放在左侧，`USB metrics` 放在它下方，`Journal` 始终显示在右侧；调平点按钮也会使用短标签随语言切换
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 
