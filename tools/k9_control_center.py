@@ -8,6 +8,7 @@ Features:
 - browse, start, pause, resume, stop, and delete SD files
 - live temperature / SD status polling
 - home, disable motors, and jog X/Y/Z
+- heat the hotend and feed/retract filament manually
 - bed-leveling helper points for the unusual X/Z bed plane layout
 """
 
@@ -105,6 +106,12 @@ JOG_TRAVEL_ACCEL = {
     "Z": 80,
 }
 JOG_RESTORE_TRAVEL_ACCEL = 80
+FILAMENT_STEPS_MM = (1.0, 5.0, 10.0, 20.0, 50.0)
+FILAMENT_DEFAULT_STEP_MM = 10.0
+FILAMENT_PREHEAT_TARGET_C = 200.0
+FILAMENT_EXTRUDE_MIN_C = 180.0
+FILAMENT_FEEDRATE = 90
+FILAMENT_MOVE_TIMEOUT_SEC = 75.0
 MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
 LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
 M92_RE = re.compile(r"M92\s+X([-\d.]+)\s+Y([-\d.]+)\s+Z([-\d.]+)\s+E([-\d.]+)")
@@ -304,6 +311,8 @@ MANUAL_TEXT = textwrap.dedent(
     - "Запомнить старт" объявляет текущую физическую позу как X0 Y0 Z0.
     - "К сохранённому старту" возвращает к сохранённому нулю или предлагает guarded recovery после остановленной/завершённой печати.
     - "Моторы выкл" выключает моторы и сбрасывает доверие к home.
+    - "Hotend 200C" задаёт ручной нагрев hotend для загрузки/проверки филамента; "Hotend off" выключает этот ручной нагрев.
+    - "Протянуть" и "Назад" двигают только экструдер E на выбранный E-шаг. Протяжка заблокирована во время активной SD-печати и при hotend ниже 180C.
     - Кнопки движения перемещают выбранную ось на выбранный шаг. Ось стола намеренно двигается мягко, чтобы не ловить пропуски шагов.
     - Калибровка стола двигает по известным точкам; используй её только когда текущий старт доверенный.
 
@@ -426,6 +435,8 @@ MANUAL_TEXTS = {
         - "Save start" declares the current physical pose as X0 Y0 Z0.
         - "Go to saved start" returns to the saved zero or offers a guarded recovery path after a stopped/finished print.
         - "Motors off" disables motors and invalidates home trust.
+        - "Hotend 200C" sets a manual hotend target for loading/checking filament; "Hotend off" turns that manual heat target off.
+        - "Feed" and "Retract" move only the E extruder by the selected E step. Filament movement is blocked during active SD printing and below 180C.
         - Jog buttons move the selected axis by the selected step. The bed axis is deliberately gentle to avoid missed steps.
         - Bed leveling moves through known calibration points; use it only when the current start pose is trusted.
 
@@ -519,6 +530,8 @@ MANUAL_TEXTS = {
         - "Save start" 将当前物理姿态声明为 X0 Y0 Z0。
         - "回到保存起点" 返回保存的零点，或在停止 / 完成打印后提供受保护 recovery。
         - "Motors off" 关闭电机并使 home 信任失效。
+        - "Hotend 200C" 设置手动 hotend 加热目标，用于装载 / 检查耗材；"Hotend off" 关闭该手动加热。
+        - "Feed" / "Retract" 只移动 E 挤出机，距离为所选 E 步长；活动 SD 打印期间和 hotend 低于 180C 时会被阻止。
         - Jog 按钮按所选步长移动对应轴。平台轴故意较温和，以避免丢步。
         - Bed leveling 会移动到已知校准点；仅在当前起点可信时使用。
 
@@ -578,6 +591,7 @@ class K9ControlCenter:
         self.sd_notice_var = tk.StringVar(value="")
         self.files_status_var = tk.StringVar(value="Выбери G-code или прошивку.")
         self.step_var = tk.DoubleVar(value=self._initial_jog_step())
+        self.filament_step_var = tk.StringVar(value=self._initial_filament_step())
         self.computer_melody_on_complete_var = tk.BooleanVar(value=True)
 
         self.sd_list: list[str] = []
@@ -676,6 +690,7 @@ class K9ControlCenter:
         self._build_ui()
         self._sync_home_controls()
         self.step_var.trace_add("write", self._on_jog_step_changed)
+        self.filament_step_var.trace_add("write", self._on_filament_step_changed)
         if self.pending_flash_finalize:
             source_name = str(self.pending_flash_finalize.get("source_name", "mksLite.bin"))
             self.files_status_var.set(self._t("files_status_flash_pending").format(source=source_name))
@@ -1737,7 +1752,20 @@ class K9ControlCenter:
             return value
         return JOG_DEFAULT_STEP_MM
 
+    def _initial_filament_step(self) -> str:
+        try:
+            value = float(self.ui_state.get("filament_step", FILAMENT_DEFAULT_STEP_MM))
+        except (TypeError, ValueError):
+            value = FILAMENT_DEFAULT_STEP_MM
+        for allowed in FILAMENT_STEPS_MM:
+            if abs(value - allowed) < 0.0001:
+                return f"{allowed:g}"
+        return f"{FILAMENT_DEFAULT_STEP_MM:g}"
+
     def _on_jog_step_changed(self, *_args) -> None:
+        self._save_ui_state()
+
+    def _on_filament_step_changed(self, *_args) -> None:
         self._save_ui_state()
 
     def _home_trust_label(self) -> str:
@@ -1780,12 +1808,17 @@ class K9ControlCenter:
         post_print_go_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
         start_state = "normal" if trusted and not self.user_task_pending else "disabled"
         confirm_finish_state = "normal" if self._can_confirm_operator_finished_print() and not self.user_task_pending else "disabled"
+        filament_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
         guarded_buttons = (
             ("go_start_button", go_state),
             ("post_print_go_start_button", post_print_go_state),
             ("start_print_button", start_state),
             ("upload_and_start_button", start_state),
             ("confirm_finish_button", confirm_finish_state),
+            ("filament_feed_button", filament_state),
+            ("filament_retract_button", filament_state),
+            ("filament_heat_button", filament_state),
+            ("filament_cool_button", filament_state),
         )
         for name, state in guarded_buttons:
             widget = getattr(self, name, None)
@@ -1830,6 +1863,10 @@ class K9ControlCenter:
             state["jog_step"] = float(self.step_var.get())
         except (tk.TclError, TypeError, ValueError):
             state["jog_step"] = JOG_DEFAULT_STEP_MM
+        try:
+            state["filament_step"] = float(self.filament_step_var.get())
+        except (tk.TclError, TypeError, ValueError):
+            state["filament_step"] = FILAMENT_DEFAULT_STEP_MM
         state["sd_gcode_profiles"] = self.sd_gcode_profiles
         if self.pending_flash_finalize:
             state["pending_flash_finalize"] = self.pending_flash_finalize
@@ -1883,6 +1920,12 @@ class K9ControlCenter:
             "go_start": {"ru": "К сохранённому старту", "en": "Go to saved start", "zh": "回到保存起点"},
             "motors_off": {"ru": "Моторы выкл", "en": "Motors off", "zh": "关闭电机"},
             "step": {"ru": "Шаг", "en": "Step", "zh": "步长"},
+            "filament": {"ru": "Филамент", "en": "Filament", "zh": "耗材"},
+            "filament_step": {"ru": "Шаг E", "en": "E step", "zh": "E 步长"},
+            "filament_feed": {"ru": "Протянуть", "en": "Feed", "zh": "进料"},
+            "filament_retract": {"ru": "Назад", "en": "Retract", "zh": "回抽"},
+            "filament_heat": {"ru": "Hotend 200C", "en": "Hotend 200C", "zh": "Hotend 200C"},
+            "filament_cool": {"ru": "Hotend off", "en": "Hotend off", "zh": "关闭 hotend"},
             "head_left": {"ru": "Голова влево", "en": "Head left", "zh": "喷头左移"},
             "head_right": {"ru": "Голова вправо", "en": "Head right", "zh": "喷头右移"},
             "bed_away": {"ru": "Стол от себя", "en": "Bed away", "zh": "平台后移"},
@@ -2601,6 +2644,37 @@ class K9ControlCenter:
         self.hard_stop_button.grid(row=3, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
         self.action_widgets.append(self.hard_stop_button)
 
+        self.filament_label = ttk.Label(motion, text="Филамент")
+        self.filament_label.grid(row=4, column=0, sticky="w", padx=2, pady=(8, 2))
+        filament_step_wrap = ttk.Frame(motion)
+        filament_step_wrap.grid(row=4, column=1, sticky="ew", padx=2, pady=(8, 2))
+        self.filament_step_label = ttk.Label(filament_step_wrap, text="Шаг E")
+        self.filament_step_label.pack(side="left")
+        self.filament_step_combo = ttk.Combobox(
+            filament_step_wrap,
+            textvariable=self.filament_step_var,
+            values=[f"{value:g}" for value in FILAMENT_STEPS_MM],
+            width=5,
+            state="readonly",
+        )
+        self.filament_step_combo.pack(side="left", padx=(6, 0))
+        self.filament_feed_button = ttk.Button(motion, text="Протянуть", command=self.feed_filament)
+        self.filament_feed_button.grid(row=4, column=2, padx=2, pady=(8, 2), sticky="ew")
+        self.action_widgets.append(self.filament_feed_button)
+        self.filament_retract_button = ttk.Button(motion, text="Назад", command=self.retract_filament)
+        self.filament_retract_button.grid(row=4, column=3, padx=2, pady=(8, 2), sticky="ew")
+        self.action_widgets.append(self.filament_retract_button)
+        self.filament_heat_button = ttk.Button(
+            motion,
+            text="Hotend 200C",
+            command=lambda: self.set_filament_hotend_target(FILAMENT_PREHEAT_TARGET_C),
+        )
+        self.filament_heat_button.grid(row=5, column=0, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.filament_heat_button)
+        self.filament_cool_button = ttk.Button(motion, text="Hotend off", command=lambda: self.set_filament_hotend_target(0.0))
+        self.filament_cool_button.grid(row=5, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.action_widgets.append(self.filament_cool_button)
+
         level = ttk.LabelFrame(controls, text="Калибровка стола", padding=6)
         self.level_frame = level
         level.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
@@ -2674,6 +2748,12 @@ class K9ControlCenter:
         self.go_start_button.configure(text=self._t("go_start"))
         self.motors_off_button.configure(text=self._t("motors_off"))
         self.step_label.configure(text=self._t("step"))
+        self.filament_label.configure(text=self._t("filament"))
+        self.filament_step_label.configure(text=self._t("filament_step"))
+        self.filament_feed_button.configure(text=self._t("filament_feed"))
+        self.filament_retract_button.configure(text=self._t("filament_retract"))
+        self.filament_heat_button.configure(text=self._t("filament_heat"))
+        self.filament_cool_button.configure(text=self._t("filament_cool"))
         self.head_left_button.configure(text=self._t("head_left"))
         self.head_right_button.configure(text=self._t("head_right"))
         self.bed_away_button.configure(text=self._t("bed_away"))
@@ -6105,6 +6185,136 @@ class K9ControlCenter:
         else:
             return pose
         return (x, y, z)
+
+    def _filament_step_mm(self) -> float:
+        try:
+            value = float(self.filament_step_var.get())
+        except (tk.TclError, TypeError, ValueError):
+            value = FILAMENT_DEFAULT_STEP_MM
+        for allowed in FILAMENT_STEPS_MM:
+            if abs(value - allowed) < 0.0001:
+                return allowed
+        self.filament_step_var.set(f"{FILAMENT_DEFAULT_STEP_MM:g}")
+        return FILAMENT_DEFAULT_STEP_MM
+
+    def _query_hotend_temperature_for_filament(self) -> tuple[float, float, int | None, str]:
+        reply = sdtool.run_commands_wait_ok(
+            self._port(),
+            self._baud(),
+            ["M105"],
+            per_command_timeout=12.0,
+        )
+        match = TEMP_RE.search(reply)
+        if not match:
+            raise RuntimeError(
+                "Не удалось получить температуру hotend перед протяжкой филамента; E-движение не отправляю."
+            )
+        current = float(match.group(1))
+        target = float(match.group(2))
+        heater_match = HEATER_RE.search(reply)
+        heater = int(heater_match.group(1)) if heater_match else None
+        self._post("temp", (current, target, heater))
+        self._post("metrics", ("m105", reply))
+        return current, target, heater, reply
+
+    def set_filament_hotend_target(self, target: float) -> None:
+        target = max(0.0, min(float(target), K9_HOTEND_MAX_TARGET_C))
+        label = f"Hotend {target:.0f}C" if target > 0 else "Hotend off"
+
+        def task() -> None:
+            if self.current_print_file != "-":
+                raise RuntimeError(
+                    "Ручной hotend control для филамента заблокирован во время активной SD-печати. "
+                    "Сначала останови или заверши печать штатным путём."
+                )
+            out = sdtool.run_commands_wait_ok(
+                self._port(),
+                self._baud(),
+                [f"M104 S{target:.0f}", "M105"],
+                per_command_timeout=12.0,
+            )
+            match = TEMP_RE.search(out)
+            if match:
+                heater_match = HEATER_RE.search(out)
+                heater = int(heater_match.group(1)) if heater_match else None
+                self._post("temp", (float(match.group(1)), float(match.group(2)), heater))
+            self._post("metrics", ("m105", out))
+            if target > 0:
+                self._post("progress", (f"Филамент: hotend цель {target:.0f}C", 0.0))
+                self._post("log", f"Hotend задан на {target:.0f}C для ручной протяжки филамента. Дождись >= {FILAMENT_EXTRUDE_MIN_C:.0f}C.")
+            else:
+                self._post("progress", ("Филамент: hotend off", 0.0))
+                self._post("log", "Hotend выключен после ручной операции с филаментом.")
+
+        self._run_task(label, task)
+
+    def feed_filament(self) -> None:
+        self._move_filament(self._filament_step_mm())
+
+    def retract_filament(self) -> None:
+        self._move_filament(-self._filament_step_mm())
+
+    def _move_filament(self, distance: float) -> None:
+        signed_distance = f"{distance:+g}"
+        direction = "протяжка" if distance > 0 else "откат"
+
+        def task() -> None:
+            if self.current_print_file != "-":
+                raise RuntimeError(
+                    "Ручная протяжка филамента заблокирована во время активной SD-печати. "
+                    "Сначала нажми Stop/Стоп или дождись завершения, чтобы не вмешиваться в поток G-code."
+                )
+            current, target, heater, _reply = self._query_hotend_temperature_for_filament()
+            if current < FILAMENT_EXTRUDE_MIN_C:
+                raise RuntimeError(
+                    f"Hotend сейчас {current:.1f}C / {target:.0f}C, а для ручной протяжки нужно минимум "
+                    f"{FILAMENT_EXTRUDE_MIN_C:.0f}C. Нажми 'Hotend 200C' и дождись нагрева; "
+                    "холодное E-движение не отправлено."
+                )
+            heater_text = f" @:{heater}" if heater is not None else " @:?"
+            self._post(
+                "log",
+                f"Филамент: {direction} {signed_distance} мм при hotend {current:.1f}/{target:.0f}C{heater_text}; "
+                f"G-code E{distance:.3f} F{FILAMENT_FEEDRATE}.",
+            )
+            out = ""
+            move_error: Exception | None = None
+            restore_error: Exception | None = None
+            try:
+                out = sdtool.run_commands_wait_ok(
+                    self._port(),
+                    self._baud(),
+                    ["M17", "M83", f"G1 E{distance:.3f} F{FILAMENT_FEEDRATE}", "M400"],
+                    per_command_timeout=FILAMENT_MOVE_TIMEOUT_SEC,
+                )
+            except Exception as exc:
+                move_error = exc
+            try:
+                out += sdtool.run_commands_wait_ok(
+                    self._port(),
+                    self._baud(),
+                    ["M82"],
+                    per_command_timeout=12.0,
+                )
+            except Exception as exc:
+                restore_error = exc
+                self._post("log", f"Не удалось вернуть absolute extrusion mode M82: {exc}")
+            if move_error is not None:
+                raise move_error
+            if restore_error is not None:
+                raise RuntimeError(
+                    "Протяжка филамента завершилась неуверенно: M82 не подтвердился. "
+                    "Перед следующей печатью сделай power cycle или проверь режим экструдера вручную."
+                ) from restore_error
+            useful_lines = [
+                line.strip()
+                for line in out.splitlines()
+                if line.strip() and line.strip().lower() != "ok"
+            ]
+            if useful_lines:
+                self._post("log", "\n".join(useful_lines))
+
+        self._run_task(f"Филамент {direction} {signed_distance} мм", task)
 
     def jog_axis(self, axis: str, distance: float) -> None:
         axis = axis.upper()

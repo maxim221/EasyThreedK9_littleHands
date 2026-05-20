@@ -158,6 +158,7 @@ So:
 - after a completed, stopped, hard-stopped, or failed SD print/start, the next SD start requires explicit confirmation that the printer was power-cycled for `5–10` seconds and the start pose was saved again; pressing `Save start` alone does not clear this gate
 - new Little Hands files must not rewrite early `M109` to `M104`; host preheat before `M24` must use staged `M104` targets followed by one final `M109` session with passive temperature parsing. Do not change this back to a single cold high `M109` or the old active `M104` plus repeated `M105` polling loop; both modes have failed on this K9.
 - if Marlin shows a hotend target and positive heater output but the first minute of temperature rise is small, treat it as this K9's slow-start hotend/sensor behavior: log a warning and keep waiting up to the full preheat timeout; still abort quickly if the target drops to `/0C`, heater output stays `@0`, or `M109` stops producing temperature lines
+- manual filament feed in the `Manual control` panel is for loading/diagnosis after a print has stopped: `Hotend 200C` sets a manual `M104` target, `Feed` / `Retract` move only E with relative `M83` + `G1 E...` + `M400` and restore `M82`; these commands are blocked during active SD printing and do not send E movement until `M105` confirms the hotend is at least `180C`
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

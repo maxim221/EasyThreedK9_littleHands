@@ -203,6 +203,34 @@ def main() -> int:
         "Failed manual jog must preserve the failed-preheat-lift marker until a move is acknowledged.",
         failures,
     )
+    require("FILAMENT_EXTRUDE_MIN_C = 180.0" in app, "Manual filament feed must require a hot hotend, not cold extrusion.", failures)
+    require("FILAMENT_FEEDRATE = 90" in app, "Manual filament feedrate must stay slow for K9 diagnostics.", failures)
+    require("M302" not in app, "Manual filament feed must not enable Marlin cold extrusion.", failures)
+    require(
+        "def _move_filament" in app
+        and '"M83"' in app
+        and 'f"G1 E{distance:.3f} F{FILAMENT_FEEDRATE}"' in app
+        and '"M400"' in app
+        and '["M82"]' in app,
+        "Manual filament feed must use relative E, wait with M400, and restore absolute extrusion mode.",
+        failures,
+    )
+    require(
+        "current < FILAMENT_EXTRUDE_MIN_C" in app and "холодное E-движение не отправлено" in app,
+        "Manual filament feed must block when the hotend is below the safe extrusion temperature.",
+        failures,
+    )
+    require(
+        "Ручная протяжка филамента заблокирована во время активной SD-печати" in app
+        and 'filament_state = "normal" if self.current_print_file == "-"' in app,
+        "Manual filament feed controls must be unavailable during active SD printing.",
+        failures,
+    )
+    require(
+        'f"M104 S{target:.0f}"' in app and "Hotend задан на {target:.0f}C для ручной протяжки филамента" in app,
+        "Manual filament panel must provide an explicit bounded hotend target instead of relying on a print start.",
+        failures,
+    )
     require(
         "elif self._can_return_from_known_post_print_pose() and not self._home_is_trusted():" in app,
         "Post-print M114 recovery must not override a still-trusted live session zero.",

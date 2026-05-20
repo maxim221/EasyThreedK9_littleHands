@@ -2880,3 +2880,17 @@ After each test print, append:
   - if any return-to-start movement did not physically complete, home is not trustworthy until the bed is clear, the axis is free, and the nozzle is visually back at the intended start before `Save start`
 - Documentation action:
   - README files, printer/firmware guides, Cura settings notes, Linux/Raspberry Pi checklist, in-app manual text, and `AGENTS.md` now document these field observations and protect against reintroducing the old `M109 -> M104` rewrite assumption
+
+## 2026-05-20 Manual Filament Feed Controls
+
+- Field need:
+  - a model print failed because filament stopped feeding while the nozzle continued moving in air
+  - the operator needed an in-app way to heat the hotend and manually feed/retract filament for loading and diagnosis without starting a new SD print
+- App change:
+  - the manual-control panel now has a `Filament` row with an E-step selector, `Feed`, `Retract`, `Hotend 200C`, and `Hotend off`
+  - filament feed/retract is blocked while an SD print is active
+  - before any E move, Little Hands queries `M105` and requires hotend temperature >= `180C`; it does not enable Marlin cold extrusion
+  - E motion uses relative extrusion mode `M83`, slow `G1 E... F90`, `M400`, and restores `M82` through the ok-waiting serial helper
+- Safety/docs:
+  - the in-app manual, printer/firmware docs, `AGENTS.md`, and regression checks now protect this as a manual diagnostic path separate from SD printing
+  - no physical filament feed test was run in this code change; the operator should watch the extruder/nozzle and stop if the drive clicks loudly, filament grinds, or plastic does not flow once hot
