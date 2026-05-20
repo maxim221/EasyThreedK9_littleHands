@@ -1,0 +1,41 @@
+name: K9 test report
+description: Report Little Hands behavior on an EasyThreeD K9 / ET4000+ printer.
+title: "K9 test report: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Little Hands.
+
+        Safety note: this K9 workflow does not use normal endstop-based `G28`.
+        Do not flash firmware or run motion commands unless you understand the manual-zero `Save start` workflow.
+  - type: input
+    id: printer
+    attributes:
+      label: Printer / board variant
+      description: Exact EasyThreeD K9 / ET4000+ variant and visible board markings.
+      placeholder: "EasyThreeD K9, ET4000+, CH340, board marking..."
+  - type: input
+    id: system
+    attributes:
+      label: Host system
+      description: Linux distro, desktop environment, Raspberry Pi or PC, Python version if known.
+      placeholder: "Ubuntu 24.04 / Raspberry Pi OS / ..."
+  - type: textarea
+    id: usb
+    attributes:
+      label: USB / serial detection
+      description: What port is detected, and whether M115/M105/M27 reply.
+      placeholder: "/dev/ttyUSB0, CH340, M115 replies ..., M105 replies ..."
+  - type: textarea
+    id: result
+    attributes:
+      label: What worked / what failed
+      description: Tell us what you tried and what happened.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or firmware replies
+      description: Paste Little Hands / Marlin logs here. Remove private paths if needed.
+      render: text

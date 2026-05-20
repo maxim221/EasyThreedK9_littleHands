@@ -30,6 +30,7 @@ Little Hands — это Linux-приложение для управления �
 
 - Telegram: [@NeuroMaxim](https://t.me/NeuroMaxim)
 - Ошибки и идеи: [GitHub Issues](https://github.com/maxim221/EasyThreedK9_littleHands/issues)
+- Тестеры K9: [CALL_FOR_TESTERS.md](CALL_FOR_TESTERS.md)
 
 ## Скриншот
 

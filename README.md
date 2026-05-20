@@ -30,6 +30,7 @@ What is still rough:
 
 - Telegram: [@NeuroMaxim](https://t.me/NeuroMaxim)
 - Bugs and feature requests: [GitHub Issues](https://github.com/maxim221/EasyThreedK9_littleHands/issues)
+- K9 testers: [CALL_FOR_TESTERS.md](CALL_FOR_TESTERS.md)
 
 ## Screenshot
 

@@ -30,6 +30,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 
 - Telegram: [@NeuroMaxim](https://t.me/NeuroMaxim)
 - Bug 和功能建议：[GitHub Issues](https://github.com/maxim221/EasyThreedK9_littleHands/issues)
+- K9 测试者：[CALL_FOR_TESTERS.md](CALL_FOR_TESTERS.md)
 
 ## 截图
 
