@@ -1871,11 +1871,6 @@ class K9ControlCenter:
         if self.pending_flash_finalize:
             state["pending_flash_finalize"] = self.pending_flash_finalize
         try:
-            current = self.views.select()
-            state["selected_view"] = "log" if str(current) == str(self.log_frame) else "metrics"
-        except Exception:
-            pass
-        try:
             state["main_sash"] = int(self.main_pane.sashpos(0))
         except Exception:
             pass
@@ -1934,6 +1929,7 @@ class K9ControlCenter:
             "head_up": {"ru": "Голова вверх", "en": "Head up", "zh": "喷头上移"},
             "hard_stop": {"ru": "Жёсткий стоп", "en": "Hard stop", "zh": "强制停止"},
             "bed_level": {"ru": "Калибровка стола", "en": "Bed leveling", "zh": "平台调平"},
+            "bed_level_short": {"ru": "Калибр.", "en": "Level", "zh": "调平"},
             "level_points": {"ru": "Точки X/Y", "en": "X/Y points", "zh": "X/Y 点位"},
             "journal": {"ru": "Журнал", "en": "Journal", "zh": "日志"},
             "usb_metrics": {"ru": "USB-метрики", "en": "USB metrics", "zh": "USB 指标"},
@@ -1972,6 +1968,28 @@ class K9ControlCenter:
 
     def _format_label_value(self, key: str, value: str) -> str:
         return f"{self._t(key)}: {value}"
+
+    def _update_manual_controls_width(self) -> None:
+        container = getattr(self, "controls_and_views", None)
+        widgets = getattr(self, "manual_width_widgets", [])
+        if container is None or not widgets:
+            return
+        font = tkfont.nametofont("TkDefaultFont")
+        max_text_width = 0
+        for widget in widgets:
+            try:
+                max_text_width = max(max_text_width, font.measure(str(widget.cget("text"))))
+            except Exception:
+                continue
+        max_wide_text_width = 0
+        for widget in getattr(self, "manual_wide_width_widgets", []):
+            try:
+                max_wide_text_width = max(max_wide_text_width, font.measure(str(widget.cget("text"))))
+            except Exception:
+                continue
+        button_width = max(114, max_text_width + 26, int((max_wide_text_width + 42) / 2))
+        level_width = font.measure(str(getattr(self, "level_points_label", "").cget("text"))) + 260 if hasattr(self, "level_points_label") else 0
+        container.columnconfigure(0, minsize=max((button_width * 4) + 56, level_width))
 
     def _refresh_translated_strings(self) -> None:
         self.progress_var.set(self._t("progress_idle") if self.progress_var.get().startswith(("Печать: простой", "Print: idle", "打印：空闲")) else self.progress_var.get())
@@ -2203,6 +2221,7 @@ class K9ControlCenter:
 
         style.configure(".", background=colors["bg"], foreground=colors["text"])
         style.configure("TFrame", background=colors["bg"])
+        style.configure("Panel.TFrame", background=colors["panel"])
         style.configure("TPanedwindow", background=colors["bg"])
         style.configure("TLabelframe", background=colors["panel"], bordercolor=colors["border"], relief="solid")
         style.configure("TLabelframe.Label", background=colors["panel"], foreground=colors["accent"], font=("DejaVu Sans", 10, "bold"))
@@ -2286,47 +2305,6 @@ class K9ControlCenter:
             bordercolor=colors["border"],
             arrowcolor=colors["accent"],
         )
-        style.configure(
-            "LH.TNotebook",
-            background=colors["panel"],
-            borderwidth=0,
-            relief="flat",
-            bordercolor=colors["border"],
-            lightcolor=colors["border"],
-            darkcolor=colors["border"],
-            tabmargins=(2, 2, 2, 0),
-        )
-        style.configure(
-            "LH.TNotebook.Tab",
-            background="#16261f",
-            foreground="#bdd7c5",
-            bordercolor=colors["border"],
-            lightcolor=colors["border"],
-            darkcolor=colors["border"],
-            padding=(12, 4),
-            font=("DejaVu Sans", 9, "bold"),
-        )
-        style.map(
-            "LH.TNotebook.Tab",
-            background=[
-                ("selected", "#20352b"),
-                ("active", "#1b2d24"),
-            ],
-            foreground=[
-                ("selected", "#dbeadf"),
-                ("active", "#d1e3d7"),
-            ],
-            padding=[
-                ("selected", (14, 7)),
-                ("active", (12, 5)),
-            ],
-            font=[
-                ("selected", ("DejaVu Sans", 11, "bold")),
-                ("active", ("DejaVu Sans", 10, "bold")),
-            ],
-        )
-        style.configure("NotebookPage.TFrame", background=colors["panel"])
-
         for sd_listbox in (self.sd_print_listbox,):
             sd_listbox.configure(
                 bg=colors["field"],
@@ -2415,6 +2393,7 @@ class K9ControlCenter:
             except Exception:
                 pass
         self._draw_corner_hands()
+        self._update_manual_controls_width()
         self._draw_temp_graph()
         self._render_live_status()
 
@@ -2590,64 +2569,81 @@ class K9ControlCenter:
         right.rowconfigure(1, weight=1)
 
         controls_and_views = ttk.Frame(right)
-        controls_and_views.columnconfigure(0, weight=1)
-        controls_and_views.rowconfigure(1, weight=1)
+        self.controls_and_views = controls_and_views
+        controls_and_views.columnconfigure(0, weight=0)
+        controls_and_views.columnconfigure(1, weight=1)
+        controls_and_views.rowconfigure(0, weight=1)
         controls_and_views.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        controls_and_views.grid_propagate(False)
 
         controls = ttk.Frame(controls_and_views)
-        controls.grid(row=0, column=0, sticky="ew")
+        controls.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         controls.columnconfigure(0, weight=1)
-        controls.columnconfigure(1, weight=1)
+        controls.rowconfigure(1, weight=1)
+        controls.grid_propagate(False)
 
         motion = ttk.LabelFrame(controls, text="Ручное управление", padding=6)
         self.motion_frame = motion
-        motion.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        motion.grid(row=0, column=0, sticky="new")
         for idx in range(4):
             motion.columnconfigure(idx, weight=1)
 
-        self.save_start_button = ttk.Button(motion, text="Запомнить старт", command=self.set_current_home_zero)
-        self.save_start_button.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+        def manual_button(parent, text, command):
+            return ttk.Button(parent, text=text, command=command)
+
+        def level_button(parent, text, command):
+            return ttk.Button(parent, text=text, command=command, width=4)
+
+        self.save_start_button = manual_button(motion, "Запомнить старт", self.set_current_home_zero)
+        self.save_start_button.grid(row=0, column=0, columnspan=2, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.save_start_button)
-        self.go_start_button = ttk.Button(motion, text="К сохранённому старту", command=self.go_print_home)
-        self.go_start_button.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+        self.go_start_button = manual_button(motion, "К сохранённому старту", self.go_print_home)
+        self.go_start_button.grid(row=0, column=2, columnspan=2, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.go_start_button)
-        self.motors_off_button = ttk.Button(motion, text="Моторы выкл", command=self.motor_off)
-        self.motors_off_button.grid(row=0, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.motors_off_button = manual_button(motion, "Моторы выкл", self.motor_off)
+        self.motors_off_button.grid(row=1, column=0, columnspan=2, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.motors_off_button)
+        self.hard_stop_button = manual_button(motion, "Жёсткий стоп", self.hard_stop)
+        self.hard_stop_button.grid(row=1, column=2, columnspan=2, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.hard_stop_button)
 
         self.step_label = ttk.Label(motion, text="Шаг")
-        self.step_label.grid(row=1, column=0, sticky="w", pady=(2, 1))
-        step_box = ttk.Frame(motion)
-        step_box.grid(row=1, column=1, columnspan=3, sticky="w", pady=(2, 1))
+        self.step_label.grid(row=2, column=0, sticky="w", padx=3, pady=(6, 1))
+        step_box = ttk.Frame(motion, style="Panel.TFrame")
+        step_box.grid(row=2, column=1, columnspan=3, sticky="w", padx=3, pady=(6, 1))
         for value in JOG_STEPS_MM:
             ttk.Radiobutton(step_box, text=str(value), value=value, variable=self.step_var).pack(side="left", padx=2)
 
-        self.head_left_button = ttk.Button(motion, text="Голова влево", command=lambda: self.jog_axis("X", -self.step_var.get()))
-        self.head_left_button.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
+        self.head_left_button = manual_button(motion, "Голова влево", lambda: self.jog_axis("X", -self.step_var.get()))
+        self.head_left_button.grid(row=3, column=0, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.head_left_button)
-        self.head_right_button = ttk.Button(motion, text="Голова вправо", command=lambda: self.jog_axis("X", self.step_var.get()))
-        self.head_right_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
+        self.head_right_button = manual_button(motion, "Голова вправо", lambda: self.jog_axis("X", self.step_var.get()))
+        self.head_right_button.grid(row=3, column=1, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.head_right_button)
-        self.bed_away_button = ttk.Button(motion, text="Стол от себя", command=lambda: self.jog_axis("Y", -self.step_var.get()))
-        self.bed_away_button.grid(row=2, column=2, padx=2, pady=2, sticky="ew")
+        self.bed_away_button = manual_button(motion, "Стол от себя", lambda: self.jog_axis("Y", -self.step_var.get()))
+        self.bed_away_button.grid(row=3, column=2, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.bed_away_button)
-        self.bed_toward_button = ttk.Button(motion, text="Стол к себе", command=lambda: self.jog_axis("Y", self.step_var.get()))
-        self.bed_toward_button.grid(row=2, column=3, padx=2, pady=2, sticky="ew")
+        self.bed_toward_button = manual_button(motion, "Стол к себе", lambda: self.jog_axis("Y", self.step_var.get()))
+        self.bed_toward_button.grid(row=3, column=3, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.bed_toward_button)
-        self.head_down_button = ttk.Button(motion, text="Голова вниз", command=lambda: self.jog_axis("Z", -self.step_var.get()))
-        self.head_down_button.grid(row=3, column=0, padx=2, pady=2, sticky="ew")
+        self.head_down_button = manual_button(motion, "Голова вниз", lambda: self.jog_axis("Z", -self.step_var.get()))
+        self.head_down_button.grid(row=4, column=0, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.head_down_button)
-        self.head_up_button = ttk.Button(motion, text="Голова вверх", command=lambda: self.jog_axis("Z", self.step_var.get()))
-        self.head_up_button.grid(row=3, column=1, padx=2, pady=2, sticky="ew")
+        self.head_up_button = manual_button(motion, "Голова вверх", lambda: self.jog_axis("Z", self.step_var.get()))
+        self.head_up_button.grid(row=4, column=1, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.head_up_button)
-        self.hard_stop_button = ttk.Button(motion, text="Жёсткий стоп", command=self.hard_stop)
-        self.hard_stop_button.grid(row=3, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
-        self.action_widgets.append(self.hard_stop_button)
+
+        self.filament_feed_button = manual_button(motion, "Протянуть", self.feed_filament)
+        self.filament_feed_button.grid(row=4, column=2, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.filament_feed_button)
+        self.filament_retract_button = manual_button(motion, "Назад", self.retract_filament)
+        self.filament_retract_button.grid(row=4, column=3, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.filament_retract_button)
 
         self.filament_label = ttk.Label(motion, text="Филамент")
-        self.filament_label.grid(row=4, column=0, sticky="w", padx=2, pady=(8, 2))
-        filament_step_wrap = ttk.Frame(motion)
-        filament_step_wrap.grid(row=4, column=1, sticky="ew", padx=2, pady=(8, 2))
+        self.filament_label.grid(row=5, column=0, sticky="w", padx=3, pady=(6, 1))
+        filament_step_wrap = ttk.Frame(motion, style="Panel.TFrame")
+        filament_step_wrap.grid(row=5, column=1, sticky="w", padx=3, pady=(6, 1))
         self.filament_step_label = ttk.Label(filament_step_wrap, text="Шаг E")
         self.filament_step_label.pack(side="left")
         self.filament_step_combo = ttk.Combobox(
@@ -2658,62 +2654,84 @@ class K9ControlCenter:
             state="readonly",
         )
         self.filament_step_combo.pack(side="left", padx=(6, 0))
-        self.filament_feed_button = ttk.Button(motion, text="Протянуть", command=self.feed_filament)
-        self.filament_feed_button.grid(row=4, column=2, padx=2, pady=(8, 2), sticky="ew")
-        self.action_widgets.append(self.filament_feed_button)
-        self.filament_retract_button = ttk.Button(motion, text="Назад", command=self.retract_filament)
-        self.filament_retract_button.grid(row=4, column=3, padx=2, pady=(8, 2), sticky="ew")
-        self.action_widgets.append(self.filament_retract_button)
-        self.filament_heat_button = ttk.Button(
+        self.filament_heat_button = manual_button(
             motion,
-            text="Hotend 200C",
-            command=lambda: self.set_filament_hotend_target(FILAMENT_PREHEAT_TARGET_C),
+            "Hotend 200C",
+            lambda: self.set_filament_hotend_target(FILAMENT_PREHEAT_TARGET_C),
         )
-        self.filament_heat_button.grid(row=5, column=0, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.filament_heat_button.grid(row=5, column=2, padx=3, pady=(6, 1), sticky="ew")
         self.action_widgets.append(self.filament_heat_button)
-        self.filament_cool_button = ttk.Button(motion, text="Hotend off", command=lambda: self.set_filament_hotend_target(0.0))
-        self.filament_cool_button.grid(row=5, column=2, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.filament_cool_button = manual_button(motion, "Hotend off", lambda: self.set_filament_hotend_target(0.0))
+        self.filament_cool_button.grid(row=5, column=3, padx=3, pady=(6, 1), sticky="ew")
         self.action_widgets.append(self.filament_cool_button)
 
-        level = ttk.LabelFrame(controls, text="Калибровка стола", padding=6)
-        self.level_frame = level
-        level.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        for idx in range(3):
-            level.columnconfigure(idx, weight=1)
+        level_row = ttk.Frame(motion, style="Panel.TFrame")
+        level_row.grid(row=6, column=0, columnspan=4, sticky="ew", padx=3, pady=(8, 0))
+        level_row.columnconfigure(0, weight=0)
+        for idx in range(1, 6):
+            level_row.columnconfigure(idx, weight=1)
+        self.level_points_label = ttk.Label(level_row, text="Калибр.:")
+        self.level_points_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.level_front_left_button = level_button(level_row, "ПЛ", lambda: self.move_level_point(5, 5))
+        self.level_front_left_button.grid(row=0, column=1, padx=2, sticky="ew")
+        self.action_widgets.append(self.level_front_left_button)
+        self.level_center_button = level_button(level_row, "Ц", lambda: self.move_level_point(45, 45))
+        self.level_center_button.grid(row=0, column=2, padx=2, sticky="ew")
+        self.action_widgets.append(self.level_center_button)
+        self.level_front_right_button = level_button(level_row, "ПП", lambda: self.move_level_point(95, 5))
+        self.level_front_right_button.grid(row=0, column=3, padx=2, sticky="ew")
+        self.action_widgets.append(self.level_front_right_button)
+        self.level_back_left_button = level_button(level_row, "ЗЛ", lambda: self.move_level_point(5, 95))
+        self.level_back_left_button.grid(row=0, column=4, padx=2, sticky="ew")
+        self.action_widgets.append(self.level_back_left_button)
+        self.level_back_right_button = level_button(level_row, "ЗП", lambda: self.move_level_point(95, 95))
+        self.level_back_right_button.grid(row=0, column=5, padx=(2, 0), sticky="ew")
+        self.action_widgets.append(self.level_back_right_button)
+        self.manual_width_widgets = [
+            self.head_left_button,
+            self.head_right_button,
+            self.bed_away_button,
+            self.bed_toward_button,
+            self.head_down_button,
+            self.head_up_button,
+            self.filament_feed_button,
+            self.filament_retract_button,
+            self.filament_heat_button,
+            self.filament_cool_button,
+        ]
+        self.manual_wide_width_widgets = [
+            self.save_start_button,
+            self.go_start_button,
+            self.motors_off_button,
+            self.hard_stop_button,
+        ]
+        self._update_manual_controls_width()
 
-        self.level_points_label = ttk.Label(level, text="Точки X/Y")
-        self.level_points_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
-        ttk.Button(level, text="ПЛ", command=lambda: self.move_level_point(5, 5)).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
-        ttk.Button(level, text="Ц", command=lambda: self.move_level_point(45, 45)).grid(row=1, column=1, padx=2, pady=2, sticky="ew")
-        ttk.Button(level, text="ПП", command=lambda: self.move_level_point(95, 5)).grid(row=1, column=2, padx=2, pady=2, sticky="ew")
-        ttk.Button(level, text="ЗЛ", command=lambda: self.move_level_point(5, 95)).grid(row=2, column=0, padx=2, pady=2, sticky="ew")
-        ttk.Button(level, text="ЗП", command=lambda: self.move_level_point(95, 95)).grid(row=2, column=2, padx=2, pady=2, sticky="ew")
-
-        self.views = ttk.Notebook(controls_and_views, style="LH.TNotebook")
-        self.views.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
-
-        self.metrics_frame = ttk.Frame(self.views, padding=8, style="NotebookPage.TFrame")
+        self.metrics_frame = ttk.LabelFrame(controls, text="USB-метрики", padding=8)
+        self.metrics_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
         self.metrics_frame.columnconfigure(0, weight=1)
         self.metrics_frame.rowconfigure(1, weight=1)
-        metrics_buttons = ttk.Frame(self.metrics_frame)
+        self.metrics_frame.grid_propagate(False)
+        metrics_buttons = ttk.Frame(self.metrics_frame, style="Panel.TFrame")
         metrics_buttons.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         self.capture_metrics_button = ttk.Button(metrics_buttons, text="Снять все метрики", command=self.refresh_metrics)
         self.capture_metrics_button.pack(side="left")
-        self.save_log_button = ttk.Button(metrics_buttons, text="Сохранить лог", command=self.save_log_snapshot)
-        self.save_log_button.pack(side="left", padx=(8, 0))
-        self.metrics_text = ScrolledText(self.metrics_frame, wrap="word", height=18)
+        self.metrics_text = ScrolledText(self.metrics_frame, wrap="word", width=48, height=8)
         self.metrics_text.grid(row=1, column=0, sticky="nsew")
         self.metrics_text.configure(state="disabled")
 
-        self.log_frame = ttk.Frame(self.views, padding=8, style="NotebookPage.TFrame")
+        self.log_frame = ttk.LabelFrame(controls_and_views, text="Журнал", padding=8)
+        self.log_frame.grid(row=0, column=1, sticky="nsew")
         self.log_frame.columnconfigure(0, weight=1)
-        self.log_frame.rowconfigure(0, weight=1)
-        self.log_text = ScrolledText(self.log_frame, wrap="word", height=18)
-        self.log_text.grid(row=0, column=0, sticky="nsew")
+        self.log_frame.rowconfigure(1, weight=1)
+        self.log_frame.grid_propagate(False)
+        log_buttons = ttk.Frame(self.log_frame, style="Panel.TFrame")
+        log_buttons.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.save_log_button = ttk.Button(log_buttons, text="Сохранить лог", command=self.save_log_snapshot)
+        self.save_log_button.pack(side="left")
+        self.log_text = ScrolledText(self.log_frame, wrap="word", width=48, height=18)
+        self.log_text.grid(row=1, column=0, sticky="nsew")
         self.log_text.configure(state="disabled")
-        self.views.add(self.log_frame, text="Журнал")
-        self.views.add(self.metrics_frame, text="USB-метрики")
-        self.views.select(self.log_frame)
 
     def _apply_language(self) -> None:
         current_lang = self.lang_var.get().strip() or "ru"
@@ -2761,12 +2779,12 @@ class K9ControlCenter:
         self.head_down_button.configure(text=self._t("head_down"))
         self.head_up_button.configure(text=self._t("head_up"))
         self.hard_stop_button.configure(text=self._t("hard_stop"))
-        self.level_frame.configure(text=self._t("bed_level"))
-        self.level_points_label.configure(text=self._t("level_points"))
+        self.level_points_label.configure(text=f"{self._t('bed_level_short')}:")
+        self._update_manual_controls_width()
         self.capture_metrics_button.configure(text=self._t("capture_metrics"))
         self.save_log_button.configure(text=self._t("save_log"))
-        self.views.tab(self.log_frame, text=self._t("journal"))
-        self.views.tab(self.metrics_frame, text=self._t("usb_metrics"))
+        self.log_frame.configure(text=self._t("journal"))
+        self.metrics_frame.configure(text=self._t("usb_metrics"))
         if self.files_window and self.files_window.winfo_exists():
             self.files_window.title(self._t("files_window_title"))
         if self.files_window_content and self.files_window_content.winfo_exists():
@@ -2962,8 +2980,12 @@ class K9ControlCenter:
         try:
             self.root.update_idletasks()
             width = max(self.root.winfo_width(), 1120)
-            default_main = max(360, min(int(width * 0.34), 430))
+            manual_min = int(self.controls_and_views.grid_columnconfigure(0).get("minsize") or 560)
+            max_main = max(300, width - manual_min - 360)
+            left_cap = min(max_main, max(300, min(int(width * 0.30), 430)))
+            default_main = max(300, min(int(width * 0.28), 380, left_cap))
             main_sash = int(self.ui_state.get("main_sash", default_main))
+            main_sash = max(280, min(main_sash, left_cap))
             self.main_pane.sashpos(0, main_sash)
             left_y = int(self.ui_state.get("left_split_y", 415))
             self.left_split.sash_place(0, 0, left_y)
@@ -3184,19 +3206,11 @@ class K9ControlCenter:
                 self._set_busy_ui(bool(busy), str(label))
             elif kind == "metrics":
                 key, value = payload  # type: ignore[misc]
-                key_str = str(key)
-                value_str = str(value).strip()
-                if key_str == "m114":
-                    value_str = self._format_m114_for_metrics(value_str)
-                self.metrics_sections[key_str] = value_str
-                if key_str == "m115":
-                    self.last_m115_raw = value_str
-                    self._refresh_fw_identity()
-                    self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else "")
-                elif key_str == "m503":
-                    self.last_m503_raw = value_str
-                    self._refresh_fw_identity()
-                    self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else "")
+                self._store_metric_section(key, value)
+                self._render_metrics()
+            elif kind == "metrics-bulk":
+                for key, value in dict(payload).items():  # type: ignore[arg-type]
+                    self._store_metric_section(key, value)
                 self._render_metrics()
             elif kind == "sd-files":
                 self._apply_sd_files(payload)  # type: ignore[arg-type]
@@ -3241,6 +3255,39 @@ class K9ControlCenter:
                 self._close_post_print_window()
         self.root.after(150, self._drain_events)
 
+    def _store_metric_section(self, key: object, value: object) -> None:
+        key_str = str(key)
+        value_str = str(value).strip()
+        if key_str == "m114":
+            value_str = self._format_m114_for_metrics(value_str)
+        self.metrics_sections[key_str] = value_str
+        if key_str == "m115":
+            self.last_m115_raw = value_str
+            self._refresh_fw_identity()
+            self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else "")
+        elif key_str == "m503":
+            self.last_m503_raw = value_str
+            self._refresh_fw_identity()
+            self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else "")
+
+    def _replace_metrics_text(self, rendered: str) -> None:
+        try:
+            first, _last = self.metrics_text.yview()
+            keep_at_top = first <= 0.001
+        except Exception:
+            first = 0.0
+            keep_at_top = True
+
+        self.metrics_text.configure(state="normal")
+        self.metrics_text.delete("1.0", "end")
+        self.metrics_text.insert("1.0", rendered)
+        self.metrics_text.configure(state="disabled")
+
+        try:
+            self.metrics_text.yview_moveto(0.0 if keep_at_top else first)
+        except Exception:
+            pass
+
     def _render_metrics(self) -> None:
         order = [
             ("m115", "M115 / Firmware"),
@@ -3255,10 +3302,7 @@ class K9ControlCenter:
             if value:
                 blocks.append(f"[{title}]\n{value}")
         rendered = "\n\n".join(blocks) if blocks else "Метрики ещё не запрошены."
-        self.metrics_text.configure(state="normal")
-        self.metrics_text.delete("1.0", "end")
-        self.metrics_text.insert("1.0", rendered)
-        self.metrics_text.configure(state="disabled")
+        self._replace_metrics_text(rendered)
 
     def _operator_axis_name(self, axis: str) -> str:
         axis = axis.upper()
@@ -4810,15 +4854,11 @@ class K9ControlCenter:
         self._run_task("Проверка статуса", task)
 
     def refresh_metrics(self) -> None:
-        self.views.select(self.metrics_frame)
-        self.metrics_text.configure(state="normal")
-        self.metrics_text.delete("1.0", "end")
-        self.metrics_text.insert("1.0", {
+        self._replace_metrics_text({
             "ru": "Собираю USB-метрики...\n",
             "en": "Collecting USB metrics...\n",
             "zh": "正在收集 USB 指标...\n",
         }[self.lang_var.get().strip() or "ru"])
-        self.metrics_text.configure(state="disabled")
 
         def task() -> None:
             caps, sd = sdtool.preflight(self._port(), self._baud())
@@ -4833,11 +4873,16 @@ class K9ControlCenter:
             pos_line = next((line.strip() for line in m114.splitlines() if "X:" in line and "Y:" in line and "Z:" in line), "").strip()
             if pos_line:
                 self._post("pos", pos_line)
-            self._post("metrics", ("m115", caps))
-            self._post("metrics", ("m503", m503))
-            self._post("metrics", ("m114", m114))
-            self._post("metrics", ("m105", m105))
-            self._post("metrics", ("m27", m27))
+            self._post(
+                "metrics-bulk",
+                {
+                    "m115": caps,
+                    "m503": m503,
+                    "m114": m114,
+                    "m105": m105,
+                    "m27": m27,
+                },
+            )
 
         self._run_task("Снятие всех USB-метрик", task)
 
@@ -4862,7 +4907,6 @@ class K9ControlCenter:
         else:
             target.write_text("", encoding="utf-8")
         self.log(f"Лог сохранён: {target}")
-        self.views.select(self.log_frame)
         messagebox.showinfo("Little Hands", f"Лог сохранён:\n{target}")
 
     def reset_usb_session(self) -> None:
