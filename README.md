@@ -26,6 +26,11 @@ What is still rough:
 - Windows packaging is only planned, not shipped
 - the app UI has RU / EN / ZH switching; the main controls and newer journal events are localized, while raw firmware replies stay as the printer reports them
 
+## Contact
+
+- Telegram: [@NeuroMaxim](https://t.me/NeuroMaxim)
+- Bugs and feature requests: [GitHub Issues](https://github.com/maxim221/EasyThreedK9_littleHands/issues)
+
 ## Screenshot
 
 The screenshots below are captured with the English UI. The main window now keeps manual control on the left, shows USB metrics under it, and keeps the journal visible on the right.

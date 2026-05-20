@@ -26,6 +26,11 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 - Windows 打包还只是计划
 - 程序界面支持 RU / EN / ZH 切换；主要控制项和较新的系统日志事件已经本地化，而固件原始回复会保持打印机返回的内容
 
+## 联系方式
+
+- Telegram: [@NeuroMaxim](https://t.me/NeuroMaxim)
+- Bug 和功能建议：[GitHub Issues](https://github.com/maxim221/EasyThreedK9_littleHands/issues)
+
 ## 截图
 
 下面的截图使用英文界面。主窗口现在左侧是 manual control，USB metrics 位于其下方，journal 固定显示在右侧。
