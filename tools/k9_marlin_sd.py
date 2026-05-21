@@ -262,9 +262,10 @@ def parse_stopped_print_position(text: str) -> tuple[float, float, float] | None
     positions = parse_positions(text)
     if not positions:
         return None
-    interrupted = next((pos for pos in positions if not _looks_like_post_stop_reset_position(pos)), None)
-    if interrupted is None:
+    interrupted_candidates = [pos for pos in positions if not _looks_like_post_stop_reset_position(pos)]
+    if not interrupted_candidates:
         return None
+    interrupted = interrupted_candidates[-1]
     safe_z = max(pos[2] for pos in positions)
     return (interrupted[0], interrupted[1], max(interrupted[2], safe_z))
 
@@ -835,19 +836,25 @@ def stop_sd_print(port: str, baud: int) -> str:
 
 
 def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float, float, float] | None]:
+    def read_m114_probe(ser: serial.Serial, label: str, *, read_seconds: float = 1.4) -> str:
+        send_line(ser, "M114")
+        time.sleep(0.25)
+        return f";LH stop {label} M114\n" + read_for(ser, read_seconds)
+
     with open_serial(port, baud) as ser:
         sync_ascii(ser)
-        # Pause first so M114 has a chance to report the interrupted SD-print pose
-        # before M524 tears down the SD job state.
-        for command, delay in (
-            ("M25", 0.6),
-            ("M400", 0.4),
-            ("M114", 0.4),
-        ):
-            send_line(ser, command)
-            time.sleep(delay)
-        pose_out = read_for(ser, 1.8)
-        interrupted_pose = parse_position(pose_out)
+        # Capture M114 before M524 destroys the SD-print state. Do not issue
+        # M400 before this probe: on an active SD print it can sit in busy
+        # planner-drain mode and starve the position response we need.
+        pose_out = read_m114_probe(ser, "pre-pause", read_seconds=1.2)
+        send_line(ser, "M25")
+        time.sleep(0.35)
+        pose_out += ";LH stop pause M25\n" + read_for(ser, 0.8)
+        for attempt in range(3):
+            pose_out += read_m114_probe(ser, f"paused attempt {attempt + 1}")
+            if parse_position(pose_out) is not None:
+                break
+        interrupted_pose = parse_stopped_print_position(pose_out)
         controlled_stop_out = ""
         if interrupted_pose is not None:
             safe_z = _stop_recovery_z(interrupted_pose[2])

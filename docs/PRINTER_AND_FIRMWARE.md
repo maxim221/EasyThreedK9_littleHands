@@ -141,14 +141,14 @@ So:
 - after a failed start or suspicious state, re-establish the start pose and zero again
 - Little Hands now tracks home as `trusted`, `uncertain`, or `invalid`; SD start and `Go to saved start` are blocked unless home is trusted or the app is showing an explicit post-print recovery prompt
 - changing / disconnecting the USB port, disabling motors, hard-stopping, a failed jog, or a failed recovery invalidates that trust because the printer has no physical endstops to re-discover zero
-- normal `Stop` is a controlled stop, not the emergency path: Little Hands pauses, reads `M114`, tries to lift Z to a known safe recovery height, then sends `M524` / heater-off commands
+- normal `Stop` is a controlled stop, not the emergency path: Little Hands now probes `M114` before `M524` as early as possible, pauses, retries `M114`, tries to lift Z to a known safe recovery height, then sends `M524` / heater-off commands
 - after a normal `Stop`, Little Hands saves a stopped-print recovery marker when possible: X/Y come from the interrupted print position, while Z comes from the controlled post-stop lift when available; manual jogs after Stop update this recovery marker instead of deleting it
 - if `Stop` happens while the K9 is still busy and no `M114` is captured, Little Hands may offer a guarded live-session `Go to saved start`; use it only with a clear bed, then press `Save start` only after visually confirming the physical start pose
-- if USB drops during a real SD print and the main window still shows a stale active-print marker after reconnect, `After print: return` may offer guarded recovery from the saved `LH_END_GCODE_V1` print-end; accept only if the print is definitely finished, the bed is clear, and the axes were not moved after finish
+- if USB drops during a real SD print and the main window still shows a stale active-print marker after reconnect, `Go to saved start` may offer guarded recovery from the saved `LH_END_GCODE_V1` print-end; accept only if the print is definitely finished, the bed is clear, and the axes were not moved after finish
 - if the CH340 printer re-enumerates under a new `/dev/ttyUSB*` name after USB loss, post-print recovery may automatically switch to the single visible safe printer-like port; manual `Find` is not required for that recovery case
 - if an old active-print marker is too stale to restore as active printing, Little Hands still keeps a valid predicted print-end as a guarded recovery option
-- if USB is lost during SD printing but the print finishes normally, the operator can use `Print finished` after removing the part; Little Hands then keeps the saved predicted final pose for guarded `After print: return`
-- the SD panel has a dedicated `After print: return` button; it does not perform a separate unsafe home, but runs the same guarded recovery path as the manual `Go to saved start` button, including the clear-bed confirmation
+- if USB is lost during SD printing but the print finishes normally, Little Hands may show a recovery window with `Confirm finish`; after the operator removes the part and confirms, the app keeps the saved predicted final pose for guarded `Go to saved start`
+- post-print return uses the manual `Go to saved start` button; the old separate SD-panel `After print: return` button was removed to keep only one guarded recovery entry point
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 - SD start is now blocked unless the app knows the printer is physically at the saved `X0 Y0 Z0`
 - before `M24`, Little Hands always proves hotend heatup with staged `M104` targets followed by one final host-side `M109` session while passively reading temperature lines; if heatup is not confirmed, `M24` is not sent and cold movements should not happen
@@ -159,7 +159,7 @@ So:
 - new Little Hands files must not rewrite early `M109` to `M104`; host preheat before `M24` must use staged `M104` targets followed by one final `M109` session with passive temperature parsing. Do not change this back to a single cold high `M109` or the old active `M104` plus repeated `M105` polling loop; both modes have failed on this K9.
 - if Marlin shows a hotend target and positive heater output but the first minute of temperature rise is small, treat it as this K9's slow-start hotend/sensor behavior: log a warning and keep waiting up to the full preheat timeout; still abort quickly if the target drops to `/0C`, heater output stays `@0`, or `M109` stops producing temperature lines
 - manual filament feed in the `Manual control` panel is for loading/diagnosis after a print has stopped: `Hotend 200C` sets a manual `M104` target, `Feed` / `Retract` move only E with relative `M83` + `G1 E...` + `M400` and restore `M82`; these commands are blocked during active SD printing and do not send E movement until `M105` confirms the hotend is at least `180C`
-- the current main UI keeps `Manual control` on the left, `USB metrics` directly below it, and the `Journal` always visible on the right; leveling point buttons are localized with short `FL/C/FR/BL/BR` labels in English
+- the current main UI keeps `Manual control` on the left, `USB metrics` directly below it, and the `Journal` always visible on the right; leveling point buttons are localized with short `FL/C/FR/BL/BR` labels in English and are enabled only after `Save start` has made home trusted
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

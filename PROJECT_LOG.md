@@ -2738,7 +2738,7 @@ After each test print, append:
   - during a real SD print the CH340/USB path disappeared while the printer kept printing from SD
   - Little Hands had already saved `PRINT_END_EXPECTED` for `VENUSTOP.GCO`: `X95 Y95 Z25.08`
 - Fix:
-  - the SD file panel now has an operator-only `Print finished` / `Печать завершена` action
+  - Little Hands gained an operator-only print-finished confirmation path; it was later moved from the SD file panel into the recovery window as `Confirm finish` / `Подтвердить финиш`
   - it does not send USB commands; it only records that the user confirmed normal completion, model removal, and no manual axis movement
   - after confirmation, Little Hands clears the stale active print marker but keeps the predicted final pose so guarded `Go to start` can return from the expected print-end point
   - this operator-confirmed predicted recovery state is persisted across app restarts
@@ -2753,7 +2753,7 @@ After each test print, append:
   - `Go to start` now rehydrates a completed-print `M114` pose from `little_hands_print_state.json` before refusing recovery
   - this keeps the guarded post-print return available after sleep/wake or USB drop, as long as the state is still fresh and explicitly marked `completed`
   - after a manual terminal recovery to `X0 Y0 Z0`, the local state must be marked `returned-to-start` so the UI cannot perform the same recovery twice
-  - the SD file panel now has a dedicated `Return to start` / `Вернуть к старту` button wired to the same guarded recovery path, so the operator does not need to use the manual-control block or ask for terminal recovery
+  - Little Hands gained a dedicated SD-panel return button wired to the same guarded recovery path; this was later removed in favor of the single manual-control `Go to saved start` entry point
   - the old `Reset USB` label was renamed to `Reset USB session` because it is a soft Marlin serial-session reset (`M110 N0` + `M105`), not a physical USB hub reset or printer power cycle
 - Time estimate improvement:
   - Little Hands parses Cura `;TIME:<seconds>` from uploaded/known G-code files and stores it in the SD profile
@@ -2764,8 +2764,8 @@ After each test print, append:
   - the manual now has full Russian, English, and Chinese variants and updates immediately when the interface language changes
 - Button naming cleanup:
   - the manual-control return button is now labeled `К сохранённому старту` / `Go to saved start`
-  - the SD-panel post-print recovery button is now labeled `После печати: к старту` / `After print: return`
-  - the rename keeps both buttons on the same guarded recovery implementation while making their intended context clear in the UI
+  - the former SD-panel post-print recovery button was later removed; post-print recovery now uses the same manual-control button
+  - the rename keeps the guarded recovery implementation clear while avoiding a second return-to-start entry point
 - Failed-preheat recovery fix:
   - observed a real failed SD-start preheat where Little Hands lifted Z by `10 mm`, hotend stayed near the warm-bed temperature, and Marlin stopped acknowledging the automatic relative Z-down return
   - the app now preserves a dedicated failed-preheat-lift recovery marker, including through a following `Stop`, instead of losing the only useful model
@@ -2911,3 +2911,24 @@ After each test print, append:
 - Verification:
   - no physical printer motion was run for this UI/documentation pass
   - regression checks and Python compilation were run before commit
+
+## 2026-05-21 Stop Recovery M114 Probe And UI Simplification
+
+- Field trigger:
+  - a print was stopped after a USB I/O drop and CH340 reconnect; Little Hands could see USB metrics again, but `Stop` did not capture a pre-`M524` `M114`
+  - without a stopped-print pose, the app correctly refused automatic return to saved start
+- Stop/recovery change:
+  - `stop_sd_print_with_position` now probes `M114` before `M524` as early as possible, then sends `M25` and retries `M114` several times before stopping SD/heaters
+  - the old pre-capture `M400` was removed from this path because on an active SD print it can sit in planner-drain `busy: processing` and starve the position response
+  - stopped-print recovery now prefers the latest real non-reset `M114` pose when several probes reply, while still preserving the raised post-stop Z when available
+- UI change:
+  - removed the top-level `Reset USB session` button from the main UI
+  - removed the separate SD-panel `After print: return` button; post-print and stopped-print recovery now use the single guarded `Go to saved start` / `К сохранённому старту` entry point
+  - removed the always-visible SD-panel `Print finished` button; stale active-print confirmation now appears only inside the recovery window as `Confirm finish` when a predicted print-end marker exists and no fresh SD progress was seen
+  - added the `50` manual movement step with a small visual gap after `20`, and formatted jog step labels without redundant `.0` suffixes
+  - bed-level point buttons now stay disabled until `Save start` makes home trusted, and the bed-level move handler refuses movement without that trusted start
+- Documentation:
+  - README, printer/firmware docs, in-app manual text, `AGENTS.md`, and regression checks were updated to protect the new single recovery entry point and early `M114` stop probe behavior
+- Verification:
+  - no physical printer motion was run for this code change
+  - Python compilation, regression checks, and whitespace diff checks passed before commit

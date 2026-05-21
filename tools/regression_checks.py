@@ -50,6 +50,12 @@ def main() -> int:
     require('"M204 T1000"' not in app, "k9_control_center.py must not hard-code M204 T1000.", failures)
     require("JOG_RESTORE_TRAVEL_ACCEL = 80" in app, "Manual jog must leave service travel acceleration at T80.", failures)
     require(
+        appmod.JOG_STEPS_MM == (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
+        and 'text=f"{value:g}"' in app,
+        "Manual jog step choices must include 50 mm and display labels without redundant .0 suffixes.",
+        failures,
+    )
+    require(
         "LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin" in app,
         "App default firmware must point at the current LH v5 Watch180 build.",
         failures,
@@ -195,6 +201,14 @@ def main() -> int:
         failures,
     )
     require("sdtool.run_commands_wait_ok" in app, "App jog/level service moves must use ok-waiting serial commands.", failures)
+    require(
+        "_level_point_button_names" in app
+        and 'level_state = "normal" if trusted and self.current_print_file == "-" and not self.user_task_pending else "disabled"' in app
+        and "Калибровка стола доступна только после" in app
+        and "if not self._home_is_trusted():" in app,
+        "Bed-level point buttons and handlers must require a trusted saved start before movement.",
+        failures,
+    )
     require_regex(
         app,
         r"preheat_lift_recovery_before_jog = self\.preheat_lift_recovery_available.*?"
@@ -268,6 +282,13 @@ def main() -> int:
         failures,
     )
     require(
+        "pre-pause" in marlin
+        and "paused attempt" in marlin
+        and '("M400", 0.4),\n            ("M114", 0.4),' not in marlin,
+        "Stop must probe M114 before M524 without a pre-capture M400 planner drain.",
+        failures,
+    )
+    require(
         "_can_recover_stale_active_marker_from_predicted_end" in app
         and "ACTIVE_PRINT_RECENT_PROGRESS_BLOCK_SEC" in app,
         "Go-to-start must offer guarded predicted-end recovery for stale active-print markers after USB loss.",
@@ -296,6 +317,15 @@ def main() -> int:
         and "PRINT_END_CONFIRMED_BY_OPERATOR" in app
         and "operator confirmed SD print finished; use saved predicted print-end recovery" in app,
         "The UI must let the operator confirm normal completion after USB loss and keep the predicted print-end recovery pose.",
+        failures,
+    )
+    require(
+        "_confirm_finished_from_post_print_window" in app
+        and "Confirm finish" in app
+        and "confirm_finish_button" not in app
+        and "post_print_go_start_button" not in app
+        and "reset_usb_button" not in app,
+        "Recovery-only actions must not reappear as always-visible main-window buttons.",
         failures,
     )
     require(
@@ -401,6 +431,16 @@ def main() -> int:
     require(
         sdtool.parse_stopped_print_position(stopped_sample) == (74.35, 73.43, 5.0),
         "Stopped-print recovery must keep interrupted X/Y and lifted post-stop Z.",
+        failures,
+    )
+    stopped_multi_sample = (
+        "X:10.00 Y:20.00 Z:1.20 E:1.0 Count X:1 Y:2 Z:3\n"
+        "X:12.00 Y:22.00 Z:1.20 E:1.1 Count X:4 Y:5 Z:6\n"
+        "X:0.00 Y:0.00 Z:5.00 E:1.2 Count X:0 Y:0 Z:2400\n"
+    )
+    require(
+        sdtool.parse_stopped_print_position(stopped_multi_sample) == (12.0, 22.0, 5.0),
+        "Stopped-print recovery must prefer the latest pre-M524 real M114 pose when several probes reply.",
         failures,
     )
     require(sdtool._stop_recovery_z(0.2) == 10.0, "Low stopped prints must lift to a 10 mm recovery height.", failures)

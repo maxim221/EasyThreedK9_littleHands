@@ -90,7 +90,7 @@ PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
 HOME_TRUST_TRUSTED = "trusted"
 HOME_TRUST_UNCERTAIN = "uncertain"
 HOME_TRUST_INVALID = "invalid"
-JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
+JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
 JOG_DEFAULT_STEP_MM = 5.0
 SERVICE_X_FEEDRATE = 900
 SERVICE_BED_FEEDRATE = 240
@@ -272,26 +272,25 @@ MANUAL_TEXT = textwrap.dedent(
 
     После штатного завершения печати
     1. Сними модель, brim, нитки и мусор со стола.
-    2. Нажми "После печати: к старту" в SD-блоке.
+    2. Нажми "К сохранённому старту" в блоке ручного управления.
     3. Подтверди, что стол свободен.
     4. Little Hands вернётся из известной послепечатной позы в X0 Y0 Z0 через защищённые recovery-движения.
     5. Когда принтер физически стоит в стартовой позе, сделай power cycle принтера на 5–10 секунд, проверь старт и перед следующей печатью нажми "Запомнить старт".
 
     Если Little Hands был закрыт, компьютер спал или USB отвалился во время печати
-    - Если у приложения есть сохранённая послепечатная поза, "После печати: к старту" может использовать её после подтверждения, что деталь снята и оси не двигали руками.
-    - Если приложение только знает, что печать, вероятно, завершилась, используй "Печать завершена" после снятия детали. Это записывает подтверждение пользователя и включает guarded recovery, если достаточно данных о print-end.
+    - Если у приложения есть сохранённая послепечатная поза, "К сохранённому старту" может использовать её после подтверждения, что деталь снята и оси не двигали руками.
+    - Если приложение только знает, что печать, вероятно, завершилась, оно покажет recovery-окно. Используй "Подтвердить финиш" после снятия детали. Это записывает подтверждение пользователя и включает guarded recovery, если достаточно данных о print-end.
     - Если доверенной сохранённой позы нет, Little Hands откажется возвращать автоматически. Выставь старт вручную и нажми "Запомнить старт".
 
     Если печать остановлена или сорвалась
-    - "Стоп" — это управляемая остановка, а не аварийный путь. Он пытается поставить печать на паузу, снять M114, безопасно поднять Z, остановить SD-печать и выключить нагрев.
+    - "Стоп" — это управляемая остановка, а не аварийный путь. Он сначала пытается снять M114 до M524, затем поставить печать на паузу, повторить M114, безопасно поднять Z, остановить SD-печать и выключить нагрев.
     - Если сорвался предпрогрев после автоматического подъёма Z, "К сохранённому старту" предложит отдельный guarded возврат: опустить Z обратно на тот же известный preheat-lift. Подтверждай только если голову/стол после сбоя не двигали руками.
-    - После управляемого Stop сначала убери неудачный пластик, затем нажимай "К сохранённому старту" или "После печати: к старту".
+    - После управляемого Stop сначала убери неудачный пластик, затем нажимай "К сохранённому старту".
     - "Жёсткий стоп" нужен для срочных остановок. После него доверие к home сбрасывается, стартовую позу нужно заново выставить вручную.
 
     Верхние кнопки
     - "Файлы и прошивка" открывает окно загрузки G-code и прошивки.
     - "Manual" открывает это руководство. Текст соответствует выбранному языку интерфейса.
-    - "Сброс USB-сессии" — мягкий сброс serial-сессии: приложение ставит опрос на паузу, отправляет M110 N0 и M105, затем возобновляет опрос. Это не физический USB reset и не power cycle принтера.
     - "Экспорт профиля Cura" сохраняет текущий проверенный профиль и настройки Cura в проект.
     - "Звук ПК" проигрывает компьютерный звук завершения.
 
@@ -301,8 +300,6 @@ MANUAL_TEXT = textwrap.dedent(
     - "Удалить" удаляет выбранный SD-файл.
     - "Пауза" и "Продолжить" отправляют SD pause/resume.
     - "Стоп" выполняет управляемую остановку.
-    - "Печать завершена" — подтверждение пользователя для печати, завершившейся при ненадёжном USB/app-состоянии.
-    - "После печати: к старту" запускает защищённый послепечатный recovery.
     - "Старт" показывает время начала печати.
     - "Ожидаемое завершение" считает время конца по Cura ;TIME или предыдущей реальной длительности этого файла.
     - "Известное время" показывает Cura-время и/или фактическую длительность, если они известны.
@@ -314,7 +311,7 @@ MANUAL_TEXT = textwrap.dedent(
     - "Hotend 200C" задаёт ручной нагрев hotend для загрузки/проверки филамента; "Hotend off" выключает этот ручной нагрев.
     - "Протянуть" и "Назад" двигают только экструдер E на выбранный E-шаг. Протяжка заблокирована во время активной SD-печати и при hotend ниже 180C.
     - Кнопки движения перемещают выбранную ось на выбранный шаг. Ось стола намеренно двигается мягко, чтобы не ловить пропуски шагов.
-    - Калибровка стола двигает по известным точкам; используй её только когда текущий старт доверенный.
+    - Калибровка стола двигает по известным точкам; её кнопки доступны только после "Запомнить старт", когда текущий старт доверенный.
 
     USB-метрики и логи
     - Вкладка "Журнал" показывает понятные события.
@@ -396,26 +393,25 @@ MANUAL_TEXTS = {
 
         After a normal print finish
         1. Remove the printed part, brim, strings, and debris from the bed.
-        2. Press "After print: return" in the SD panel.
+        2. Press "Go to saved start" in the manual control panel.
         3. Confirm that the bed is clear.
         4. Little Hands returns from the known post-print pose to X0 Y0 Z0 using guarded recovery moves.
         5. When the printer is physically at the start pose, power-cycle the printer for 5-10 seconds, re-check the start, and press "Save start" before the next print.
 
         If Little Hands was closed, asleep, or USB dropped during the print
-        - If the app has a saved post-print pose, "After print: return" can use it after you confirm that the part is removed and the axes were not moved by hand.
-        - If the app only knows that the print probably ended, use "Print finished" after removing the part. That records operator-confirmed completion and enables guarded recovery when enough print-end data exists.
+        - If the app has a saved post-print pose, "Go to saved start" can use it after you confirm that the part is removed and the axes were not moved by hand.
+        - If the app only knows that the print probably ended, it shows the recovery window. Use "Confirm finish" after removing the part. That records operator-confirmed completion and enables guarded recovery when enough print-end data exists.
         - If there is no trusted saved pose, Little Hands will refuse automatic return. Jog manually to the start pose and press "Save start".
 
         If a print is stopped or fails
-        - "Stop" is a controlled stop, not the emergency path. It tries to pause, capture M114, lift safely, stop SD printing, and turn heaters off.
+        - "Stop" is a controlled stop, not the emergency path. It first tries to capture M114 before M524, then pauses, retries M114, lifts safely, stops SD printing, and turns heaters off.
         - If preheat fails after the automatic Z lift, "Go to saved start" offers a dedicated guarded return: lower Z back by the same known preheat lift. Confirm only if the head/bed were not moved by hand after the failure.
-        - After a controlled stop, remove the failed plastic before pressing "Go to saved start" or "After print: return".
+        - After a controlled stop, remove the failed plastic before pressing "Go to saved start".
         - "Hard stop" is for urgent stop situations. After hard stop, home trust is invalid and the start pose must be established again manually.
 
         Top buttons
         - "Files & Firmware" opens the upload/firmware window.
         - "Manual" opens this manual. The text follows the selected interface language.
-        - "Reset USB session" is a soft serial-session reset: it pauses polling, sends M110 N0 and M105, and resumes polling. It is not a physical USB hub reset and not a printer power cycle.
         - "Export Cura profile" exports the current validated Cura profile/settings into the project.
         - "PC sound" plays the computer completion sound.
 
@@ -425,8 +421,6 @@ MANUAL_TEXTS = {
         - "Delete" removes the selected SD file.
         - "Pause" and "Resume" send SD pause/resume commands.
         - "Stop" performs the controlled stop workflow.
-        - "Print finished" is an operator confirmation for prints that completed while USB/app state was unreliable.
-        - "After print: return" runs the guarded post-print recovery path.
         - "Start" shows print start time.
         - "Expected finish" uses Cura ;TIME or the previous real duration for this file.
         - "Known time" shows Cura and/or actual duration when known.
@@ -438,7 +432,7 @@ MANUAL_TEXTS = {
         - "Hotend 200C" sets a manual hotend target for loading/checking filament; "Hotend off" turns that manual heat target off.
         - "Feed" and "Retract" move only the E extruder by the selected E step. Filament movement is blocked during active SD printing and below 180C.
         - Jog buttons move the selected axis by the selected step. The bed axis is deliberately gentle to avoid missed steps.
-        - Bed leveling moves through known calibration points; use it only when the current start pose is trusted.
+        - Bed leveling moves through known calibration points; its buttons are available only after "Save start", when the current start pose is trusted.
 
         USB metrics and logs
         - The "Journal" tab shows human-readable events.
@@ -491,26 +485,25 @@ MANUAL_TEXTS = {
 
         正常打印完成后
         1. 从平台上取下模型、brim、拉丝和碎屑。
-        2. 点击 SD 面板中的 "打印后返回"。
+        2. 点击手动控制面板中的 "回到保存起点"。
         3. 确认平台已清空。
         4. Little Hands 会从已知的打印后位置用受保护 recovery 移动回到 X0 Y0 Z0。
         5. 当打印机实际位于起点时，关闭打印机电源 5-10 秒再打开，重新检查起点，并在下一次打印前点击 "Save start"。
 
         如果打印期间 Little Hands 关闭、电脑睡眠或 USB 掉线
-        - 如果应用有保存的打印后位置，"打印后返回" 可在你确认模型已取下且各轴没有被手动移动后使用。
-        - 如果应用只知道打印可能已经结束，取下模型后使用 "Print finished"。它会记录操作者确认，并在有足够 print-end 数据时允许受保护 recovery。
+        - 如果应用有保存的打印后位置，"回到保存起点" 可在你确认模型已取下且各轴没有被手动移动后使用。
+        - 如果应用只知道打印可能已经结束，它会显示 recovery 窗口。取下模型后使用 "Confirm finish"。它会记录操作者确认，并在有足够 print-end 数据时允许受保护 recovery。
         - 如果没有可信保存位置，Little Hands 会拒绝自动返回。请手动点动到起点，然后点击 "Save start"。
 
         如果打印被停止或失败
-        - "Stop" 是受控停止，不是紧急停止。它会尝试暂停、读取 M114、安全抬 Z、停止 SD 打印并关闭加热。
+        - "Stop" 是受控停止，不是紧急停止。它会先在 M524 之前尝试读取 M114，然后暂停、再次读取 M114、安全抬 Z、停止 SD 打印并关闭加热。
         - 如果自动抬 Z 后预热失败，"回到保存起点" 会提供专门的受保护返回：按同一个已知 preheat lift 把 Z 降回去。只有失败后没有手动移动喷头/平台时才确认。
-        - 受控停止后，请先清除失败塑料，再点击 "回到保存起点" 或 "打印后返回"。
+        - 受控停止后，请先清除失败塑料，再点击 "回到保存起点"。
         - "Hard stop" 用于紧急停止。硬停止后 home 信任无效，必须重新手动建立起点。
 
         顶部按钮
         - "Files & Firmware" 打开上传 / 固件窗口。
         - "Manual" 打开本说明。文本会跟随当前界面语言。
-        - "Reset USB session" 是软串口会话重置：暂停轮询，发送 M110 N0 和 M105，然后恢复轮询。它不是物理 USB hub reset，也不是打印机断电重启。
         - "Export Cura profile" 将当前验证过的 Cura 配置导出到项目中。
         - "PC sound" 播放电脑完成提示音。
 
@@ -520,8 +513,6 @@ MANUAL_TEXTS = {
         - "Delete" 删除选中的 SD 文件。
         - "Pause" / "Resume" 发送 SD 暂停 / 继续命令。
         - "Stop" 执行受控停止流程。
-        - "Print finished" 用于 USB 或应用状态不可靠时由操作者确认打印完成。
-        - "打印后返回" 执行受保护的打印后 recovery。
         - "Start" 显示打印开始时间。
         - "Expected finish" 使用 Cura ;TIME 或该文件上次真实打印时长。
         - "Known time" 显示 Cura 和 / 或已知真实时长。
@@ -533,7 +524,7 @@ MANUAL_TEXTS = {
         - "Hotend 200C" 设置手动 hotend 加热目标，用于装载 / 检查耗材；"Hotend off" 关闭该手动加热。
         - "Feed" / "Retract" 只移动 E 挤出机，距离为所选 E 步长；活动 SD 打印期间和 hotend 低于 180C 时会被阻止。
         - Jog 按钮按所选步长移动对应轴。平台轴故意较温和，以避免丢步。
-        - Bed leveling 会移动到已知校准点；仅在当前起点可信时使用。
+        - Bed leveling 会移动到已知校准点；按钮只会在点击 "Save start" 且当前起点可信后可用。
 
         USB metrics 和日志
         - "Journal" 标签显示人类可读事件。
@@ -1789,7 +1780,25 @@ class K9ControlCenter:
         )
 
     def _can_confirm_operator_finished_print(self) -> bool:
-        return bool(self.current_print_file != "-" and self._has_predicted_print_end_recovery_model())
+        return bool(
+            self.current_print_file != "-"
+            and self._has_predicted_print_end_recovery_model()
+            and (
+                self.print_state_restored_from_log
+                or self.post_print_recovery_required
+                or self.bed_clear_before_go_start_required
+                or not self._has_recent_active_print_progress()
+            )
+        )
+
+    def _level_point_button_names(self) -> tuple[str, ...]:
+        return (
+            "level_front_left_button",
+            "level_center_button",
+            "level_front_right_button",
+            "level_back_left_button",
+            "level_back_right_button",
+        )
 
     def _sync_home_controls(self) -> None:
         trusted = self._home_is_trusted()
@@ -1805,16 +1814,13 @@ class K9ControlCenter:
             )
         )
         go_state = "normal" if (trusted or recovery_ready) and not self.user_task_pending else "disabled"
-        post_print_go_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
         start_state = "normal" if trusted and not self.user_task_pending else "disabled"
-        confirm_finish_state = "normal" if self._can_confirm_operator_finished_print() and not self.user_task_pending else "disabled"
         filament_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
+        level_state = "normal" if trusted and self.current_print_file == "-" and not self.user_task_pending else "disabled"
         guarded_buttons = (
             ("go_start_button", go_state),
-            ("post_print_go_start_button", post_print_go_state),
             ("start_print_button", start_state),
             ("upload_and_start_button", start_state),
-            ("confirm_finish_button", confirm_finish_state),
             ("filament_feed_button", filament_state),
             ("filament_retract_button", filament_state),
             ("filament_heat_button", filament_state),
@@ -1825,6 +1831,13 @@ class K9ControlCenter:
             if widget is not None:
                 try:
                     widget.configure(state=state)
+                except Exception:
+                    pass
+        for name in self._level_point_button_names():
+            widget = getattr(self, name, None)
+            if widget is not None:
+                try:
+                    widget.configure(state=level_state)
                 except Exception:
                     pass
 
@@ -1894,7 +1907,6 @@ class K9ControlCenter:
             "disconnect": {"ru": "Откл.", "en": "Off", "zh": "断开"},
             "files_and_firmware": {"ru": "Файлы и прошивка", "en": "Files & Firmware", "zh": "文件和固件"},
             "manual": {"ru": "Manual", "en": "Manual", "zh": "说明"},
-            "reset_usb": {"ru": "Сброс USB-сессии", "en": "Reset USB session", "zh": "重置 USB 会话"},
             "export_cura": {"ru": "Экспорт профиля Cura", "en": "Export Cura profile", "zh": "导出 Cura 配置"},
             "sound_pc_short": {"ru": "Звук ПК", "en": "PC sound", "zh": "电脑提示音"},
             "sound_pc_complete": {"ru": "Звук окончания печати ПК", "en": "PC completion sound", "zh": "打印完成电脑提示音"},
@@ -1908,8 +1920,6 @@ class K9ControlCenter:
             "pause": {"ru": "Пауза", "en": "Pause", "zh": "暂停"},
             "resume": {"ru": "Продолжить", "en": "Resume", "zh": "继续"},
             "stop": {"ru": "Стоп", "en": "Stop", "zh": "停止"},
-            "confirm_finish": {"ru": "Печать завершена", "en": "Print finished", "zh": "打印完成"},
-            "post_print_go_start": {"ru": "После печати: к старту", "en": "After print: return", "zh": "打印后返回"},
             "manual_controls": {"ru": "Ручное управление", "en": "Manual control", "zh": "手动控制"},
             "save_start": {"ru": "Запомнить старт", "en": "Save start", "zh": "保存起点"},
             "go_start": {"ru": "К сохранённому старту", "en": "Go to saved start", "zh": "回到保存起点"},
@@ -2583,7 +2593,7 @@ class K9ControlCenter:
 
         actions = ttk.Frame(top_left)
         actions.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        for idx in range(5):
+        for idx in range(4):
             actions.columnconfigure(idx, weight=1)
         self.files_fw_button = ttk.Button(actions, text="Файлы и прошивка", command=self.show_files_firmware_window)
         self.files_fw_button.grid(row=0, column=0, padx=3, sticky="ew")
@@ -2591,14 +2601,11 @@ class K9ControlCenter:
         self.manual_button = ttk.Button(actions, text="Manual", command=self.show_manual)
         self.manual_button.grid(row=0, column=1, padx=3, sticky="ew")
         self.action_widgets.append(self.manual_button)
-        self.reset_usb_button = ttk.Button(actions, text="Сброс USB", command=self.reset_usb_session)
-        self.reset_usb_button.grid(row=0, column=2, padx=3, sticky="ew")
-        self.action_widgets.append(self.reset_usb_button)
         self.export_cura_button = ttk.Button(actions, text="Экспорт профиля Cura", command=self.export_cura_bundle)
-        self.export_cura_button.grid(row=0, column=3, padx=3, sticky="ew")
+        self.export_cura_button.grid(row=0, column=2, padx=3, sticky="ew")
         self.action_widgets.append(self.export_cura_button)
         self.pc_sound_button = ttk.Button(actions, text="Звук ПК", command=self.play_computer_melody_button)
-        self.pc_sound_button.grid(row=0, column=4, padx=3, sticky="ew")
+        self.pc_sound_button.grid(row=0, column=3, padx=3, sticky="ew")
         self.action_widgets.append(self.pc_sound_button)
 
         substatus = ttk.Frame(top_left)
@@ -2704,12 +2711,6 @@ class K9ControlCenter:
         self.stop_button = ttk.Button(buttons, text="Стоп", command=self.stop_print)
         self.stop_button.grid(row=1, column=2, padx=3, pady=2, sticky="ew")
         self.action_widgets.append(self.stop_button)
-        self.confirm_finish_button = ttk.Button(buttons, text="Печать завершена", command=self.confirm_print_finished_by_operator)
-        self.confirm_finish_button.grid(row=2, column=0, padx=3, pady=2, sticky="ew")
-        self.action_widgets.append(self.confirm_finish_button)
-        self.post_print_go_start_button = ttk.Button(buttons, text="После печати: к старту", command=self.return_to_start_after_print)
-        self.post_print_go_start_button.grid(row=2, column=1, columnspan=2, padx=3, pady=2, sticky="ew")
-        self.action_widgets.append(self.post_print_go_start_button)
         self.left_split.add(live_frame, stretch="always", minsize=180)
         self.left_split.add(sd_frame, stretch="always", minsize=120)
 
@@ -2760,7 +2761,8 @@ class K9ControlCenter:
         step_box = ttk.Frame(motion, style="Panel.TFrame")
         step_box.grid(row=2, column=1, columnspan=3, sticky="w", padx=3, pady=(6, 1))
         for value in JOG_STEPS_MM:
-            ttk.Radiobutton(step_box, text=str(value), value=value, variable=self.step_var).pack(side="left", padx=2)
+            step_padx = (10, 2) if abs(value - 50.0) < 0.0001 else 2
+            ttk.Radiobutton(step_box, text=f"{value:g}", value=value, variable=self.step_var).pack(side="left", padx=step_padx)
 
         self.head_left_button = manual_button(motion, "Голова влево", lambda: self.jog_axis("X", -self.step_var.get()))
         self.head_left_button.grid(row=3, column=0, padx=3, pady=2, sticky="ew")
@@ -2891,7 +2893,6 @@ class K9ControlCenter:
         self.disconnect_port_button.configure(text=self._t("disconnect"))
         self.files_fw_button.configure(text=self._t("files_and_firmware"))
         self.manual_button.configure(text=self._t("manual"))
-        self.reset_usb_button.configure(text=self._t("reset_usb"))
         self.export_cura_button.configure(text=self._t("export_cura"))
         self.pc_sound_button.configure(text=self._t("sound_pc_short"))
         self.pc_sound_check.configure(text=self._t("sound_pc_complete"))
@@ -2907,8 +2908,6 @@ class K9ControlCenter:
         self.pause_button.configure(text=self._t("pause"))
         self.resume_button.configure(text=self._t("resume"))
         self.stop_button.configure(text=self._t("stop"))
-        self.confirm_finish_button.configure(text=self._t("confirm_finish"))
-        self.post_print_go_start_button.configure(text=self._t("post_print_go_start"))
         self.motion_frame.configure(text=self._t("manual_controls"))
         self.save_start_button.configure(text=self._t("save_start"))
         self.go_start_button.configure(text=self._t("go_start"))
@@ -3890,7 +3889,7 @@ class K9ControlCenter:
                 "- the part has been removed from the bed\n"
                 "- axes were not moved after the finish\n"
                 "- if USB/power was cycled, the printer physically stayed at the finished pose\n\n"
-                "After confirmation, 'After print: return' can use the saved final pose."
+                "After confirmation, 'Go to saved start' can use the saved final pose."
             ),
             "zh": (
                 f"确认这次 SD 打印已正常完成？\n\n"
@@ -3901,7 +3900,7 @@ class K9ControlCenter:
                 "- 模型已经从平台取下\n"
                 "- 结束后没有移动各轴\n"
                 "- 如果 USB/电源重置过，打印机实际仍停在结束位置\n\n"
-                "确认后，“打印后返回”可以使用保存的结束位置。"
+                "确认后，“回到保存起点”可以使用保存的结束位置。"
             ),
             "ru": (
                 f"Подтвердить, что SD-печать штатно завершилась?\n\n"
@@ -3912,7 +3911,7 @@ class K9ControlCenter:
                 "- деталь снята со стола\n"
                 "- после финиша оси не двигали\n"
                 "- если был USB/power reset, физически принтер остался в финальной позе\n\n"
-                "После подтверждения 'После печати: к старту' сможет использовать сохранённую финальную точку."
+                "После подтверждения 'К сохранённому старту' сможет использовать сохранённую финальную точку."
             ),
         }.get(lang) or "Подтвердить штатное завершение печати?"
         return bool(messagebox.askyesno("Little Hands", prompt))
@@ -3927,7 +3926,7 @@ class K9ControlCenter:
             messagebox.showerror("Little Hands", msg)
             return
         if self.current_print_file == "-":
-            msg = "Активной печати нет. Если нужно вернуться к старту после печати, нажми 'После печати: к старту' и подтверди recovery."
+            msg = "Активной печати нет. Если нужно вернуться к старту после печати, нажми 'К сохранённому старту' и подтверди recovery."
             self.log(msg)
             messagebox.showinfo("Little Hands", msg)
             return
@@ -3973,7 +3972,7 @@ class K9ControlCenter:
         self._post("progress", ("Печать: завершение подтверждено", 100.0))
         self.log(
             f"Оператор подтвердил штатный финиш печати {finished_file}. "
-            "Сохранённая финальная точка оставлена для guarded 'После печати: к старту'."
+            "Сохранённая финальная точка оставлена для guarded 'К сохранённому старту'."
         )
         self._show_post_print_recovery_window("completion")
         self._sync_home_controls()
@@ -4141,7 +4140,7 @@ class K9ControlCenter:
             return (
                 f"{intro}\n\n"
                 "1. Remove the printed part from the bed.\n"
-                "2. Only after the part is removed, return the printer to the start pose. If Little Hands observed the print finish, 'After print: return' can use that known post-print pose.\n"
+                "2. Only after the part is removed, return the printer to the start pose. If Little Hands observed the print finish, 'Go to saved start' can use that known post-print pose.\n"
                 "3. While the printer is physically in that start pose, power it off for 5-10 seconds and power it on again.\n"
                 "4. If the port is not responsive, press 'Find'. If the app sees CH340 but Marlin does not answer, repeat the power cycle.\n"
                 "5. Make sure the printer is still in the start pose and press 'Save start' in this window or in the main controls.\n"
@@ -4166,7 +4165,7 @@ class K9ControlCenter:
             return (
                 f"{intro}\n\n"
                 "1. 从平台上取下模型。\n"
-                "2. 只有在取下模型之后，才让打印机回到起始姿态。如果 Little Hands 观察到了打印结束，'打印后返回' 可以使用已知的打印后位置。\n"
+                "2. 只有在取下模型之后，才让打印机回到起始姿态。如果 Little Hands 观察到了打印结束，'回到保存起点' 可以使用已知的打印后位置。\n"
                 "3. 打印机实际停在起始姿态时，关闭电源 5-10 秒，然后重新打开。\n"
                 "4. 如果端口没有响应，点击 'Find'。如果只看到 CH340 但 Marlin 不回应，请再次断电重启。\n"
                 "5. 确认打印机仍在起始姿态，然后在此窗口或主控制区点击 'Save start'。\n"
@@ -4192,7 +4191,7 @@ class K9ControlCenter:
         return (
             f"{intro}\n\n"
             "1. Сними модель со стола.\n"
-            "2. Только после снятия модели верни принтер в стартовую позу. Если Little Hands видел завершение печати, 'После печати: к старту' использует известную послепечатную позу.\n"
+            "2. Только после снятия модели верни принтер в стартовую позу. Если Little Hands видел завершение печати, 'К сохранённому старту' использует известную послепечатную позу.\n"
             "3. Когда принтер физически стоит в стартовой позе, выключи питание на 5–10 секунд и включи снова.\n"
             "4. Если порт не отвечает, нажми 'Найти'. Если приложение видит CH340, но Marlin молчит, повтори power cycle.\n"
             "5. Убедись, что принтер всё ещё в стартовой позе, и нажми 'Запомнить старт' в этом окне или в ручном управлении.\n"
@@ -4204,24 +4203,27 @@ class K9ControlCenter:
     def _save_start_from_post_print_window(self) -> None:
         self.set_current_home_zero()
 
+    def _confirm_finished_from_post_print_window(self) -> None:
+        self.confirm_print_finished_by_operator()
+
     def _go_start_from_post_print_window(self) -> None:
         lang = self.lang_var.get().strip() or "ru"
         prompt = {
             "en": (
                 "Has the printed part already been removed from the bed?\n\n"
-                "Use 'After print: return' only after removing the part, so the head and bed cannot hit the model."
+                "Use 'Go to saved start' only after removing the part, so the head and bed cannot hit the model."
             ),
             "zh": (
                 "模型已经从平台上取下了吗？\n\n"
-                "只有取下模型后才能使用“打印后返回”，避免喷头或平台碰到模型。"
+                "只有取下模型后才能使用“回到保存起点”，避免喷头或平台碰到模型。"
             ),
             "ru": (
                 "Модель уже снята со стола?\n\n"
-                "Кнопку 'После печати: к старту' можно нажимать только после удаления детали, чтобы голова и стол не задели модель."
+                "Кнопку 'К сохранённому старту' можно нажимать только после удаления детали, чтобы голова и стол не задели модель."
             ),
         }.get(lang) or (
             "Модель уже снята со стола?\n\n"
-            "Кнопку 'После печати: к старту' можно нажимать только после удаления детали, чтобы голова и стол не задели модель."
+            "Кнопку 'К сохранённому старту' можно нажимать только после удаления детали, чтобы голова и стол не задели модель."
         )
         if not messagebox.askyesno(
             "Little Hands",
@@ -4233,9 +4235,9 @@ class K9ControlCenter:
     def return_to_start_after_print(self) -> None:
         if self.current_print_file != "-":
             msg = {
-                "ru": "Печать ещё считается активной. 'После печати: к старту' недоступна во время активной SD-печати.",
-                "en": "A print is still marked active. 'After print: return' is not available during active SD printing.",
-                "zh": "仍标记为正在打印。SD 打印活动期间不能使用“打印后返回”。",
+                "ru": "Печать ещё считается активной. 'К сохранённому старту' недоступна во время активной SD-печати.",
+                "en": "A print is still marked active. 'Go to saved start' is not available during active SD printing.",
+                "zh": "仍标记为正在打印。SD 打印活动期间不能使用“回到保存起点”。",
             }.get(self.lang_var.get().strip() or "ru", "Печать ещё считается активной.")
             self.log(msg)
             messagebox.showwarning("Little Hands", msg)
@@ -4344,20 +4346,31 @@ class K9ControlCenter:
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
         buttons.columnconfigure(2, weight=1)
+        if self._can_confirm_operator_finished_print():
+            buttons.columnconfigure(3, weight=1)
         close_label = {"ru": "Понятно", "en": "OK", "zh": "知道了"}.get(self.lang_var.get().strip() or "ru", "Понятно")
         go_start_label = {
-            "ru": "После печати: к старту",
-            "en": "After print: return",
-            "zh": "打印后返回",
-        }.get(self.lang_var.get().strip() or "ru", "После печати: к старту")
+            "ru": "К сохранённому старту",
+            "en": "Go to saved start",
+            "zh": "回到保存起点",
+        }.get(self.lang_var.get().strip() or "ru", "К сохранённому старту")
+        confirm_finished_label = {
+            "ru": "Подтвердить финиш",
+            "en": "Confirm finish",
+            "zh": "确认完成",
+        }.get(self.lang_var.get().strip() or "ru", "Подтвердить финиш")
         confirm_label = {
             "ru": "Запомнить старт",
             "en": "Save start",
             "zh": "保存起点",
         }.get(self.lang_var.get().strip() or "ru", "Запомнить старт")
         ttk.Button(buttons, text=close_label, command=self._close_post_print_window).grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        ttk.Button(buttons, text=go_start_label, command=self._go_start_from_post_print_window).grid(row=0, column=1, sticky="ew", padx=5)
-        ttk.Button(buttons, text=confirm_label, command=self._save_start_from_post_print_window).grid(row=0, column=2, sticky="ew", padx=(5, 0))
+        column = 1
+        if self._can_confirm_operator_finished_print():
+            ttk.Button(buttons, text=confirm_finished_label, command=self._confirm_finished_from_post_print_window).grid(row=0, column=column, sticky="ew", padx=5)
+            column += 1
+        ttk.Button(buttons, text=go_start_label, command=self._go_start_from_post_print_window).grid(row=0, column=column, sticky="ew", padx=5)
+        ttk.Button(buttons, text=confirm_label, command=self._save_start_from_post_print_window).grid(row=0, column=column + 1, sticky="ew", padx=(5, 0))
 
         def _on_close() -> None:
             self._close_post_print_window()
@@ -5845,7 +5858,7 @@ class K9ControlCenter:
         self.log(
             "Восстановил послепечатную позу из локального state-файла: "
             f"X{restored_pose[0]:.2f} Y{restored_pose[1]:.2f} Z{restored_pose[2]:.2f}. "
-            "Можно выполнить guarded 'После печати: к старту' после подтверждения, что модель снята."
+            "Можно выполнить guarded 'К сохранённому старту' после подтверждения, что модель снята."
         )
         return True
 
@@ -5975,22 +5988,22 @@ class K9ControlCenter:
         prompt = {
             "en": (
                 "Is the bed clear now?\n\n"
-                "'Go to saved start' / 'After print: return' returns to Z0, which means the nozzle touches the bed. "
+                "'Go to saved start' returns to Z0, which means the nozzle touches the bed. "
                 "Use it only after the printed part or failed first layer has been removed."
             ),
             "zh": (
                 "平台现在已经清空了吗？\n\n"
-                "“回到保存起点”/“打印后返回”会回到 Z0，也就是喷嘴接触平台。"
+                "“回到保存起点”会回到 Z0，也就是喷嘴接触平台。"
                 "只有取下模型或失败的第一层后才使用。"
             ),
             "ru": (
                 "Стол сейчас свободен?\n\n"
-                "'К сохранённому старту' / 'После печати: к старту' возвращает в Z0, то есть сопло опустится до касания стола. "
+                "'К сохранённому старту' возвращает в Z0, то есть сопло опустится до касания стола. "
                 "Нажимай это только после удаления детали или неудавшегося первого слоя."
             ),
         }.get(lang) or (
             "Стол сейчас свободен?\n\n"
-            "'К сохранённому старту' / 'После печати: к старту' возвращает в Z0, то есть сопло опустится до касания стола. "
+            "'К сохранённому старту' возвращает в Z0, то есть сопло опустится до касания стола. "
             "Нажимай это только после удаления детали или неудавшегося первого слоя."
         )
         return bool(messagebox.askyesno("Little Hands", prompt))
@@ -6587,6 +6600,17 @@ class K9ControlCenter:
         self._run_task(f"Сдвиг {display_hint} {signed_distance} мм", task)
 
     def move_level_point(self, x: float, y: float) -> None:
+        if not self._home_is_trusted():
+            msg = "Калибровка стола доступна только после 'Запомнить старт': текущий старт не доверенный."
+            self.log(msg)
+            messagebox.showwarning("Little Hands", msg)
+            return
+        if self.current_print_file != "-":
+            msg = "Калибровка стола недоступна во время активной SD-печати."
+            self.log(msg)
+            messagebox.showwarning("Little Hands", msg)
+            return
+
         def task() -> None:
             self.at_saved_start_pose = False
             self.post_print_pose_known = False
@@ -7007,7 +7031,7 @@ class K9ControlCenter:
                         if completion_pose_known:
                             self._post(
                                 "log",
-                                "Послепечатная поза M114 известна: после снятия модели кнопка 'После печати: к старту' может вернуть принтер к сохранённому 0.",
+                                "Послепечатная поза M114 известна: после снятия модели кнопка 'К сохранённому старту' может вернуть принтер к сохранённому 0.",
                             )
                         else:
                             self._post(
@@ -7046,7 +7070,7 @@ class K9ControlCenter:
                     else:
                         self._post(
                             "log",
-                            "Сохраняю predicted print-end для guarded 'После печати: к старту': "
+                            "Сохраняю predicted print-end для guarded 'К сохранённому старту': "
                             "печать завершена, но реальную M114-позу финиша снять не удалось.",
                         )
                     self._save_print_state("completed", force=True)

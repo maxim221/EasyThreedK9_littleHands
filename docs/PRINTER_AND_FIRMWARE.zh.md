@@ -138,14 +138,14 @@ G92 X0 Y0 Z0
 - 如果启动失败或状态可疑，应重新建立起始姿态并重新设零
 - Little Hands 现在把 home 状态分为 `trusted`、`uncertain` 和 `invalid`；除非 home 可信，或应用正在显示明确的打印后 recovery 确认流程，否则会阻止 SD 启动和 `回到保存起点`
 - 更换 / 断开 USB 端口、关闭电机、硬停止、jog 失败或 recovery 失败都会清除 home 信任，因为这台机器没有物理限位开关来重新寻找绝对零点
-- 普通 `Stop` 是受控停止，不是紧急路径：Little Hands 会暂停、读取 `M114`、尝试把 Z 抬到已知安全 recovery 高度，然后发送 `M524` 和关闭加热命令
+- 普通 `Stop` 是受控停止，不是紧急路径：Little Hands 现在会尽早在 `M524` 前探测 `M114`，随后暂停、再次读取 `M114`、尝试把 Z 抬到已知安全 recovery 高度，然后发送 `M524` 和关闭加热命令
 - 正常 `Stop` 后，Little Hands 会尽量保存 stopped-print recovery 标记：X/Y 来自中断打印位置，Z 来自受控 post-stop 抬升（如果确认成功）；Stop 后的手动 jog 会更新该标记，而不是删除它
 - 如果 `Stop` 发生在 K9 仍然 busy、没有取得 `M114` 的窗口内，Little Hands 可能提供受保护的 live-session `回到保存起点`；只有平台清空后才使用，并且只有目视确认实际起点正确后才点击 `Save start`
-- 如果 USB 在真实 SD 打印期间断开，重新连接后主窗口仍显示过期的活动打印标记，`打印后返回` 可以按保存的 `LH_END_GCODE_V1` print-end 提供受保护恢复；只有确认打印已经结束、平台已清空且结束后没有手动移动各轴时才接受
+- 如果 USB 在真实 SD 打印期间断开，重新连接后主窗口仍显示过期的活动打印标记，`回到保存起点` 可以按保存的 `LH_END_GCODE_V1` print-end 提供受保护恢复；只有确认打印已经结束、平台已清空且结束后没有手动移动各轴时才接受
 - 如果 USB 断开后 CH340 打印机以新的 `/dev/ttyUSB*` 名称重新枚举，打印后 recovery 可以自动切换到唯一可见的安全 printer-like 端口；此 recovery 场景不需要手动点击 `Find`
 - 如果旧的活动打印标记已经太旧，不能恢复为活动打印，Little Hands 仍会保留有效的 predicted print-end 作为受保护 recovery 选项
-- 如果 SD 打印期间 USB 断开但打印正常完成，操作者可以在取下模型后点击 `Print finished`；Little Hands 会保留预测的最终位置，用于受保护的 `打印后返回`
-- SD 面板有单独的 `打印后返回` 按钮；它不会执行另一套不安全的 home，而是调用与手动 `回到保存起点` 相同的受保护 recovery 流程，包括确认平台已清空
+- 如果 SD 打印期间 USB 断开但打印正常完成，Little Hands 可能显示带有 `Confirm finish` 的 recovery 窗口；操作者取下模型并确认后，应用会保留预测的最终位置，用于受保护的 `回到保存起点`
+- 打印后返回现在统一使用手动 `回到保存起点` 按钮；旧的 SD 面板 `打印后返回` 独立按钮已移除，以保留唯一的受保护 recovery 入口
 - 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
 - SD 启动会被阻止，除非应用确认打印机实际停在已保存的 `X0 Y0 Z0`
 - 在 `M24` 前，Little Hands 总是先用分段 `M104` 目标和最终 host-side `M109` 证明 hotend 已经加热，并被动读取温度行；如果加热没有确认，就不会发送 `M24`，也不应出现冷态运动
@@ -156,7 +156,7 @@ G92 X0 Y0 Z0
 - 新的 Little Hands 文件不应再把早期 `M109` 改写为 `M104`；`M24` 前的 host-side 预热必须使用分段 `M104` 目标，然后用最终 `M109` 会话作为加热门槛，并被动读取温度行。不要把它改回单次冷态高温 `M109`，也不要改回旧的主动 `M104` 加重复 `M105` 轮询；这两种模式都已经在这台 K9 上失败过。
 - 如果 Marlin 显示 hotend 目标温度和正的加热输出，但第一分钟温度上升很小，应把它当作这台 K9 hotend / 传感器的 slow-start 特性：Little Hands 会记录警告并等待完整的预热超时；只有目标掉到 `/0C`、heater output 一直是 `@0` 或 `M109` 不再输出温度行时才快速中止
 - `Manual control` 面板中的手动耗材进料用于停止打印后的装载 / 诊断：`Hotend 200C` 设置手动 `M104` 目标，`Feed` / `Retract` 只用相对 `M83` + `G1 E...` + `M400` 移动 E，并恢复 `M82`；活动 SD 打印期间会被阻止，且只有 `M105` 确认 hotend 至少 `180C` 后才发送 E 移动
-- 当前主界面将 `Manual control` 放在左侧，`USB metrics` 放在它下方，`Journal` 始终显示在右侧；调平点按钮也会使用短标签随语言切换
+- 当前主界面将 `Manual control` 放在左侧，`USB metrics` 放在它下方，`Journal` 始终显示在右侧；调平点按钮也会使用短标签随语言切换，并且只有 `Save start` 让 home 可信后才会启用
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 
