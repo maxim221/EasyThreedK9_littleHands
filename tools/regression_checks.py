@@ -71,14 +71,38 @@ def main() -> int:
         failures,
     )
     require("SERVICE_BED_FEEDRATE = 240" in app, "App long bed service moves must remain F240.", failures)
+    require("SERVICE_X_FEEDRATE = 900" in app, "App X service/recovery moves must remain around F900.", failures)
+    require(
+        "JOG_HEAD_FEEDRATE = 600" in app
+        and '"X": JOG_HEAD_FEEDRATE' in app
+        and "JOG_HEAD_PRINT_ACCEL = 80" in app
+        and "JOG_HEAD_TRAVEL_ACCEL = 80" in app
+        and '"X": (JOG_HEAD_PRINT_ACCEL, JOG_HEAD_TRAVEL_ACCEL)' in app,
+        "Manual head left/right jog must stay in the smoother one-move F600 / M204 P80 T80 diagnostic context.",
+        failures,
+    )
+    require(
+        "JOG_HEAD_LOCAL_ZERO_MM = 50.0" in app
+        and "G92 X{JOG_HEAD_LOCAL_ZERO_MM:g}" in app
+        and "local_target = JOG_HEAD_LOCAL_ZERO_MM + distance" in app,
+        "Manual X jog must use a local neutral X coordinate so stale/negative Marlin X does not accumulate after skipped moves.",
+        failures,
+    )
     require("JOG_BED_FEEDRATE = 600" in app, "App manual bed jog must match the validated manual F600 test.", failures)
     require("BED_JOG_SEGMENT_MM" not in app, "Manual bed jog must honor the selected UI step as a single move.", failures)
     require("MAX_MANUAL_BED_JOG_MM" not in app, "Manual bed jog must not be capped; the UI step should be honored.", failures)
     require("BED_RAW_MIN_MM" not in app and "BED_RAW_MAX_MM" not in app, "Raw Y must not be treated as a physical bed-edge guard without homing.", failures)
     require('"Y": JOG_BED_FEEDRATE' in app, "Manual bed jog must use the named conservative bed feedrate.", failures)
-    require('"Y": 80' in app, "Manual bed jog acceleration must match the validated manual M204 P80 T80 test.", failures)
-    require("M204 P{travel_accel} T{travel_accel}" in app, "Manual jog must soften both print and travel acceleration.", failures)
+    require('"Y": (JOG_BED_ACCEL, JOG_BED_ACCEL)' in app, "Manual bed jog acceleration must match the validated manual M204 P80 T80 test.", failures)
+    require("M204 P{print_accel:g} T{travel_accel:g}" in app, "Manual jog must set both print and travel acceleration explicitly.", failures)
     require('commands.extend([f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])' in app, "Manual jog must send the selected UI step as one waited move.", failures)
+    require(
+        "manual X jog was acknowledged; physical X motion must be verified" in app
+        and "Ручной X-jog подтверждён Marlin" in app
+        and 'if axis == "X":\n                commands.append("M114")' in app,
+        "Manual X jog acknowledgement must not be treated as proof of physical X motion, and must capture same-session post-jog M114.",
+        failures,
+    )
     require("Bed jog context: raw Y=" not in app, "Manual bed jog must not open a separate M114 query before movement.", failures)
     require("HOME_TRUST_TRUSTED" in app and "HOME_TRUST_UNCERTAIN" in app, "Home trust state machine is missing.", failures)
     require("_home_is_trusted()" in app, "Home-sensitive actions must use the explicit home trust guard.", failures)

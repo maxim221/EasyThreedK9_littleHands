@@ -2932,3 +2932,162 @@ After each test print, append:
 - Verification:
   - no physical printer motion was run for this code change
   - Python compilation, regression checks, and whitespace diff checks passed before commit
+
+## 2026-05-22 Manual Head Jog Slowdown
+
+- Field trigger:
+  - after a completed print and guarded return, manual `Head left/right` jog could buzz without moving even when the head was not physically at the hard edge
+  - logs showed manual X jog was using `G1 X... F900`, then `F600`, with the soft `M204 P80 T80` context; Marlin acknowledged the moves, so physical skipped motion could make the logical position untrustworthy
+- UI/manual motion change:
+  - manual head left/right jog was briefly tested with an over-soft `F120` / `M204 P40 T40` context, but that repeated the bed-jog detour: it did not remove the buzz and made the app differ from the validated direct-control path
+  - manual head left/right jog now uses the same one-move context that fixed the bed workflow: `F600` with `M204 P80 T80`, no separate pre-move `M114`
+  - a successful manual X `ok`/`M400` no longer leaves trusted home intact: Little Hands marks home uncertain and logs that physical X motion must be verified before saving start or printing
+  - X service/recovery/presentation moves remain around `F900`; this change does not add forceful recovery moves or raise service speeds
+- Documentation:
+  - updated `AGENTS.md`, printer/firmware docs, Cura settings docs, and regression checks to distinguish manual X jog from service/recovery X motion
+- Verification:
+  - no physical printer motion was run for this code change
+
+## 2026-05-22 USB Metrics Snapshot Persistence
+
+- Field trigger:
+  - after a successful SD print and a printer power cycle, the operator captured USB metrics before reconnecting
+  - Little Hands showed only `USB metrics capture: done` in the runtime log; the raw `M115` / `M503` / `M114` / `M105` / `M27` bodies lived only in the UI widget and were lost after the view changed
+- App change:
+  - `Capture all metrics` now writes the full raw metrics snapshot to `monitor_logs/little_hands_usb_metrics_latest.txt`
+  - timestamped copies are also kept under `monitor_logs/usb_metrics/` so field diagnostics can be inspected after restart, reconnect, or a later UI refresh
+- Safety:
+  - this is a read-only USB diagnostics change and does not send any movement commands
+- Verification:
+  - no physical printer motion was run for this code change
+  - Python compilation, regression checks, and whitespace diff checks passed
+
+## 2026-05-22 Manual X Post-Jog Position Capture
+
+- Field trigger:
+  - fresh USB metrics after a power cycle showed normal LH v5 firmware and EEPROM motion settings, so the remaining issue is specific to manual USB X movement versus SD-file X movement
+- App change:
+  - manual head left/right jog still sends exactly one selected `G1 X...` move in the validated `F600` / `M204 P80 T80` context, without a pre-move `M114`
+  - after `M400` and restoring `G90`, the same serial session now asks `M114` so the journal shows whether Marlin's logical X changed after a buzz/no-move report
+- Safety:
+  - this diagnostic `M114` is read-only and is not treated as proof of physical X movement; visual confirmation is still required before `Save start` or SD printing
+- Verification:
+  - no physical printer motion was run for this code change
+  - Python compilation, regression checks, and whitespace diff checks passed
+
+## 2026-05-22 Manual X Local Coordinate Window
+
+- Field trigger:
+  - repeated manual X jogs were acknowledged by Marlin and advanced the logical counter (`X:-5`, `X:-10`, then `X:-55`) while the physical head did not move
+  - this matched the earlier bed lesson: raw Marlin coordinates after power cycle / skipped steps are diagnostic, not a physical edge or a trustworthy home model
+- App change:
+  - manual X jog still uses one selected movement in the same soft `F600` / `M204 P80 T80` context as the fixed bed jog
+  - before the X move, Little Hands declares a local neutral coordinate with `G92 X50`, then moves only the selected step to `X50 +/- step`
+  - this prevents stale negative Marlin X from accumulating across failed manual attempts while preserving the selected physical jog distance
+- Safety:
+  - a manual X jog still marks home uncertain; `Save start` and SD printing require visual confirmation of the real physical start
+- Verification:
+  - no physical printer motion was run for this code change
+  - Python compilation, regression checks, and whitespace diff checks passed
+
+## 2026-05-22 Manual X Direct USB Diagnostics
+
+- Field trigger:
+  - after the local `G92 X50` window change, the operator reported that the X sound became smoother but the head still did not physically move
+  - comparing the manual USB jog with the just-finished SD print suggested one possible difference: the printed G-code and current end-gcode use print/travel accelerations around `M204 P150..250 T120`, while manual X had been using the bed-like `M204 P80 T80`
+- Diagnostic result:
+  - a direct USB test with `G92 X50`, `G1 X52 F900`, `M400`, `M114`, then `G1 X48 F900` was acknowledged and changed Marlin X counts, but the operator-facing symptom did not improve
+  - the sharper print-like `F900` / `M204 P250 T120` manual profile was therefore not kept
+  - a tiny SD-file comparison was attempted next, but binary transfer left the CH340/Marlin session silent; the printer needs a 5-10 second power cycle before further USB diagnostics
+- App change:
+  - manual head left/right jog keeps the local neutral `G92 X50` coordinate window, but stays in the smoother one-move `F600` / `M204 P80 T80` diagnostic context
+  - manual bed jog remains on the validated bed-specific `F600` / `M204 P80 T80` context
+  - the post-jog `M114` diagnostic and home-uncertain handling remain unchanged because Marlin `ok` / `M400` still is not proof of physical X motion
+- Documentation:
+  - updated `AGENTS.md`, printer/firmware docs, Cura settings docs, and regression checks so future changes keep manual X in the softer diagnostic profile unless a physical SD-vs-USB test proves a better context
+  - corrected the in-app/printer docs axis summary so it matches the actual UI mapping: `Y` is the bed axis and `Z` is head up/down
+- Verification:
+  - physical X-only diagnostic movement was run at the operator's request; Marlin acknowledged the moves and logical X counts changed, but physical X motion was not confirmed
+
+## 2026-06-10 Experimental Controlled Hotbed 10k Sensor Build
+
+- Field trigger:
+  - the operator installed a hotbed on the old K9 and connected the heater to the board Hotbed output
+  - the bed sensor was connected to the board `-TB+` input; the neighboring `-TH+` input remains the hotend sensor
+  - with the sensor disconnected from the board, resistance near room temperature measured around `10 kOhm`, so the installed sensor is likely a `10k` NTC rather than the `100k` bed thermistor expected by the current Marlin bed sensor table
+- Before firmware change:
+  - current `LH v5 ... Fan253` firmware reported `M105` around `T:24.79 /0.00 B:83.22 /0.00 @:0 B@:0`
+  - because the bed was cold, `B:83C` confirmed that the current `TEMP_SENSOR_BED 1` table was wrong for this installed sensor
+  - no bed heating was run in this state
+- Firmware change:
+  - built experimental firmware `firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max90-mksLite.bin`
+  - SHA256: `815b0b39198848f6e8fcd872ba942bf211abb848bf898c102523fbf7b892cc9c`
+  - firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max90`
+  - source patch recorded at `docs/firmware/LH-v6-exp-bed10k-max90.patch`
+  - intended deltas from the current local K9 firmware source:
+    - `TEMP_SENSOR_BED 1 -> 4` (`Generic 10K`, R25 `10 kOhm`, beta `3950`, `4.7 kOhm` pull-up)
+    - `BED_MAXTEMP 150 -> 90`
+    - bed preheat presets `70/110C -> 50/60C`
+  - built with `pio run -e mks_robin_lite_maple`
+  - uploaded over USB as `mksLite.bin` with `tools/k9_marlin_sd.py ... flash-firmware ... --purge-bin`, then `M997`
+- After firmware change:
+  - `M115` confirmed the new `LH v6 EXP ... Bed10K Max90` firmware, build time `Jun 10 2026 00:12:19`
+  - cold `M105` reported `T:23.89 /0.00 B:22.19 /0.00 @:0 B@:0`
+  - this validated the cold sensor table sanity before any bed heat command
+- First physical heat sanity check:
+  - the operator watched the printer, with the temperature sensor attached to the center of the bed
+  - sent `M140 S30`
+  - `M105` showed `B:` rising smoothly from `22.17C` to `27.99C` over about `93s`, with the bed target `/30.00` and bed output `B@:127`
+  - sent `M140 S0`
+  - a repeated safety `M140 S0` confirmed `B@:0` with target `/0.00`
+  - follow-up `M105` monitoring showed thermal inertia peaking around `B:29.97C`, then cooling to `B:29.59C`, while `B@:0` stayed off
+  - operator's independent surface sensor, attached near the bed center, showed a rise from about `24C` to about `33C`, then a smooth cooldown to about `31C`
+  - this means the Marlin `B:` reading is plausible for control, but the real surface can run a few degrees hotter than the reported `B:` in this setup
+  - no axes were moved and no print was started
+- Second physical heat sanity check:
+  - sent `M140 S35` while the operator continued watching the bed setup
+  - `M105` showed `B:` rising smoothly from `24.10C` to `34.57C` over about `149s`, with the bed target `/35.00` and bed output `B@:127`
+  - sent `M140 S0`
+  - repeated off checks showed target `/0.00` and `B@:0`
+  - thermal inertia peaked around `B:36.07C`, then cooled steadily to `B:34.32C` during follow-up monitoring, with `B@:0` throughout
+  - no axes were moved and no print was started
+- App telemetry change:
+  - Little Hands temperature graph now stores and draws hotend current, hotend target, hotbed current (`B:`), and hotbed target
+  - runtime `M105` ring-log entries now include `B:` and `B@:` when available, so the graph can reload recent bed telemetry after restart
+  - the live status/header now shows hotbed current/target and bed heater output alongside hotend telemetry
+- Installed bed product / revised firmware cap:
+  - product link resolved from the operator's AliExpress short link: `https://aliexpress.ru/item/1005012098232684.html`
+  - search/listing text describes it as a heated platform compatible with EasyThreed `X1`, `X2`, `K1`, `K2`, `K7`, `K9`
+  - listing states maximum hotbed temperature `70C`, reached in about `15` minutes
+  - the operator's external surface sensor during the `M140 S35` test showed maximum around `40C` and about `36C` at the end of the test
+  - based on the product `70C` maximum and the observed surface-vs-Marlin offset, the experimental firmware cap was tightened from `Bed10K Max90` to `Bed10K Max70`
+  - built `firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin`
+  - SHA256: `f547e321e6c1132ad36e6e312bba04c05eedd8b42c4a25525ce6a84a5f93df92`
+  - source patch recorded at `docs/firmware/LH-v6-exp-bed10k-max70.patch`
+  - intended delta from `Max90`: `LH_FIRMWARE_LABEL ... Bed10K Max70`, `BED_MAXTEMP 90 -> 70`
+  - with Marlin `BED_OVERSHOOT 10`, this means the practical maximum bed target is about `60C`
+  - flashed via USB as `mksLite.bin` with `tools/k9_marlin_sd.py ... flash-firmware ... --purge-bin`, then `M997`
+  - after reboot, `M115` confirmed `LH v6 EXP ... Bed10K Max70`, build time `Jun 10 2026 00:48:45`
+  - post-flash `M105` showed `T:25.80 /0.00 B:28.19 /0.00 @:0 B@:0`
+- Safety rule:
+  - public printing baseline remains `LH v5` + external warm mat / Cura bed temperature `0` for release docs
+  - despite the successful `M140 S30` and `M140 S35` sanity tests, do not add Cura or SD-print `M140/M190 S>0` yet; a full print-workflow validation is still needed before controlled bed heating becomes the normal workflow
+  - any next bed-heating validation should still be operator-watched: confirm plausible cold `B:`, use a bounded target, verify `B:` rises, and turn the bed off with `M140 S0`
+
+## 2026-06-10 Hotbed Installation Notes And Feeler-Gauge Leveling
+
+- Field trigger:
+  - the operator installed the physical hotbed and bought calibrated feeler gauges for post-install bed leveling
+  - the current Cura start G-code declares the physical start pose with `G92 X0 Y0 Z0`, while the first layer already prints around `Z0.20`
+- Installation docs:
+  - added `docs/HOTBED_INSTALLATION.ru.md`
+  - recorded the board wiring: hotbed heater on board `Hotbed`, bed thermistor on `-TB+`, hotend thermistor remains on `-TH+`
+  - recorded the installed product link, advertised `70C` product maximum, `~10k` room-temperature sensor observation, `LH v6 EXP ... Bed10K Max70` firmware identity, Max70 firmware SHA, and the `M140 S30` / `M140 S35` sanity-test results
+- Leveling rule:
+  - for this manual-zero workflow, level all five Little Hands points with a `0.05 mm` feeler at `Z0`
+  - the feeler should move with light, even drag in `FL/C/FR/BL/BR` (`ПЛ/Ц/ПП/ЗЛ/ЗП`)
+  - `0.10 mm` is only an upper sanity check for now, not the target gap, because treating a larger feeler gap as logical zero can make the first layer too high
+  - final confirmation remains visual first-layer inspection: brim/skirt lines should be continuous and slightly flattened
+- Safety:
+  - controlled hotbed remains experimental; Cura bed temperature stays `0` until full print-workflow validation
+  - first real controlled-hotbed print should still use a conservative observed bed target, external surface sensor if available, and a ready `M140 S0` heat-off path

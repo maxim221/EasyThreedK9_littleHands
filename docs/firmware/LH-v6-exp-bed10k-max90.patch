@@ -1,0 +1,18 @@
+diff --git a/Marlin/Configuration.h b/Marlin/Configuration.h
+--- a/Marlin/Configuration.h
++++ b/Marlin/Configuration.h
+@@
+-#define LH_FIRMWARE_LABEL "LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253"
++#define LH_FIRMWARE_LABEL "LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max90"
+@@
+-#define TEMP_SENSOR_BED 1
++#define TEMP_SENSOR_BED 4
+@@
+-#define BED_MAXTEMP      150
++#define BED_MAXTEMP       90
+@@
+-#define PREHEAT_1_TEMP_BED     70
++#define PREHEAT_1_TEMP_BED     50
+@@
+-#define PREHEAT_2_TEMP_BED    110
++#define PREHEAT_2_TEMP_BED     60

@@ -115,7 +115,8 @@ G1 Y95 F240 ;Move bed toward the operator
 - Ironing acceleration：`120 mm/s^2`
 - Jerk control：`off`
 - 注意：暂时不要为这个 RepRap-flavor 配置启用 Cura jerk control；我们的 Marlin 固件使用 `M205`，而 Cura 在此模式下会生成 `M566`。
-- K9 维护移动限制：当前验证的 `LH-v5` baseline 仍可能在 EEPROM/Marlin 中带有类似 `M201 X1000 Y1000` 和 `M204 T1000` 的 service dynamics，这对小型机械结构的手动和 recovery 移动过于激进。打印时把 travel acceleration 保持在 `200 mm/s^2` 或更低；Little Hands 对长距离 service / recovery 平台移动保持柔和的 `M204 T80` service-idle 状态并使用约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右约 `F900`。
+- K9 维护移动限制：当前验证的 `LH-v5` baseline 仍可能在 EEPROM/Marlin 中带有类似 `M201 X1000 Y1000` 和 `M204 T1000` 的 service dynamics，这对小型机械结构的手动和 recovery 移动过于激进。打印时把 travel acceleration 保持在 `200 mm/s^2` 或更低；Little Hands 对长距离 service / recovery 平台移动保持柔和的 `M204 T80` service-idle 状态并使用约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右 service/recovery 约 `F900`，手动喷头左右 jog 使用更柔和的 one-move `F600` / `M204 P80 T80` 诊断上下文。手动 X jog 会先声明本地中性 `G92 X50`，避免跳步后过期的负 X 坐标继续累积。
+- 手动 X jog 的确认不再被视为 X 物理移动的证明；如果喷头卡住，请目视检查滑车，并在打印前重新保存起点。
 - 不要通过提高 Cura travel speed 或 recovery speed 来补偿打印后喷头左右滑车的机械卡滞。先释放 / 检查该轴；如果几次短 jog 后恢复正常运动，应按现场机械问题处理，而不是修改切片速度目标。
 
 ## 平台附着

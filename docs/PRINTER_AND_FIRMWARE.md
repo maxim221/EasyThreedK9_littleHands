@@ -34,8 +34,8 @@ This build is the current public default candidate because it matches the valida
   - `E1040`
 - validated operator motion mapping:
   - `X` = printhead left / right
-  - `Y` = printhead up / down
-  - `Z` = bed in the print plane
+  - `Y` = bed in the print plane
+  - `Z` = printhead up / down
 
 ## 3. Firmware Identity
 
@@ -108,8 +108,9 @@ Where the bad speed/dynamics came from:
 Current rule:
 
 - treat the small X head carriage and Y bed as limiting service-motion axes when choosing print speeds and acceleration
-- Little Hands now leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service/recovery paths around `F240`, uses the validated `F600` / `M204 P80 T80` context for manual bed jogs, and moves the head left/right around `F900`
-- short diagnostic bed moves up to `F600` worked over `5 mm`, and the UI now follows the validated manual context instead of over-softening the move
+- Little Hands now leaves recovery motion in the soft `M204 T80` service-idle state, moves long bed service/recovery paths around `F240`, uses the validated `F600` / `M204 P80 T80` context for manual bed jogs, keeps head left/right service/recovery around `F900`, and uses the smoother one-move `F600` / `M204 P80 T80` diagnostic context for manual head left/right jogs; manual X first declares a local neutral `G92 X50` so stale negative X coordinates after a skipped move do not accumulate
+- an `ok` / `M400` after manual X jog is only Marlin acknowledgement; Little Hands records a same-session post-jog `M114` for diagnostics, but if the operator sees that the head did not physically move, home stays uncertain and the start must be checked and saved again by eye before printing
+- short diagnostic bed moves up to `F600` worked over `5 mm`, and the UI now follows the validated manual bed context instead of over-softening the move; manual X stays in the smoother `F600` / `M204 P80 T80` diagnostic context because both over-soft `F120` / `M204 P40 T40` and sharper print-like `F900` / `M204 P250 T120` tests failed to restore physical X motion
 - the Cura baseline keeps travel acceleration at or below `200 mm/s^2`
 - Little Hands SD start uses staged hotend preheat: `M104` stages around `60/100/150/200C`, then the final blocking `M109` before `M24`
 - the first hotend stage can look slow and may produce faint clicks before the temperature suddenly climbs; this is acceptable only while the staged temperature gates are reached, the target is stable, and heater output is not stuck at `@0`
@@ -160,6 +161,7 @@ So:
 - if Marlin shows a hotend target and positive heater output but the first minute of temperature rise is small, treat it as this K9's slow-start hotend/sensor behavior: log a warning and keep waiting up to the full preheat timeout; still abort quickly if the target drops to `/0C`, heater output stays `@0`, or `M109` stops producing temperature lines
 - manual filament feed in the `Manual control` panel is for loading/diagnosis after a print has stopped: `Hotend 200C` sets a manual `M104` target, `Feed` / `Retract` move only E with relative `M83` + `G1 E...` + `M400` and restore `M82`; these commands are blocked during active SD printing and do not send E movement until `M105` confirms the hotend is at least `180C`
 - the current main UI keeps `Manual control` on the left, `USB metrics` directly below it, and the `Journal` always visible on the right; leveling point buttons are localized with short `FL/C/FR/BL/BR` labels in English and are enabled only after `Save start` has made home trusted
+- `Capture all metrics` saves the raw `M115` / `M503` / `M114` / `M105` / `M27` snapshot to `monitor_logs/little_hands_usb_metrics_latest.txt` and keeps timestamped copies under `monitor_logs/usb_metrics/`
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 
@@ -183,6 +185,22 @@ Safety note:
 
 - use a heat-safe surface
 - do not blindly reuse a random stock plate on a raw external heater
+
+Experimental controlled-hotbed branch:
+
+- AliExpress product link used for the installed bed: `https://aliexpress.ru/item/1005012098232684.html`
+- the listing says this EasyThreed X1/X2/K1/K2/K7/K9-compatible heated platform has maximum hotbed temperature `70C`
+- detailed Russian field notes for installation and leveling are recorded in `docs/HOTBED_INSTALLATION.ru.md`
+- `firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin` was built for the newly installed bed connected to the board hotbed output with a `~10k` NTC sensor on `-TB+`
+- firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
+- Marlin bed sensor: `TEMP_SENSOR_BED 4` (`Generic 10K`), `BED_MAXTEMP 70`, bed preheat presets `50C` / `60C`; with `BED_OVERSHOOT 10`, the practical maximum target is about `60C`
+- first cold check after flashing showed `M105` around `T:23.89` and `B:22.19`, with `B@:0`
+- first operator-watched heat sanity check used `M140 S30`; `B:` rose smoothly from about `22C` to about `28C`, then after `M140 S0` the bed output stayed `B@:0` while temperature peaked near `30C` and began cooling
+- the operator's independent surface sensor near the bed center read about `24C -> 33C -> 31C`, so the real surface can be a few degrees hotter than Marlin `B:` during this first setup
+- second operator-watched heat sanity check used `M140 S35`; `B:` rose smoothly from about `24C` to `34.57C`, then after `M140 S0` the bed output stayed `B@:0` while Marlin `B:` peaked near `36C` and began cooling; the operator's external surface sensor peaked around `40C` and was around `36C` at the end of the test
+- after the hotbed install, level the bed at all five Little Hands points (`FL` / `C` / `FR` / `BL` / `BR`) with a `0.05 mm` feeler at `Z0`; it should have light, even drag. Treat `0.10 mm` only as an upper sanity check for now, because Cura already prints the first layer around `Z0.20` after `G92 X0 Y0 Z0`
+- keep Cura bed temperature at `0` and do not add `M140/M190 S>0` to print G-code until a full print-workflow validation is logged
+- further validation heat tests should remain operator-watched: confirm plausible cold `B:` first, use a bounded target, verify `B:` rises, and turn the bed off with `M140 S0`
 
 ## 8. Cura Baseline
 

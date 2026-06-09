@@ -33,8 +33,8 @@
   - `E1040`
 - 已验证的操作者视角运动定义：
   - `X` = 喷头左右
-  - `Y` = 喷头上下
-  - `Z` = 平台前后
+  - `Y` = 平台前后
+  - `Z` = 喷头上下
 
 ## 3. 固件识别
 
@@ -105,8 +105,9 @@
 当前规则：
 
 - 计算打印速度和加速度时，把小型 X 喷头滑车和 Y 平台都当作 service-motion 限制轴
-- Little Hands 对 recovery 移动保持柔和的 `M204 T80` service-idle 状态，长距离平台 service/recovery 移动约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右约 `F900`
-- `5 mm` 短距离诊断移动中，平台到 `F600` 也可工作，现在 UI 会遵循已验证的手动移动上下文，而不是过度放慢移动
+- Little Hands 对 recovery 移动保持柔和的 `M204 T80` service-idle 状态，长距离平台 service/recovery 移动约 `F240`，手动平台 jog 使用已验证的 `F600` / `M204 P80 T80`，喷头左右 service/recovery 约 `F900`，手动喷头左右 jog 使用更柔和的 one-move `F600` / `M204 P80 T80` 诊断上下文；手动 X 会先声明本地中性 `G92 X50`，避免跳步后过期的负 X 坐标继续累积
+- 手动 X jog 后的 `ok` / `M400` 只表示 Marlin 已确认；Little Hands 会在同一会话中记录 post-jog `M114` 用于诊断，但如果操作者看到喷头没有实际移动，home 仍会标记为不确定，下一次打印前必须目视检查并重新保存起点
+- `5 mm` 短距离诊断移动中，平台到 `F600` 也可工作，现在 UI 会遵循已验证的手动平台上下文，而不是过度放慢移动；手动 X jog 保持更柔和的 `F600` / `M204 P80 T80`，因为过软的 `F120` / `M204 P40 T40` 和更尖锐的 `F900` / `M204 P250 T120` 都没有恢复 X 的物理运动
 - Cura baseline 将 travel acceleration 保持在 `200 mm/s^2` 或更低
 - Little Hands 的 SD 启动使用分段 hotend 预热：`M104` 约 `60/100/150/200C`，然后在 `M24` 前执行最终阻塞 `M109`
 - 第一段 hotend 预热可能看起来很慢，并伴随轻微咔哒声，之后温度才突然上升；只有在分段温度门槛能够达到、目标稳定且 heater output 没有卡在 `@0` 时，这才算可接受
@@ -157,6 +158,7 @@ G92 X0 Y0 Z0
 - 如果 Marlin 显示 hotend 目标温度和正的加热输出，但第一分钟温度上升很小，应把它当作这台 K9 hotend / 传感器的 slow-start 特性：Little Hands 会记录警告并等待完整的预热超时；只有目标掉到 `/0C`、heater output 一直是 `@0` 或 `M109` 不再输出温度行时才快速中止
 - `Manual control` 面板中的手动耗材进料用于停止打印后的装载 / 诊断：`Hotend 200C` 设置手动 `M104` 目标，`Feed` / `Retract` 只用相对 `M83` + `G1 E...` + `M400` 移动 E，并恢复 `M82`；活动 SD 打印期间会被阻止，且只有 `M105` 确认 hotend 至少 `180C` 后才发送 E 移动
 - 当前主界面将 `Manual control` 放在左侧，`USB metrics` 放在它下方，`Journal` 始终显示在右侧；调平点按钮也会使用短标签随语言切换，并且只有 `Save start` 让 home 可信后才会启用
+- `Capture all metrics` 会把原始 `M115` / `M503` / `M114` / `M105` / `M27` 快照保存到 `monitor_logs/little_hands_usb_metrics_latest.txt`，并在 `monitor_logs/usb_metrics/` 保留带时间戳的副本
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 
@@ -175,6 +177,22 @@ G92 X0 Y0 Z0
 
 - 外部热床约 `40–50C`
 - 热床上覆盖打孔柔性打印面
+
+实验性的受控 hotbed 分支：
+
+- 已安装热床的商品链接：`https://aliexpress.ru/item/1005012098232684.html`
+- 商品页称该 EasyThreed X1/X2/K1/K2/K7/K9 兼容 heated platform 的最大 hotbed 温度为 `70C`
+- 详细的俄文现场安装和调平记录在 `docs/HOTBED_INSTALLATION.ru.md`
+- `firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin` 是为新安装的受控热床构建的；热床接在主板 hotbed 输出，`~10k` NTC 传感器接在 `-TB+`
+- firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
+- Marlin bed sensor: `TEMP_SENSOR_BED 4` (`Generic 10K`), `BED_MAXTEMP 70`, bed preheat presets `50C` / `60C`；由于 `BED_OVERSHOOT 10`，实际可设目标上限约为 `60C`
+- 刷写后的第一次冷态检查显示 `M105` 约为 `T:23.89` 和 `B:22.19`，且 `B@:0`
+- 第一次由操作者看守的 heat sanity check 使用 `M140 S30`；`B:` 从约 `22C` 平稳升到约 `28C`，之后发送 `M140 S0`，热床输出保持 `B@:0`，温度因惯性接近 `30C` 后开始下降
+- 操作者在平台中心附近的独立 surface sensor 显示约 `24C -> 33C -> 31C`，因此在这套首次安装中，真实表面温度可能比 Marlin `B:` 高几度
+- 第二次由操作者看守的 heat sanity check 使用 `M140 S35`；`B:` 从约 `24C` 平稳升到 `34.57C`，之后发送 `M140 S0`，热床输出保持 `B@:0`，Marlin `B:` 因惯性接近 `36C` 后开始下降；操作者的外部 surface sensor 最高约 `40C`，测试结束时约 `36C`
+- 安装 hotbed 后，在 Little Hands 的五个调平点（`前左` / `中` / `前右` / `后左` / `后右`）使用 `0.05 mm` 塞尺在 `Z0` 调平；塞尺应有轻微且一致的阻力。`0.10 mm` 目前只作为上限检查，因为 `G92 X0 Y0 Z0` 后 Cura 首层本身已经约为 `Z0.20`
+- 在记录完整 print-workflow validation 前，Cura bed temperature 仍保持 `0`，不要在打印 G-code 中加入 `M140/M190 S>0`
+- 后续 validation heat tests 仍必须由操作者看守：先确认冷态 `B:` 合理，再使用有限目标，确认 `B:` 上升，然后用 `M140 S0` 关闭热床
 
 ## 8. Cura 基线
 

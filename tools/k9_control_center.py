@@ -37,6 +37,8 @@ CURA_ROOT = Path.home() / ".local/share/cura/5.11"
 DEFAULT_FIRMWARE = PROJECT_ROOT / "firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin"
 LOG_DIR = PROJECT_ROOT / "monitor_logs"
 GUI_EXPORT_DIR = LOG_DIR / "gui_exports"
+USB_METRICS_DIR = LOG_DIR / "usb_metrics"
+USB_METRICS_LATEST_PATH = LOG_DIR / "little_hands_usb_metrics_latest.txt"
 RUNTIME_LOG_PATH = LOG_DIR / "little_hands_runtime.log"
 RUNTIME_LOG_MAX_BYTES = 10 * 1024 * 1024
 UI_STATE_PATH = LOG_DIR / "little_hands_ui_state.json"
@@ -84,7 +86,9 @@ K9_MAX_BODY_PRINT_ACCEL = 600.0
 
 
 TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
+BED_TEMP_RE = re.compile(r"\bB:([-\d.]+)\s*/([-\d.]+)")
 HEATER_RE = re.compile(r"@:(\d+)")
+BED_HEATER_RE = re.compile(r"\bB@:(\d+)")
 SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
 HOME_TRUST_TRUSTED = "trusted"
@@ -93,17 +97,40 @@ HOME_TRUST_INVALID = "invalid"
 JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
 JOG_DEFAULT_STEP_MM = 5.0
 SERVICE_X_FEEDRATE = 900
+JOG_HEAD_FEEDRATE = 600
+JOG_HEAD_PRINT_ACCEL = 80
+JOG_HEAD_TRAVEL_ACCEL = 80
+JOG_HEAD_LOCAL_ZERO_MM = 50.0
 SERVICE_BED_FEEDRATE = 240
 JOG_BED_FEEDRATE = 600
+JOG_BED_ACCEL = 80
+JOG_VERTICAL_ACCEL = 80
 JOG_FEEDRATES = {
-    "X": SERVICE_X_FEEDRATE,
+    "X": JOG_HEAD_FEEDRATE,
     "Y": JOG_BED_FEEDRATE,
     "Z": 600,
 }
-JOG_TRAVEL_ACCEL = {
-    "X": 80,
-    "Y": 80,
-    "Z": 80,
+
+TempPayload = tuple[float | None, float | None, int | None, float | None, float | None, int | None]
+TempHistoryRow = tuple[float, float | None, float | None, float | None, float | None]
+
+
+def parse_m105_temperatures(reply: str) -> TempPayload:
+    hotend_match = TEMP_RE.search(reply)
+    bed_match = BED_TEMP_RE.search(reply)
+    hotend_current = float(hotend_match.group(1)) if hotend_match else None
+    hotend_target = float(hotend_match.group(2)) if hotend_match else None
+    heater_match = HEATER_RE.search(reply)
+    hotend_heater = int(heater_match.group(1)) if heater_match else None
+    bed_current = float(bed_match.group(1)) if bed_match else None
+    bed_target = float(bed_match.group(2)) if bed_match else None
+    bed_heater_match = BED_HEATER_RE.search(reply)
+    bed_heater = int(bed_heater_match.group(1)) if bed_heater_match else None
+    return hotend_current, hotend_target, hotend_heater, bed_current, bed_target, bed_heater
+JOG_ACCELS = {
+    "X": (JOG_HEAD_PRINT_ACCEL, JOG_HEAD_TRAVEL_ACCEL),
+    "Y": (JOG_BED_ACCEL, JOG_BED_ACCEL),
+    "Z": (JOG_VERTICAL_ACCEL, JOG_VERTICAL_ACCEL),
 }
 JOG_RESTORE_TRAVEL_ACCEL = 80
 FILAMENT_STEPS_MM = (1.0, 5.0, 10.0, 20.0, 50.0)
@@ -250,7 +277,7 @@ MANUAL_TEXT = textwrap.dedent(
     - Единственный вентилятор принтера используется как hotend auto-fan на FAN1: ниже примерно 45C выключен, выше примерно 45C включён.
     - Внешний warm bed / hotbed не управляется прошивкой принтера.
     - В этом workflow не используется обычный Marlin G28. У этого K9 в проверенной конфигурации нет надёжного home по концевикам.
-    - Оси с точки зрения пользователя: X двигает голову влево/вправо, Y двигает голову вверх/вниз, Z двигает стол к себе/от себя в плоскости печати.
+    - Оси с точки зрения пользователя: X двигает голову влево/вправо, Y двигает стол к себе/от себя в плоскости печати, Z двигает голову вверх/вниз.
 
     Стартовая поза и модель home
     Принтер не находит home сам. Пользователь выставляет стартовую позу печати, а Little Hands объявляет её логическим нулём командой G92 X0 Y0 Z0.
@@ -371,7 +398,7 @@ MANUAL_TEXTS = {
         - The single printer fan is used as the hotend auto-fan on FAN1: off below about 45C, on above about 45C.
         - The warm bed / hotbed is external and is not controlled by the printer firmware.
         - Do not use normal Marlin G28 homing in this workflow. This K9 has no reliable endstop-based home in the validated setup.
-        - Operator-facing motion: X moves the head left/right, Y moves the head up/down, Z moves the bed toward/away in the print plane.
+        - Operator-facing motion: X moves the head left/right, Y moves the bed toward/away in the print plane, Z moves the head up/down.
 
         Start pose and home model
         The printer does not find home by itself. The operator sets the print start pose and Little Hands declares it as logical zero with G92 X0 Y0 Z0.
@@ -463,7 +490,7 @@ MANUAL_TEXTS = {
         - 打印机唯一风扇接在 FAN1，作为 hotend auto-fan：约 45C 以下关闭，约 45C 以上开启。
         - 外部 warm bed / hotbed 不由打印机固件控制。
         - 此工作流不要使用普通 Marlin G28 回零。当前验证配置中，这台 K9 没有可靠的限位开关 home。
-        - 面向操作者的运动：X 是喷头左右，Y 是喷头上下，Z 是平台前后。
+        - 面向操作者的运动：X 是喷头左右，Y 是平台前后，Z 是喷头上下。
 
         起点和 home 模型
         打印机不会自己寻找 home。操作者把机器移动到打印起点，Little Hands 用 G92 X0 Y0 Z0 把该姿态声明为逻辑零点。
@@ -606,7 +633,7 @@ class K9ControlCenter:
         self.post_print_pose_known = False
         self.post_print_pose: tuple[float, float, float] | None = None
         self.log_file_lock = threading.Lock()
-        self.temp_history: list[tuple[float, float, float]] = []
+        self.temp_history: list[TempHistoryRow] = []
         self.last_telemetry_log_ts = 0.0
         self.current_print_file = "-"
         self.current_print_display = "-"
@@ -644,6 +671,9 @@ class K9ControlCenter:
         self.last_temp_current: float | None = None
         self.last_temp_target: float | None = None
         self.last_heater_power: int | None = None
+        self.last_bed_temp_current: float | None = None
+        self.last_bed_temp_target: float | None = None
+        self.last_bed_heater_power: int | None = None
         self.last_sd_sample_ts = 0.0
         self.last_sd_summary = "SD: unknown"
         self.last_fw_line = ""
@@ -730,9 +760,12 @@ class K9ControlCenter:
         now = time.time()
         today = time.localtime(now)
         cutoff = now - TEMP_GRAPH_WINDOW_SEC
-        loaded: list[tuple[float, float, float]] = []
+        loaded: list[TempHistoryRow] = []
         telem_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}).*temp=([-\d.]+)/([-\d.]+)")
-        m105_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}).*T:([-\d.]+)\s*/([-\d.]+)")
+        m105_re = re.compile(
+            r"(\d{2}):(\d{2}):(\d{2}).*T:([-\d.]+)\s*/([-\d.]+)"
+            r"(?:.*\bB:([-\d.]+)\s*/([-\d.]+))?"
+        )
         try:
             lines = RUNTIME_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
         except Exception:
@@ -744,6 +777,8 @@ class K9ControlCenter:
             hh, mm, ss = int(m.group(1)), int(m.group(2)), int(m.group(3))
             cur = float(m.group(4))
             tgt = float(m.group(5))
+            bed_cur = float(m.group(6)) if len(m.groups()) >= 7 and m.group(6) is not None else None
+            bed_tgt = float(m.group(7)) if len(m.groups()) >= 7 and m.group(7) is not None else None
             stamp = time.mktime((
                 today.tm_year, today.tm_mon, today.tm_mday,
                 hh, mm, ss,
@@ -752,12 +787,14 @@ class K9ControlCenter:
             if stamp > now + 60:
                 stamp -= 24 * 3600
             if stamp >= cutoff:
-                loaded.append((stamp, cur, tgt))
+                loaded.append((stamp, cur, tgt, bed_cur, bed_tgt))
         if loaded:
             self.temp_history = loaded[-1200:]
             self.last_temp_sample_ts = loaded[-1][0]
             self.last_temp_current = loaded[-1][1]
             self.last_temp_target = loaded[-1][2]
+            self.last_bed_temp_current = loaded[-1][3]
+            self.last_bed_temp_target = loaded[-1][4]
         self._restore_last_print_state_from_log(lines)
 
     def _restore_last_print_state_from_log(self, lines: list[str]) -> None:
@@ -1372,17 +1409,16 @@ class K9ControlCenter:
             except Exception:
                 pass
 
-        def parse_temperature_reply(reply: str) -> tuple[float | None, float | None, int | None]:
-            match = TEMP_RE.search(reply)
-            if not match:
-                return None, None, None
-            current = float(match.group(1))
-            seen_target = float(match.group(2))
-            heater_match = HEATER_RE.search(reply)
-            heater = int(heater_match.group(1)) if heater_match else None
-            return current, seen_target, heater
-
-        def record_temperature(current: float, seen_target: float, heater: int | None, *, label: str) -> None:
+        def record_temperature(
+            current: float,
+            seen_target: float,
+            heater: int | None,
+            bed_current: float | None = None,
+            bed_target: float | None = None,
+            bed_heater: int | None = None,
+            *,
+            label: str,
+        ) -> None:
             nonlocal last_logged, last_temp, first_temp, first_temp_ts
             nonlocal heater_positive_seen, heater_zero_since, slow_rise_warned
 
@@ -1395,7 +1431,7 @@ class K9ControlCenter:
                 heater_positive_seen = True
                 heater_zero_since = 0.0
 
-            self._post("temp", (current, seen_target, heater))
+            self._post("temp", (current, seen_target, heater, bed_current, bed_target, bed_heater))
             pct = max(0.0, min(100.0, (current / max(target, 1.0)) * 100.0))
             heater_text = f" @:{heater}" if heater is not None else " @:?"
             self._post("progress", (f"Предпрогрев hotend: {current:.1f}/{seen_target:.0f}C{heater_text}", pct))
@@ -1452,10 +1488,18 @@ class K9ControlCenter:
                 if "error:" in lowered_reply or "printer halted" in lowered_reply or "kill()" in lowered_reply:
                     raise RuntimeError(f"Marlin сообщил ошибку во время M104 stage preheat: {temp_reply.strip()}")
 
-                current, seen_target, heater = parse_temperature_reply(temp_reply)
+                current, seen_target, heater, bed_current, bed_target, bed_heater = parse_m105_temperatures(temp_reply)
                 if current is None or seen_target is None:
                     continue
-                record_temperature(current, seen_target, heater, label=f"M104 S{stage_target:.0f}")
+                record_temperature(
+                    current,
+                    seen_target,
+                    heater,
+                    bed_current,
+                    bed_target,
+                    bed_heater,
+                    label=f"M104 S{stage_target:.0f}",
+                )
 
                 if current >= stage_goal:
                     return
@@ -1518,9 +1562,9 @@ class K9ControlCenter:
                 if "error:" in lowered_reply or "printer halted" in lowered_reply or "kill()" in lowered_reply:
                     raise RuntimeError(f"Marlin сообщил ошибку во время M109 preheat: {temp_reply.strip()}")
 
-                current, seen_target, heater = parse_temperature_reply(temp_reply)
+                current, seen_target, heater, bed_current, bed_target, bed_heater = parse_m105_temperatures(temp_reply)
                 if current is not None and seen_target is not None:
-                    record_temperature(current, seen_target, heater, label="M109 final")
+                    record_temperature(current, seen_target, heater, bed_current, bed_target, bed_heater, label="M109 final")
                     heater_text = f" @:{heater}" if heater is not None else " @:?"
                     if current >= target - PRINT_PREHEAT_MARGIN_C and "ok" in lowered_reply:
                         self._post("progress", ("Предпрогрев завершён: запускаю SD", 100.0))
@@ -1557,9 +1601,9 @@ class K9ControlCenter:
                 sdtool.read_for(ser, 0.4)
                 sdtool.send_line(ser, "M105")
                 first_reply = sdtool.read_for(ser, 1.0)
-                current, seen_target, heater = parse_temperature_reply(first_reply)
+                current, seen_target, heater, bed_current, bed_target, bed_heater = parse_m105_temperatures(first_reply)
                 if current is not None and seen_target is not None:
-                    record_temperature(current, seen_target, heater, label="initial")
+                    record_temperature(current, seen_target, heater, bed_current, bed_target, bed_heater, label="initial")
 
                 stage_targets = [s for s in PRINT_PREHEAT_STAGE_TARGETS_C if s < target - PRINT_PREHEAT_MARGIN_C]
                 for stage_target in stage_targets:
@@ -1910,7 +1954,7 @@ class K9ControlCenter:
             "export_cura": {"ru": "Экспорт профиля Cura", "en": "Export Cura profile", "zh": "导出 Cura 配置"},
             "sound_pc_short": {"ru": "Звук ПК", "en": "PC sound", "zh": "电脑提示音"},
             "sound_pc_complete": {"ru": "Звук окончания печати ПК", "en": "PC completion sound", "zh": "打印完成电脑提示音"},
-            "temp_graph": {"ru": "Температура hotend", "en": "Hotend temperature", "zh": "热端温度"},
+            "temp_graph": {"ru": "Температуры hotend / hotbed", "en": "Hotend / hotbed temperatures", "zh": "热端 / 热床温度"},
             "live_params": {"ru": "Параметры в реальном времени", "en": "Realtime parameters", "zh": "实时参数"},
             "sd_files": {"ru": "Файлы на SD принтера", "en": "Printer SD files", "zh": "打印机 SD 文件"},
             "printable_files": {"ru": "Файлы для печати", "en": "Printable files", "zh": "可打印文件"},
@@ -2281,8 +2325,8 @@ class K9ControlCenter:
 
         width = max(int(c.winfo_width() or 0), int(c.cget("width")))
         height = max(int(c.winfo_height() or 0), int(c.cget("height")))
-        left, right = 32, width - 8
-        top, bottom = 8, height - 18
+        left, right = 36, width - 8
+        top, bottom = 26, height - 22
         plot_w = max(20, right - left)
         plot_h = max(20, bottom - top)
 
@@ -2310,9 +2354,14 @@ class K9ControlCenter:
         if not scale_data:
             scale_data = data
 
-        series = [temp for _ts, current, target in scale_data for temp in (current, target) if temp > 0.0]
+        series = [
+            temp
+            for row in scale_data
+            for temp in row[1:]
+            if temp is not None and temp > 0.0
+        ]
         if not series:
-            series = [temp for _ts, current, _target in scale_data for temp in (current,)]
+            series = [temp for row in scale_data for temp in row[1:2] if temp is not None]
         vmin = min(series)
         vmax = max(series)
         span = max(8.0, vmax - vmin)
@@ -2336,21 +2385,61 @@ class K9ControlCenter:
             temp = max(graph_min, min(graph_max, temp))
             return bottom - ((temp - graph_min) / max(1e-6, (graph_max - graph_min))) * plot_h
 
-        target_points: list[float] = []
-        temp_points: list[float] = []
-        for ts, current, target in data:
-            x = map_x(ts)
-            temp_points.extend((x, map_y(current)))
-            target_points.extend((x, map_y(target)))
+        def collect_points(index: int, *, positive_only: bool = False) -> list[float]:
+            points: list[float] = []
+            for row in data:
+                value = row[index] if len(row) > index else None
+                if value is None or (positive_only and value <= 0.0):
+                    continue
+                points.extend((map_x(row[0]), map_y(value)))
+            return points
 
-        if len(target_points) >= 4:
-            c.create_line(*target_points, fill="#d33682", width=1, dash=(4, 2))
-        if len(temp_points) >= 4:
-            c.create_line(*temp_points, fill="#b58900", width=2)
+        hotend_points = collect_points(1)
+        hotend_target_points = collect_points(2, positive_only=True)
+        bed_points = collect_points(3)
+        bed_target_points = collect_points(4, positive_only=True)
 
-        current = data[-1][1]
-        target = data[-1][2]
-        c.create_text(left + 4, height - 7, anchor="w", text=f"{current:.1f}C / {target:.1f}C", fill=colors["text"], font=("DejaVu Sans", 9, "bold"))
+        if len(hotend_target_points) >= 4:
+            c.create_line(*hotend_target_points, fill="#d33682", width=1, dash=(4, 2))
+        if len(bed_target_points) >= 4:
+            c.create_line(*bed_target_points, fill="#268bd2", width=1, dash=(3, 3))
+        if len(hotend_points) >= 4:
+            c.create_line(*hotend_points, fill="#b58900", width=2)
+        if len(bed_points) >= 4:
+            c.create_line(*bed_points, fill="#2aa198", width=2)
+
+        legend_items = (
+            ("Hotend", "#b58900", False),
+            ("Hotend target", "#d33682", True),
+            ("Hotbed", "#2aa198", False),
+            ("Hotbed target", "#268bd2", True),
+        )
+        legend_x = left + 6
+        for label, color, dashed in legend_items:
+            line_end = legend_x + 20
+            if dashed:
+                c.create_line(legend_x, 13, line_end, 13, fill=color, width=2, dash=(4, 2))
+            else:
+                c.create_line(legend_x, 13, line_end, 13, fill=color, width=2)
+            c.create_text(line_end + 4, 13, anchor="w", text=label, fill=colors["muted"], font=("DejaVu Sans", 8))
+            legend_x += 116
+
+        last = data[-1]
+        hotend_current = last[1]
+        hotend_target = last[2]
+        bed_current = last[3] if len(last) > 3 else None
+        bed_target = last[4] if len(last) > 4 else None
+        hotend_text = (
+            f"H {hotend_current:.1f}/{(hotend_target or 0.0):.1f}C"
+            if hotend_current is not None
+            else "H ?/?C"
+        )
+        bed_text = (
+            f"B {bed_current:.1f}/{(bed_target or 0.0):.1f}C"
+            if bed_current is not None
+            else "B ?/?C"
+        )
+        c.create_text(left + 4, height - 8, anchor="w", text=f"{hotend_text}   {bed_text}", fill=colors["text"], font=("DejaVu Sans", 9, "bold"))
         c.create_text(right - 4, height - 7, anchor="e", text="15 min", fill=colors["muted"], font=("DejaVu Sans", 8))
 
     def _apply_theme(self) -> None:
@@ -2647,7 +2736,7 @@ class K9ControlCenter:
         graph.columnconfigure(0, weight=1)
         graph.rowconfigure(1, weight=1)
         graph.grid_propagate(False)
-        self.temp_graph_label = ttk.Label(graph, text="Температура hotend")
+        self.temp_graph_label = ttk.Label(graph, text=self._t("temp_graph"))
         self.temp_graph_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
         self.temp_canvas = tk.Canvas(graph, width=760, height=280, bd=0, highlightthickness=1)
         self.temp_canvas.grid(row=1, column=0, sticky="nsew")
@@ -3021,9 +3110,15 @@ class K9ControlCenter:
             return f"{hours}:{minutes:02d}:{secs:02d}"
         return f"{minutes}:{secs:02d}"
 
-    def _record_temp_point(self, current: float, target: float) -> None:
+    def _record_temp_point(
+        self,
+        current: float | None,
+        target: float | None,
+        bed_current: float | None = None,
+        bed_target: float | None = None,
+    ) -> None:
         now = time.time()
-        self.temp_history.append((now, current, target))
+        self.temp_history.append((now, current, target, bed_current, bed_target))
         cutoff = now - (TEMP_GRAPH_WINDOW_SEC + 60)
         self.temp_history = [row for row in self.temp_history if row[0] >= cutoff]
         self._draw_temp_graph()
@@ -3031,9 +3126,16 @@ class K9ControlCenter:
     def _refresh_header_from_cache(self) -> None:
         now = time.time()
         if self.last_temp_current is not None and (now - self.last_temp_sample_ts) <= 4.0:
-            self.temp_var.set(f"Hotend: {self.last_temp_current:.2f} / {self.last_temp_target or 0.0:.2f} C")
+            bed_text = (
+                f" | Hotbed: {self.last_bed_temp_current:.2f} / {self.last_bed_temp_target or 0.0:.2f} C"
+                if self.last_bed_temp_current is not None
+                else ""
+            )
+            self.temp_var.set(
+                f"Hotend: {self.last_temp_current:.2f} / {self.last_temp_target or 0.0:.2f} C{bed_text}"
+            )
         elif self.last_temp_current is None:
-            self.temp_var.set("Hotend: ? / ? C")
+            self.temp_var.set("Hotend: ? / ? C | Hotbed: ? / ? C")
 
         if self.last_sd_summary and (now - self.last_sd_sample_ts) <= 8.0:
             self.sd_var.set(self.last_sd_summary)
@@ -3092,11 +3194,16 @@ class K9ControlCenter:
             stale = (now - self.last_temp_sample_ts) > 4.0
             state = {"ru": ("устарели" if stale else "свежие"), "en": ("stale" if stale else "fresh"), "zh": ("过期" if stale else "正常")}[lang]
             temp_line = f"Hotend: {self.last_temp_current:.2f} / {self.last_temp_target or 0.0:.2f} C"
+            if self.last_bed_temp_current is not None:
+                temp_line += f" | Hotbed: {self.last_bed_temp_current:.2f} / {self.last_bed_temp_target or 0.0:.2f} C"
             age_prefix = {"ru": "Возраст телеметрии", "en": "Telemetry age", "zh": "遥测年龄"}[lang]
             age_line = f"{age_prefix}: {now - self.last_temp_sample_ts:.1f} c ({state})"
 
         sd_age = f"{now - self.last_sd_sample_ts:.1f} c" if self.last_sd_sample_ts else {"ru": "нет данных", "en": "no data", "zh": "无数据"}[lang]
-        heater_line = f"Heater PWM @: {self.last_heater_power if self.last_heater_power is not None else '?'}"
+        heater_line = (
+            f"Heater PWM @: {self.last_heater_power if self.last_heater_power is not None else '?'}"
+            f" | Bed B@: {self.last_bed_heater_power if self.last_bed_heater_power is not None else '?'}"
+        )
         pos_line = self.last_position_line
         zero_line = {"ru": ("да" if self.session_zero_defined else "нет"), "en": ("yes" if self.session_zero_defined else "no"), "zh": ("是" if self.session_zero_defined else "否")}[lang]
         home_reason = f" ({self.home_trust_reason})" if self.home_trust_reason else ""
@@ -3326,13 +3433,37 @@ class K9ControlCenter:
                 messagebox.showinfo("Little Hands", text)
                 self.log(text)
             elif kind == "temp":
-                current, target, heater = payload  # type: ignore[misc]
-                self.last_temp_current = float(current)
-                self.last_temp_target = float(target)
+                values = tuple(payload)  # type: ignore[arg-type]
+                current = values[0] if len(values) > 0 else None
+                target = values[1] if len(values) > 1 else None
+                heater = values[2] if len(values) > 2 else None
+                bed_current = values[3] if len(values) > 3 else None
+                bed_target = values[4] if len(values) > 4 else None
+                bed_heater = values[5] if len(values) > 5 else None
+                self.last_temp_current = None if current is None else float(current)
+                self.last_temp_target = None if target is None else float(target)
                 self.last_heater_power = None if heater is None else int(heater)
+                self.last_bed_temp_current = None if bed_current is None else float(bed_current)
+                self.last_bed_temp_target = None if bed_target is None else float(bed_target)
+                self.last_bed_heater_power = None if bed_heater is None else int(bed_heater)
                 self.last_temp_sample_ts = time.time()
-                self.temp_var.set(f"Hotend: {current:.2f} / {target:.2f} C")
-                self._record_temp_point(float(current), float(target))
+                hotend_text = (
+                    f"Hotend: {self.last_temp_current:.2f} / {self.last_temp_target or 0.0:.2f} C"
+                    if self.last_temp_current is not None
+                    else "Hotend: ? / ? C"
+                )
+                bed_text = (
+                    f" | Hotbed: {self.last_bed_temp_current:.2f} / {self.last_bed_temp_target or 0.0:.2f} C"
+                    if self.last_bed_temp_current is not None
+                    else " | Hotbed: ? / ? C"
+                )
+                self.temp_var.set(hotend_text + bed_text)
+                self._record_temp_point(
+                    self.last_temp_current,
+                    self.last_temp_target,
+                    self.last_bed_temp_current,
+                    self.last_bed_temp_target,
+                )
             elif kind == "sd":
                 self.last_sd_summary = str(payload)
                 self.last_sd_sample_ts = time.time()
@@ -3463,6 +3594,40 @@ class K9ControlCenter:
                 blocks.append(f"[{title}]\n{value}")
         rendered = "\n\n".join(blocks) if blocks else "Метрики ещё не запрошены."
         self._replace_metrics_text(rendered)
+
+    def _format_metrics_snapshot(self, sections: dict[str, str], captured_at: str) -> str:
+        order = [
+            ("m115", "M115 / Firmware"),
+            ("m503", "M503 / Settings"),
+            ("m114", "M114 / Position"),
+            ("m105", "M105 / Temperature"),
+            ("m27", "M27 / SD status"),
+        ]
+        lines = [
+            "Little Hands USB metrics snapshot",
+            f"Captured: {captured_at}",
+            f"Port: {self._port()}",
+            f"Baud: {self._baud()}",
+            "",
+        ]
+        for key, title in order:
+            value = str(sections.get(key, "")).strip()
+            if not value:
+                continue
+            lines.append(f"[{title}]")
+            lines.append(value)
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _save_metrics_snapshot(self, sections: dict[str, str]) -> Path:
+        captured_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        filename_stamp = time.strftime("%Y%m%d_%H%M%S")
+        rendered = self._format_metrics_snapshot(sections, captured_at)
+        USB_METRICS_DIR.mkdir(parents=True, exist_ok=True)
+        snapshot_path = USB_METRICS_DIR / f"little_hands_usb_metrics_{filename_stamp}.txt"
+        snapshot_path.write_text(rendered, encoding="utf-8")
+        USB_METRICS_LATEST_PATH.write_text(rendered, encoding="utf-8")
+        return snapshot_path
 
     def _operator_axis_name(self, axis: str) -> str:
         axis = axis.upper()
@@ -5042,15 +5207,21 @@ class K9ControlCenter:
             pos_line = next((line.strip() for line in m114.splitlines() if "X:" in line and "Y:" in line and "Z:" in line), "").strip()
             if pos_line:
                 self._post("pos", pos_line)
+            metrics = {
+                "m115": caps,
+                "m503": m503,
+                "m114": m114,
+                "m105": m105,
+                "m27": m27,
+            }
+            try:
+                snapshot_path = self._save_metrics_snapshot(metrics)
+                self._post("log", f"USB-метрики сохранены: {snapshot_path}")
+            except Exception as exc:
+                self._post("log", f"Не удалось сохранить USB-метрики: {exc}")
             self._post(
                 "metrics-bulk",
-                {
-                    "m115": caps,
-                    "m503": m503,
-                    "m114": m114,
-                    "m105": m105,
-                    "m27": m27,
-                },
+                metrics,
             )
 
         self._run_task("Снятие всех USB-метрик", task)
@@ -5112,11 +5283,9 @@ class K9ControlCenter:
                     sync=False,
                 )
                 temp = sdtool.query_command(self._port(), self._baud(), "M105", wait_before_read=0.2, read_seconds=0.8)
-                match = TEMP_RE.search(temp)
-                if match:
-                    heater_match = HEATER_RE.search(temp)
-                    heater = int(heater_match.group(1)) if heater_match else None
-                    self._post("temp", (float(match.group(1)), float(match.group(2)), heater))
+                temp_payload = parse_m105_temperatures(temp)
+                if temp_payload[0] is not None or temp_payload[3] is not None:
+                    self._post("temp", temp_payload)
                 self._post("metrics", ("m105", temp))
                 self._post("log", (out + temp).strip() or "Сброс USB выполнен")
             except Exception as exc:
@@ -6418,16 +6587,12 @@ class K9ControlCenter:
             ["M105"],
             per_command_timeout=12.0,
         )
-        match = TEMP_RE.search(reply)
-        if not match:
+        current, target, heater, bed_current, bed_target, bed_heater = parse_m105_temperatures(reply)
+        if current is None or target is None:
             raise RuntimeError(
                 "Не удалось получить температуру hotend перед протяжкой филамента; E-движение не отправляю."
             )
-        current = float(match.group(1))
-        target = float(match.group(2))
-        heater_match = HEATER_RE.search(reply)
-        heater = int(heater_match.group(1)) if heater_match else None
-        self._post("temp", (current, target, heater))
+        self._post("temp", (current, target, heater, bed_current, bed_target, bed_heater))
         self._post("metrics", ("m105", reply))
         return current, target, heater, reply
 
@@ -6447,11 +6612,9 @@ class K9ControlCenter:
                 [f"M104 S{target:.0f}", "M105"],
                 per_command_timeout=12.0,
             )
-            match = TEMP_RE.search(out)
-            if match:
-                heater_match = HEATER_RE.search(out)
-                heater = int(heater_match.group(1)) if heater_match else None
-                self._post("temp", (float(match.group(1)), float(match.group(2)), heater))
+            temp_payload = parse_m105_temperatures(out)
+            if temp_payload[0] is not None or temp_payload[3] is not None:
+                self._post("temp", temp_payload)
             self._post("metrics", ("m105", out))
             if target > 0:
                 self._post("progress", (f"Филамент: hotend цель {target:.0f}C", 0.0))
@@ -6533,7 +6696,10 @@ class K9ControlCenter:
     def jog_axis(self, axis: str, distance: float) -> None:
         axis = axis.upper()
         feedrate = JOG_FEEDRATES.get(axis, 1200)
-        travel_accel = JOG_TRAVEL_ACCEL.get(axis)
+        accel_pair = JOG_ACCELS.get(axis)
+        print_accel = travel_accel = None
+        if accel_pair is not None:
+            print_accel, travel_accel = accel_pair
         display_hint = self._operator_axis_hint(axis)
         signed_distance = f"{distance:+g}"
 
@@ -6547,16 +6713,30 @@ class K9ControlCenter:
             self._post(
                 "log",
                 f"Jog: {display_hint} {signed_distance} мм; G-code {axis}{distance:.3f} F{feedrate}"
-                + (f", M204 P{travel_accel} T{travel_accel}" if travel_accel is not None else ""),
+                + (
+                    f", M204 P{print_accel:g} T{travel_accel:g}"
+                    if print_accel is not None and travel_accel is not None
+                    else ""
+                ),
             )
             commands = ["M17", "G90", "M211 S0"]
-            if travel_accel is not None:
-                commands.append(f"M204 P{travel_accel} T{travel_accel}")
-            commands.append("G91")
-            commands.extend([f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])
-            if travel_accel is not None:
+            if print_accel is not None and travel_accel is not None:
+                commands.append(f"M204 P{print_accel:g} T{travel_accel:g}")
+            if axis == "X":
+                local_target = JOG_HEAD_LOCAL_ZERO_MM + distance
+                commands.extend([
+                    f"G92 X{JOG_HEAD_LOCAL_ZERO_MM:g}",
+                    f"G1 X{local_target:.3f} F{feedrate}",
+                    "M400",
+                ])
+            else:
+                commands.append("G91")
+                commands.extend([f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])
+            if print_accel is not None and travel_accel is not None:
                 commands.append(f"M204 P{JOG_RESTORE_TRAVEL_ACCEL} T{JOG_RESTORE_TRAVEL_ACCEL}")
             commands.append("G90")
+            if axis == "X":
+                commands.append("M114")
             try:
                 out = sdtool.run_commands_wait_ok(
                     self._port(),
@@ -6578,6 +6758,23 @@ class K9ControlCenter:
                         "после восстановления USB/питания.",
                     )
                 raise
+            if axis == "X":
+                if self._home_is_trusted():
+                    self._set_home_trust(
+                        HOME_TRUST_UNCERTAIN,
+                        "manual X jog was acknowledged; physical X motion must be verified",
+                        log_change=True,
+                    )
+                self._post(
+                    "log",
+                    "Ручной X-jog подтверждён Marlin, но эта ось сейчас может физически не двигаться. "
+                    "Если голова не сдвинулась глазами — не нажимай 'Запомнить старт' и не запускай печать; "
+                    "сначала освободи/проверь X-каретку и заново выставь старт вручную.",
+                )
+                pos_line = next((line.strip() for line in out.splitlines() if "X:" in line and "Y:" in line and "Z:" in line), "")
+                if pos_line:
+                    self._post("pos", pos_line)
+                    self._post("metrics", ("m114", pos_line))
             self._clear_preheat_lift_recovery(save=False)
             updated_stopped_pose = self._update_stopped_print_pose_after_jog(stopped_pose_before_jog, axis, distance)
             if updated_stopped_pose is not None and self.bed_clear_before_go_start_required:
@@ -6715,25 +6912,37 @@ class K9ControlCenter:
                     sync=False,
                     reset_input=False,
                 )
-            match = TEMP_RE.search(temp)
+            temp_payload = parse_m105_temperatures(temp)
             current_temp = None
             target_temp = None
-            if match:
-                current_temp = float(match.group(1))
-                target_temp = float(match.group(2))
-                heater_match = HEATER_RE.search(temp)
-                heater = int(heater_match.group(1)) if heater_match else None
+            has_temperature = temp_payload[0] is not None or temp_payload[3] is not None
+            if temp_payload[0] is not None and temp_payload[1] is not None:
+                current_temp = float(temp_payload[0])
+                target_temp = float(temp_payload[1])
+                heater = temp_payload[2]
+                bed_current = temp_payload[3]
+                bed_target = temp_payload[4]
+                bed_heater = temp_payload[5]
                 self.usb_silence_since = 0.0
                 self.last_usb_silence_log_ts = 0.0
-                self._post("temp", (current_temp, target_temp, heater))
+                self._post("temp", temp_payload)
                 if now - self.last_temp_log_ts >= TEMP_LOG_INTERVAL_SEC:
                     self.last_temp_log_ts = now
                     heater_value = heater if heater is not None else "?"
-                    self._append_ring_log(
-                        f"{time.strftime('%H:%M:%S')} M105 T:{current_temp:.2f} /{target_temp:.2f} @:{heater_value}"
+                    bed_text = (
+                        f" B:{bed_current:.2f} /{(bed_target or 0.0):.2f} B@:{bed_heater if bed_heater is not None else '?'}"
+                        if bed_current is not None
+                        else ""
                     )
+                    self._append_ring_log(
+                        f"{time.strftime('%H:%M:%S')} M105 T:{current_temp:.2f} /{target_temp:.2f} @:{heater_value}{bed_text}"
+                    )
+            elif has_temperature:
+                self.usb_silence_since = 0.0
+                self.last_usb_silence_log_ts = 0.0
+                self._post("temp", temp_payload)
             self._post("metrics", ("m105", temp))
-            if not match:
+            if not has_temperature:
                 if not self.usb_silence_since:
                     self.usb_silence_since = now
                 in_start_grace = (
