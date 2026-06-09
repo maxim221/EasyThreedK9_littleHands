@@ -3106,10 +3106,12 @@ After each test print, append:
   - added `SECURITY.md`
   - added bug report and feature request issue templates
   - added a pull request template with explicit safety / validation notes
-  - added a GitHub Actions smoke workflow that runs the same Python compile and regression checks used locally
+  - validated the existing issue-template config while adding the new templates
 - Publication kit:
   - added `docs/GITHUB_PUBLICATION.md` with suggested repository description, topics, public-post tags, release strategy, and a deliberate license-decision note
   - added `docs/releases/v0.1.0-public-baseline.md` as a conservative first release draft
+- CI note:
+  - a GitHub Actions smoke workflow was tried, but the public run failed before job startup because GitHub reported the account locked due to a billing issue; the workflow file was removed until billing / Actions is healthy, so public polish does not add a misleading red check
 - License:
   - no `LICENSE` file was added yet; this remains an explicit maintainer decision rather than an accidental docs edit
 - Verification:

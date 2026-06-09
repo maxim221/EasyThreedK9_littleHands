@@ -47,6 +47,12 @@ Start with one conservative public baseline release:
 
 Keep `LH v5` as the recommended public firmware in the first release. Mention the `LH v6` controlled-hotbed build only as experimental.
 
+## Checks / CI
+
+Local checks are documented in `CONTRIBUTING.md`.
+
+Do not add a live GitHub Actions workflow until the repository owner's GitHub Actions billing/account state is healthy. A first attempt at a smoke workflow failed before running any job because GitHub reported the account locked due to a billing issue; keeping that workflow would make the public project look broken even though the local checks pass.
+
 ## License Decision
 
 No repository license is committed yet. For public reuse, choose one explicitly before broader promotion.
