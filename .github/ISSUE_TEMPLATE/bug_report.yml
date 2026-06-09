@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a Little Hands app, USB, SD, Cura, or firmware issue.
+title: "Bug: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please include enough detail to separate app behavior from K9 firmware, USB, SD-card, and mechanical behavior.
+
+        Safety note: this workflow does not use normal endstop-based `G28`.
+  - type: input
+    id: version
+    attributes:
+      label: Little Hands version / commit
+      placeholder: "commit SHA, branch, or approximate date"
+  - type: input
+    id: system
+    attributes:
+      label: Host system
+      placeholder: "Ubuntu 24.04, Raspberry Pi OS, Python version..."
+  - type: input
+    id: printer
+    attributes:
+      label: Printer / board
+      placeholder: "EasyThreeD K9, ET4000+, CH340, visible board marking..."
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: Describe the command, button, or workflow and the observed result.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / firmware replies
+      description: Paste Little Hands logs or raw Marlin replies. Remove private paths if needed.
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I did not add startup G28.
+        - label: The printer was watched during any heating or motion.
+        - label: I power-cycled and re-saved start after failed/stopped print state, if applicable.

@@ -3091,3 +3091,27 @@ After each test print, append:
 - Safety:
   - controlled hotbed remains experimental; Cura bed temperature stays `0` until full print-workflow validation
   - first real controlled-hotbed print should still use a conservative observed bed target, external surface sensor if available, and a ready `M140 S0` heat-off path
+
+## 2026-06-10 Public Repository Polish
+
+- Field trigger:
+  - public GitHub signals were still quiet (`0` stars/forks/issues), so the repository needed a clearer first-visitor surface before another tester call
+- README:
+  - added GitHub-friendly status badges and a sharper project snapshot
+  - added a "What makes this different" section for the K9-specific manual-zero / guarded-recovery model
+  - linked the experimental controlled-hotbed notes while keeping the public baseline on `LH v5` and Cura bed temperature `0`
+  - added release/publication links
+- GitHub-facing files:
+  - added `CONTRIBUTING.md`
+  - added `SECURITY.md`
+  - added bug report and feature request issue templates
+  - added a pull request template with explicit safety / validation notes
+  - added a GitHub Actions smoke workflow that runs the same Python compile and regression checks used locally
+- Publication kit:
+  - added `docs/GITHUB_PUBLICATION.md` with suggested repository description, topics, public-post tags, release strategy, and a deliberate license-decision note
+  - added `docs/releases/v0.1.0-public-baseline.md` as a conservative first release draft
+- License:
+  - no `LICENSE` file was added yet; this remains an explicit maintainer decision rather than an accidental docs edit
+- Verification:
+  - no physical printer motion or heating was run
+  - `git diff --check`, Python compilation, and regression checks passed

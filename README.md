@@ -1,6 +1,12 @@
 # Little Hands For EasyThreeD K9
 
-Little Hands is a Linux desktop control center for a very specific 3D-printer setup:
+![Platform: Linux / Raspberry Pi](https://img.shields.io/badge/platform-Linux%20%2F%20Raspberry%20Pi-2ea44f)
+![Printer: EasyThreeD K9](https://img.shields.io/badge/printer-EasyThreeD%20K9-0969da)
+![Workflow: SD printing](https://img.shields.io/badge/workflow-SD%20printing-8250df)
+![Status: field-tested prototype](https://img.shields.io/badge/status-field--tested%20prototype-b76100)
+![License: pending](https://img.shields.io/badge/license-pending-lightgrey)
+
+Little Hands is a Linux desktop control center for an unusually fussy but very real 3D-printer workflow:
 
 - printer: `EasyThreeD K9`
 - board family: `ET4000+ / ET4000PLUS`
@@ -8,7 +14,11 @@ Little Hands is a Linux desktop control center for a very specific 3D-printer se
 - slicer baseline: `Cura 5.11`
 - heated bed baseline: external warm mat / hotbed, not electrically wired into the printer mainboard
 
-This project is still a little rough, but it already works for real printing.
+It is not OctoPrint and not a generic Marlin host. It is a cautious local operator panel for a small K9 that does not have a trustworthy endstop-based home in this workflow. The app helps with SD printing, USB upload, manual-zero start, guarded recovery, firmware flashing, Cura profile export, logs, and field diagnostics.
+
+## Project Snapshot
+
+This project is still a little rough, but it already works for real printing:
 
 - USB/SD control works
 - firmware upload works
@@ -17,6 +27,8 @@ This project is still a little rough, but it already works for real printing.
 - Cura export works
 - G-code upload validation catches unsafe or obviously broken files
 - print progress and temperature monitoring work
+- manual filament feed/retract works after hotend temperature is confirmed
+- experimental controlled-hotbed telemetry is now visible in the app graph
 
 What is still rough:
 
@@ -25,12 +37,14 @@ What is still rough:
 - after a real failed print start with no heating / no motion, the safest recovery is still a printer power cycle
 - Windows packaging is only planned, not shipped
 - the app UI has RU / EN / ZH switching; the main controls and newer journal events are localized, while raw firmware replies stay as the printer reports them
+- the controlled-hotbed branch is experimental until a full print workflow is validated
 
 ## Contact
 
 - Telegram: [@NeuroMaxim](https://t.me/NeuroMaxim)
 - Bugs and feature requests: [GitHub Issues](https://github.com/maxim221/EasyThreedK9_littleHands/issues)
 - K9 testers: [CALL_FOR_TESTERS.md](CALL_FOR_TESTERS.md)
+- Contributor notes: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Screenshot
 
@@ -74,6 +88,14 @@ Different `K9` units already showed differences during development.
 If you are bringing this up on a Raspberry Pi, use:
 
 - [RASPBERRY_PI_CHECKLIST.md](RASPBERRY_PI_CHECKLIST.md)
+
+## What Makes This Different
+
+- **No blind `G28`:** this K9 workflow avoids normal auto-home because the current setup does not have a reliable endstop-based home.
+- **Manual-zero start:** the operator places the nozzle at the physical start and Little Hands declares it with `G92 X0 Y0 Z0`.
+- **Guarded recovery:** after Stop, failed starts, USB drops, and finished SD prints, the app prefers explicit prompts over surprise axis motion.
+- **K9-specific motion limits:** service and manual moves are deliberately slow because this small machine can skip steps while Marlin still reports `ok`.
+- **Cura guardrails:** bundled settings and upload checks reject common unsafe files such as startup `G28`, bed heat in the public baseline, aggressive acceleration, and end-of-print `M84`.
 
 ## How Home Works
 
@@ -124,6 +146,13 @@ Important:
 - use a heat-safe build surface
 - the validated setup used the perforated flexible print surface on the warmed bed
 
+There is also an experimental controlled-hotbed branch for a newly installed K9-compatible heated platform with a `~10k` NTC sensor on the board `-TB+` input:
+
+- firmware: [`firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin`](firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin)
+- notes: [docs/HOTBED_INSTALLATION.ru.md](docs/HOTBED_INSTALLATION.ru.md)
+
+Keep Cura bed temperature at `0C` for the public baseline until controlled-bed printing is fully validated.
+
 ## Quick Start
 
 1. Install Linux dependencies:
@@ -155,6 +184,13 @@ Use this file for the current public baseline:
 - [`firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`](firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin)
 
 Archive and historical firmware files are kept in `firmware/`, but they are not the recommended default for new users.
+
+## Release Notes
+
+- Public baseline release draft: [docs/releases/v0.1.0-public-baseline.md](docs/releases/v0.1.0-public-baseline.md)
+- GitHub publication checklist: [docs/GITHUB_PUBLICATION.md](docs/GITHUB_PUBLICATION.md)
+
+The release draft is intentionally conservative: it highlights the `LH v5` public baseline and keeps the `LH v6` controlled-hotbed build marked experimental.
 
 ## Repository Layout
 

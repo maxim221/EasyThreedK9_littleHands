@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a Little Hands feature or workflow improvement.
+title: "Feature: "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What field problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should Little Hands do differently?
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Motion / heating / recovery safety notes
+      description: Say whether this touches printer motion, heating, SD start, Stop, recovery, Cura, or firmware assumptions.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
