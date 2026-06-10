@@ -178,11 +178,42 @@ def detect_printer_port(baud: int = 115200, probe_timeout_s: float = 2.8) -> tup
     return None, ranked
 
 
+SD_NAME_IGNORED_SUFFIX_TOKENS = {"K9", "LH", "SAFE", "TEST", "K9SAFE", "K9TEST"}
+
+
+def _sd_name_tokens(stem: str) -> list[str]:
+    tokens: list[str] = []
+    for part in re.split(r"[^A-Za-z0-9]+", stem):
+        if not part:
+            continue
+        tokens.extend(
+            re.findall(
+                r"[A-Z]{2,}(?=[A-Z][a-z]|\b)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+",
+                part,
+            )
+        )
+    return [token.upper() for token in tokens if token]
+
+
 def make_sd_name(source_name: str) -> str:
     src = Path(source_name)
-    stem = re.sub(r"[^A-Za-z0-9]+", "_", src.stem.upper()).strip("_") or "MODEL"
-    stem = stem[:8]
-    return f"{stem}.GCO"
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", src.stem.upper()).strip("_") or "MODEL"
+    if len(normalized) <= 8:
+        return f"{normalized}.GCO"
+
+    tokens = _sd_name_tokens(src.stem)
+    while tokens and tokens[-1] in SD_NAME_IGNORED_SUFFIX_TOKENS:
+        tokens.pop()
+    if len(tokens) > 2 and tokens[-2:] == ["K", "9"]:
+        tokens = tokens[:-2]
+
+    if len(tokens) >= 2:
+        first, last = tokens[0], tokens[-1]
+        prefix = first if len(first) <= 3 else "".join(token[0] for token in tokens[:-1])
+        stem = (prefix + last)[:8]
+    else:
+        stem = normalized[:8]
+    return f"{stem or 'MODEL'}.GCO"
 
 
 def load_mbp():

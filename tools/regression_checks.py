@@ -66,6 +66,12 @@ def main() -> int:
         failures,
     )
     require(
+        sdtool.make_sd_name("UFclassicMeasureToolBot_k9test.gcode") == "UFBOT.GCO"
+        and sdtool.make_sd_name("UFclassicMeasureToolTop_k9test.gcode") == "UFTOP.GCO",
+        "Long CamelCase G-code names must keep the meaningful Top/Bot suffix in 8.3 SD names.",
+        failures,
+    )
+    require(
         "WATCH_TEMP_PERIOD  180" in firmware_watch_patch and "WATCH_TEMP_INCREASE 2" in firmware_watch_patch,
         "Tracked LH v5 firmware patch must keep thermal protection enabled but give the slow K9 hotend a 180s heating watch window.",
         failures,

@@ -3132,3 +3132,17 @@ After each test print, append:
 - Verification:
   - no physical printer motion or heating was run
   - Python compilation and regression checks passed
+
+## 2026-06-10 SD Upload Name Collision Fix
+
+- Field trigger:
+  - while uploading the prepared UF Measure Tool G-code, Little Hands fell back to `Upload (text)`, making the transfer much slower than the usual binary path
+  - live process counters showed the text fallback was still moving steadily at about `65` G-code lines/s, not stuck in repeated timeouts
+  - the two prepared files also exposed a separate 8.3 SD-name collision: both `UFclassicMeasureToolBot_k9test.gcode` and `UFclassicMeasureToolTop_k9test.gcode` mapped to `UFCLASSI.GCO`
+- App/tool change:
+  - `tools/k9_marlin_sd.py make_sd_name()` now preserves the last meaningful CamelCase token for long names, ignoring local suffixes such as `K9TEST`
+  - the UF test files now map to distinct short SD names: `UFBOT.GCO` and `UFTOP.GCO`
+- Regression:
+  - `tools/regression_checks.py` now checks this Top/Bot case directly so future helpers do not silently collapse distinct test models onto the same SD filename
+- Verification:
+  - no physical printer motion or heating was run
