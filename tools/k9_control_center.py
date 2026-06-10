@@ -2325,18 +2325,34 @@ class K9ControlCenter:
 
         width = max(int(c.winfo_width() or 0), int(c.cget("width")))
         height = max(int(c.winfo_height() or 0), int(c.cget("height")))
-        left, right = 38, width - 46
-        top, bottom = 26, height - 22
+        left, right = 44, width - 10
+        top, bottom = 30, height - 22
         plot_w = max(20, right - left)
-        plot_h = max(20, bottom - top)
+        gap = 18
+        total_h = max(80, bottom - top - gap)
+        hotend_h = max(46, int(total_h * 0.62))
+        bed_h = max(38, total_h - hotend_h)
+        if top + hotend_h + gap + bed_h > bottom:
+            bed_h = max(32, bottom - top - gap - hotend_h)
+        hotend_top = top
+        hotend_bottom = hotend_top + hotend_h
+        bed_top = hotend_bottom + gap
+        bed_bottom = bed_top + bed_h
 
-        c.create_rectangle(left, top, right, bottom, outline=colors["border"], width=1)
+        c.create_rectangle(left, hotend_top, right, hotend_bottom, outline=colors["border"], width=1)
+        c.create_rectangle(left, bed_top, right, bed_bottom, outline=colors["border"], width=1)
+
+        def draw_panel_grid(panel_top: int, panel_bottom: int, values: tuple[float, float, float], color: str, title: str) -> None:
+            panel_h = max(1, panel_bottom - panel_top)
+            for frac, label_value in ((0.0, values[0]), (0.5, values[1]), (1.0, values[2])):
+                y = panel_bottom - int(panel_h * frac)
+                c.create_line(left, y, right, y, fill="#22372d")
+                c.create_text(left - 8, y, anchor="e", text=f"{label_value:.0f}", fill=color, font=("DejaVu Sans", 8))
+            c.create_text(left, panel_top - 10, anchor="w", text=title, fill=color, font=("DejaVu Sans", 8, "bold"))
 
         if not self.temp_history:
-            for frac, label in ((0.0, "0"), (0.5, "125"), (1.0, "250")):
-                y = bottom - int(plot_h * frac)
-                c.create_line(left, y, right, y, fill="#22372d")
-                c.create_text(18, y, text=label, fill=colors["muted"], font=("DejaVu Sans", 8))
+            draw_panel_grid(hotend_top, hotend_bottom, (0.0, 125.0, 250.0), "#b58900", "Hotend C")
+            draw_panel_grid(bed_top, bed_bottom, (0.0, 35.0, 70.0), "#2aa198", "Hotbed C")
             c.create_text(width // 2, height // 2, text=self._t("wait_m105"), fill=colors["muted"], font=("DejaVu Sans", 10))
             return
 
@@ -2390,28 +2406,31 @@ class K9ControlCenter:
         hotend_min, hotend_max = scale_bounds(hotend_series, min_span=8.0, ceiling=260.0)
         bed_min, bed_max = scale_bounds(bed_series, min_span=6.0, ceiling=120.0)
 
-        for frac, label_value in ((0.0, hotend_min), (0.5, (hotend_min + hotend_max) / 2.0), (1.0, hotend_max)):
-            y = bottom - int(plot_h * frac)
-            c.create_line(left, y, right, y, fill="#22372d")
-            c.create_text(left - 8, y, anchor="e", text=f"{label_value:.0f}", fill="#b58900", font=("DejaVu Sans", 8))
-
-        if bed_series:
-            for frac, label_value in ((0.0, bed_min), (0.5, (bed_min + bed_max) / 2.0), (1.0, bed_max)):
-                y = bottom - int(plot_h * frac)
-                c.create_text(right + 8, y, anchor="w", text=f"{label_value:.0f}", fill="#2aa198", font=("DejaVu Sans", 8))
-            c.create_text(left - 8, top - 10, anchor="e", text="H C", fill="#b58900", font=("DejaVu Sans", 8, "bold"))
-            c.create_text(right + 8, top - 10, anchor="w", text="B C", fill="#2aa198", font=("DejaVu Sans", 8, "bold"))
+        draw_panel_grid(
+            hotend_top,
+            hotend_bottom,
+            (hotend_min, (hotend_min + hotend_max) / 2.0, hotend_max),
+            "#b58900",
+            "Hotend C",
+        )
+        draw_panel_grid(
+            bed_top,
+            bed_bottom,
+            (bed_min, (bed_min + bed_max) / 2.0, bed_max),
+            "#2aa198",
+            "Hotbed C",
+        )
 
         def map_x(ts: float) -> float:
             return left + ((ts - t0) / max(1e-6, (t1 - t0))) * plot_w
 
         def map_hotend_y(temp: float) -> float:
             temp = max(hotend_min, min(hotend_max, temp))
-            return bottom - ((temp - hotend_min) / max(1e-6, (hotend_max - hotend_min))) * plot_h
+            return hotend_bottom - ((temp - hotend_min) / max(1e-6, (hotend_max - hotend_min))) * max(1, hotend_h)
 
         def map_bed_y(temp: float) -> float:
             temp = max(bed_min, min(bed_max, temp))
-            return bottom - ((temp - bed_min) / max(1e-6, (bed_max - bed_min))) * plot_h
+            return bed_bottom - ((temp - bed_min) / max(1e-6, (bed_max - bed_min))) * max(1, bed_h)
 
         def collect_points(index: int, map_y, *, positive_only: bool = False) -> list[float]:
             points: list[float] = []
@@ -2436,21 +2455,33 @@ class K9ControlCenter:
         if len(bed_points) >= 4:
             c.create_line(*bed_points, fill="#2aa198", width=2)
 
-        legend_items = (
+        hotend_legend = (
             ("Hotend", "#b58900", False),
             ("Hotend target", "#d33682", True),
+        )
+        bed_legend = (
             ("Hotbed", "#2aa198", False),
             ("Hotbed target", "#268bd2", True),
         )
-        legend_x = left + 6
-        for label, color, dashed in legend_items:
+        legend_x = left + 78
+        for label, color, dashed in hotend_legend:
             line_end = legend_x + 20
             if dashed:
-                c.create_line(legend_x, 13, line_end, 13, fill=color, width=2, dash=(4, 2))
+                c.create_line(legend_x, hotend_top - 10, line_end, hotend_top - 10, fill=color, width=2, dash=(4, 2))
             else:
-                c.create_line(legend_x, 13, line_end, 13, fill=color, width=2)
-            c.create_text(line_end + 4, 13, anchor="w", text=label, fill=colors["muted"], font=("DejaVu Sans", 8))
-            legend_x += 116
+                c.create_line(legend_x, hotend_top - 10, line_end, hotend_top - 10, fill=color, width=2)
+            c.create_text(line_end + 4, hotend_top - 10, anchor="w", text=label, fill=colors["muted"], font=("DejaVu Sans", 8))
+            legend_x += 114
+
+        legend_x = left + 78
+        for label, color, dashed in bed_legend:
+            line_end = legend_x + 20
+            if dashed:
+                c.create_line(legend_x, bed_top - 10, line_end, bed_top - 10, fill=color, width=2, dash=(3, 3))
+            else:
+                c.create_line(legend_x, bed_top - 10, line_end, bed_top - 10, fill=color, width=2)
+            c.create_text(line_end + 4, bed_top - 10, anchor="w", text=label, fill=colors["muted"], font=("DejaVu Sans", 8))
+            legend_x += 118
 
         last = data[-1]
         hotend_current = last[1]
@@ -2470,7 +2501,7 @@ class K9ControlCenter:
         c.create_text(left + 4, height - 8, anchor="w", text=f"{hotend_text}   {bed_text}", fill=colors["text"], font=("DejaVu Sans", 9, "bold"))
         bed_pwm = self.last_bed_heater_power if self.last_bed_heater_power is not None else 0
         bed_badge = f"{bed_text}  B@:{bed_pwm}"
-        c.create_text(right - 6, top + 16, anchor="e", text=bed_badge, fill="#2aa198", font=("DejaVu Sans", 10, "bold"))
+        c.create_text(right - 6, bed_top + 14, anchor="e", text=bed_badge, fill="#2aa198", font=("DejaVu Sans", 10, "bold"))
         c.create_text(right - 4, height - 7, anchor="e", text="15 min", fill=colors["muted"], font=("DejaVu Sans", 8))
 
     def _apply_theme(self) -> None:
