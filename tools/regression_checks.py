@@ -289,6 +289,14 @@ def main() -> int:
     require("G1 X95 F900" in slicer, "End G-code must keep gentle X presentation move.", failures)
     require("G1 Y95 F240" in slicer, "End G-code must present bed toward the operator at F240.", failures)
     require("M84" not in slicer and "M18" not in slicer, "Slicing helper must not disable steppers at print end.", failures)
+    require(
+        "K9_MAX_EMITTED_PRINT_ACCEL = 250.0" in slicer
+        and "K9_MAX_EMITTED_TRAVEL_ACCEL = 200.0" in slicer
+        and "def cap_m204_commands" in slicer
+        and "LH_M204_CAPPED" in slicer,
+        "Cura helper must cap high CuraEngine M204 commands before producing K9 test G-code.",
+        failures,
+    )
 
     require("is_unvalidated_modulebot_stl" in slicer, "Raw moduleBot STL orientation guard is missing.", failures)
     require(

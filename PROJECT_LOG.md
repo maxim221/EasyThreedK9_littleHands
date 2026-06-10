@@ -3117,3 +3117,18 @@ After each test print, append:
 - Verification:
   - no physical printer motion or heating was run
   - `git diff --check`, Python compilation, and regression checks passed
+
+## 2026-06-10 UF Measure Tool Test Slicing Safety Fix
+
+- Field trigger:
+  - preparing `UFclassicMeasureToolBot.STL` and `UFclassicMeasureToolTop.STL` for a K9 test showed that direct CuraEngine output could still emit high `M204 P3000` body acceleration and `M204 P4000` / `M204 T4000` tail acceleration despite the cautious profile settings
+  - Little Hands G-code validation would correctly reject those files as too aggressive for this K9
+- Helper change:
+  - `tools/k9_cura_slice.py` now post-processes generated G-code and caps emitted `M204` values to K9-safe limits: print `P <= 250`, travel/combined `T/S <= 200`
+  - the helper adds a header marker `;LH_M204_CAPPED:<count>` so prepared files show whether any CuraEngine accelerations were reduced
+  - slicer fan-command stripping remains unchanged
+- Regression:
+  - `tools/regression_checks.py` now checks that the helper retains this M204 cap
+- Verification:
+  - no physical printer motion or heating was run
+  - Python compilation and regression checks passed

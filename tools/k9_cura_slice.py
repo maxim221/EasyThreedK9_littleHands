@@ -26,6 +26,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_APPIMAGE = Path("~/Applications/UltiMaker-Cura-5.11.0-linux-X64.AppImage").expanduser()
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "exports"
 VALIDATED_MODULEBOT_ORIENTED_STL = DEFAULT_OUTPUT_DIR / "mbnorm01_moduleBot_normal_orientation.stl"
+K9_MAX_EMITTED_PRINT_ACCEL = 250.0
+K9_MAX_EMITTED_TRAVEL_ACCEL = 200.0
 
 
 def is_unvalidated_modulebot_stl(path: Path) -> bool:
@@ -400,11 +402,45 @@ def remove_slicer_fan_commands(lines: list[str]) -> int:
     return replacements
 
 
+def cap_m204_commands(lines: list[str]) -> int:
+    replacements = 0
+    param_re = re.compile(r"\b([PTS])(-?\d+(?:\.\d+)?)", re.IGNORECASE)
+    for index, line in enumerate(lines):
+        command = strip_gcode_comment(line)
+        if not command.upper().startswith("M204"):
+            continue
+
+        changed = False
+
+        def cap_param(match: re.Match[str]) -> str:
+            nonlocal changed
+            key = match.group(1).upper()
+            value = float(match.group(2))
+            limit = K9_MAX_EMITTED_TRAVEL_ACCEL if key in {"T", "S"} else K9_MAX_EMITTED_PRINT_ACCEL
+            if value <= limit:
+                return match.group(0)
+            changed = True
+            return f"{key}{limit:g}"
+
+        capped_command = param_re.sub(cap_param, command)
+        if not changed:
+            continue
+
+        prefix = line[: len(line) - len(line.lstrip())]
+        comment = ""
+        if ";" in line:
+            comment = " ;" + line.split(";", 1)[1].strip()
+        lines[index] = f"{prefix}{capped_command} ; LH: capped M204 for K9 safe acceleration{comment}"
+        replacements += 1
+    return replacements
+
+
 def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float, float], brim_width: float) -> None:
     min_x, max_x, min_y, max_y, max_z = bounds
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     filament_m = estimate_filament_m(lines)
     remove_slicer_fan_commands(lines)
+    capped_m204 = cap_m204_commands(lines)
     for index, line in enumerate(lines[:25]):
         if line.startswith(";Filament used:") and filament_m > 0:
             lines[index] = f";Filament used: {filament_m:.3f}m"
@@ -420,6 +456,9 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
             lines[index] = ";MINZ:0.2"
         elif line.startswith(";MAXZ:"):
             lines[index] = f";MAXZ:{max_z:.2f}"
+
+    if not any(line.startswith(";LH_M204_CAPPED:") for line in lines[:30]):
+        lines.insert(11, f";LH_M204_CAPPED:{capped_m204}")
 
     footer = (
         ';SETTING_3 {"global_quality": "[values]\\n'
