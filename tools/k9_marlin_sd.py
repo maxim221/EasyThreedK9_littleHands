@@ -223,7 +223,19 @@ def load_mbp():
     module = importlib.util.module_from_spec(spec)
     sys.modules["MarlinBinaryProtocol"] = module
     spec.loader.exec_module(module)
+    patch_mbp_connect(module)
     return module
+
+
+def patch_mbp_connect(module) -> None:
+    """Use the spaced M28 syntax expected by this K9 Marlin build."""
+
+    def connect(self):
+        print("Connecting: Switching Marlin to Binary Protocol...")
+        self.send_ascii("M28 B1")
+        self.send(0, 1)
+
+    module.Protocol.connect = connect
 
 
 def open_serial(port: str, baud: int, timeout: float = 1.0, *, reset_input: bool = True) -> serial.Serial:

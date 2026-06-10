@@ -72,6 +72,11 @@ def main() -> int:
         failures,
     )
     require(
+        "def patch_mbp_connect" in marlin and 'self.send_ascii("M28 B1")' in marlin,
+        "Binary upload must use spaced M28 B1 syntax for this K9 Marlin build.",
+        failures,
+    )
+    require(
         "WATCH_TEMP_PERIOD  180" in firmware_watch_patch and "WATCH_TEMP_INCREASE 2" in firmware_watch_patch,
         "Tracked LH v5 firmware patch must keep thermal protection enabled but give the slow K9 hotend a 180s heating watch window.",
         failures,
