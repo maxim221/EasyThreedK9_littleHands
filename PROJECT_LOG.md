@@ -3147,9 +3147,13 @@ After each test print, append:
   - after a power-cycle cleanup, the deleted partial file was `UFCLASSI.GCO` at about `1.44 MB`
   - follow-up investigation found the likely binary-upload cause: Marlin's bundled Python helper sends `M28B1`, while this K9 build expects the spaced `M28 B1` syntax before switching to binary protocol
   - `tools/k9_marlin_sd.py` now patches the loaded MarlinBinaryProtocol connect method to send `M28 B1`
+  - a real `UFBOT.GCO` retry confirmed binary upload starts correctly, but it was interrupted at about `64%` when the GUI was opened at the same time and took a second handle on `/dev/ttyUSB0`
+  - after that interruption, numbered `M29` / `M110 N0` recovery was needed before plain `M105` worked again; the partial `UFBOT.GCO` was then deleted from SD
+  - if firmware advertises `BINARY_FILE_TRANSFER`, `upload_gcode_auto()` now stops after a binary failure instead of falling into text upload, because fallback can leave this K9 in a half-open numbered SD-write state after a mid-transfer abort
 - Regression:
   - `tools/regression_checks.py` now checks this Top/Bot case directly so future helpers do not silently collapse distinct test models onto the same SD filename
   - regression checks also pin the spaced `M28 B1` binary-transfer entry command
+  - regression checks pin the no-text-fallback behavior for advertised binary-upload failures
 - Verification:
   - no physical printer motion or heating was run
   - printer responded after power cycle; `UFCLASSI.GCO` was removed from SD

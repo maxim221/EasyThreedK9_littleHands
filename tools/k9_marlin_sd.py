@@ -1107,6 +1107,8 @@ def upload_gcode_auto(
     if not source.is_file():
         raise FileNotFoundError(f"G-code file not found: {source}")
     transfer_error: Exception | None = None
+    caps, _sd = preflight(port, baud)
+    binary_required = "Cap:BINARY_FILE_TRANSFER:1" in caps
     try:
         upload_binary(port, baud, source, dest_name, compression=False, progress_cb=progress_cb)
         method = "binary"
@@ -1114,6 +1116,16 @@ def upload_gcode_auto(
         raise
     except Exception as exc:
         transfer_error = exc
+        if binary_required:
+            if progress_cb:
+                reason = " ".join(str(exc).split())[:140] or exc.__class__.__name__
+                progress_cb(f"Upload (binary failed: {reason})", 0.0)
+            raise RuntimeError(
+                "Binary upload failed after the printer advertised BINARY_FILE_TRANSFER; "
+                "not falling back to text upload because a failed binary session can leave "
+                "the K9 serial/SD state half-open. Power-cycle if plain commands stop working, "
+                f"then delete any partial {dest_name} file before retrying."
+            ) from exc
         if progress_cb:
             reason = " ".join(str(exc).split())[:140] or exc.__class__.__name__
             progress_cb(f"Upload (fallback: {reason})", 0.0)

@@ -77,6 +77,12 @@ def main() -> int:
         failures,
     )
     require(
+        "binary_required = \"Cap:BINARY_FILE_TRANSFER:1\" in caps" in marlin
+        and "not falling back to text upload" in marlin,
+        "Advertised binary-upload failures must stop instead of falling into text upload on this K9.",
+        failures,
+    )
+    require(
         "WATCH_TEMP_PERIOD  180" in firmware_watch_patch and "WATCH_TEMP_INCREASE 2" in firmware_watch_patch,
         "Tracked LH v5 firmware patch must keep thermal protection enabled but give the slow K9 hotend a 180s heating watch window.",
         failures,
