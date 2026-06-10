@@ -3206,3 +3206,39 @@ After each test print, append:
   - regression checks now pin uppercase `.GCO` visibility in the picker
 - Operator note:
   - without restarting the app, switching the picker to `All files` remains the immediate workaround
+
+## 2026-06-10 Suspect Partial Upload SD-Start Guard
+
+- Field trigger:
+  - `UFTOP35.GCO` upload attempts failed or were cancelled, and Little Hands warned that a partial `UFtoolTOP.GCO` could remain on SD
+  - a later SD start selected `UFTOOLTP.GCO`; the app treated the SD file profile as unknown, so only hotend preheat ran before `M24`
+  - the log showed `B:` still targeted `/0.00` before `M24`, explaining why the controlled hotbed did not heat for that start
+  - after `Stop`, Marlin reported `E:150+`, so the file had logically executed extrusion; lack of visible filament is more consistent with a suspect/partial file, early observation window, or physical filament path issue than with a G-code file containing no `E` moves
+- App change:
+  - failed or cancelled G-code uploads now mark the target SD file and likely 8.3 aliases as suspect if the file was not cleanly removed
+  - SD start is blocked for suspect files until the file is deleted or overwritten by a clean upload
+  - successful upload and successful SD delete clear the suspect-file marker
+  - local state was updated to block the current `UFTOOLTP.GCO` alias after restart
+- Verification:
+  - no physical printer motion or heating was run during the code change
+
+## 2026-06-11 Controlled Hotbed 35C Cura Default
+
+- Field trigger:
+  - the operator stopped the bad `UFTOOLTP.GCO` print, removed the failed model, and reported that the watched `35C` hotbed heat behaved well enough for the next slice
+- Cura/helper change:
+  - `tools/k9_cura_slice.py` now defaults new slices to the conservative controlled-hotbed target `35C`
+  - the helper still keeps Cura `material_bed_temperature = 0` and emits only the explicit Little Hands marker `;LH_EXPERIMENTAL_HOTBED_TARGET:35` plus non-blocking `M140 S35`
+  - passing `--experimental-hotbed-target 0` still disables controlled-hotbed emission for external-warm-mat/public-baseline slices
+- Local Cura change:
+  - updated the live Cura 5.11 `lilHands_k9_warmmat` machine start G-code to include the same `35C` marker and non-blocking `M140 S35`
+  - while touching the live machine container, synced the end G-code bed presentation move back to the safe tracked `G1 Y95 F240`
+  - later root-cause check found Cura still had `[cura] active_machine = lilHands`, so the Desktop `UFTOOLTP.gcode` was sliced with the older `lilHands_settings` container: no hotbed marker, old `G1 Z10.0 F1800`, old `codex - monitored strength` speeds, and therefore `B:` stayed targeted at `/0.00`
+  - live Cura was switched to `[cura] active_machine = lilHands_k9_warmmat`
+  - the old live `lilHands_settings` container was also patched with the `35C` marker and safe end moves as a fallback, but new slices should use `lilHands K9 warm mat`
+- Safety:
+  - ordinary Cura bed temperature remains `0`
+  - `M190` remains forbidden for K9 SD files; Little Hands must host-preheat and verify `B:` before `M24`
+  - `40C` remains reserved for a later watched test only if `35C` is not enough
+- Verification:
+  - no physical printer motion or heating was run during the settings change

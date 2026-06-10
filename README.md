@@ -12,7 +12,7 @@ Little Hands is a Linux desktop control center for an unusually fussy but very r
 - board family: `ET4000+ / ET4000PLUS`
 - current firmware candidate: `LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - slicer baseline: `Cura 5.11`
-- heated bed baseline: external warm mat / hotbed, not electrically wired into the printer mainboard
+- heated bed baseline: external warm mat for public files; the local experimental controlled-hotbed path uses an explicit Little Hands marker, not Cura's normal bed-temperature field
 
 It is not OctoPrint and not a generic Marlin host. It is a cautious local operator panel for a small K9 that does not have a trustworthy endstop-based home in this workflow. The app helps with SD printing, USB upload, manual-zero start, guarded recovery, firmware flashing, Cura profile export, logs, and field diagnostics.
 
@@ -28,7 +28,7 @@ This project is still a little rough, but it already works for real printing:
 - G-code upload validation catches unsafe or obviously broken files
 - print progress and temperature monitoring work
 - manual filament feed/retract works after hotend temperature is confirmed
-- experimental controlled-hotbed telemetry is now visible in the app graph
+- experimental controlled-hotbed telemetry and marked `35C` preheat workflow are available for the current local K9
 
 What is still rough:
 
@@ -80,6 +80,7 @@ The current public baseline is a validated `EasyThreeD K9` setup with:
 - tested firmware baseline: `LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - tested app: `tools/k9_control_center.py`
 - tested Cura machine: `lilHands K9 warm mat`
+- expected Cura active machine id: `lilHands_k9_warmmat`
 - tested Cura profile: `codex - K9 warm mat cautious`
 
 Do **not** assume this will work unchanged on every random `K9`.
@@ -95,7 +96,7 @@ If you are bringing this up on a Raspberry Pi, use:
 - **Manual-zero start:** the operator places the nozzle at the physical start and Little Hands declares it with `G92 X0 Y0 Z0`.
 - **Guarded recovery:** after Stop, failed starts, USB drops, and finished SD prints, the app prefers explicit prompts over surprise axis motion.
 - **K9-specific motion limits:** service and manual moves are deliberately slow because this small machine can skip steps while Marlin still reports `ok`.
-- **Cura guardrails:** bundled settings and upload checks reject common unsafe files such as startup `G28`, bed heat in the public baseline, aggressive acceleration, and end-of-print `M84`.
+- **Cura guardrails:** bundled settings and upload checks reject common unsafe files such as startup `G28`, unmarked or blocking bed heat, aggressive acceleration, and end-of-print `M84`.
 
 ## How Home Works
 
@@ -151,7 +152,9 @@ There is also an experimental controlled-hotbed branch for a newly installed K9-
 - firmware: [`firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin`](firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin)
 - notes: [docs/HOTBED_INSTALLATION.ru.md](docs/HOTBED_INSTALLATION.ru.md)
 
-Keep Cura bed temperature at `0C` for the public baseline until controlled-bed printing is fully validated.
+Keep Cura material bed temperature at `0C`; the local controlled-hotbed path uses an explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:35` marker plus non-blocking `M140 S35`, and Little Hands verifies `B:` before `M24`.
+
+If a fresh Desktop G-code is missing that marker, Cura is probably slicing with the older `lilHands` machine instead of `lilHands K9 warm mat`. Check `~/.config/cura/5.11/cura.cfg` for `[cura] active_machine = lilHands_k9_warmmat`, then save the G-code again.
 
 ## Quick Start
 
@@ -167,12 +170,14 @@ python3 tools/k9_control_center.py
 
 4. In Cura choose:
    - machine: `lilHands K9 warm mat`
+   - active machine id in `cura.cfg`: `lilHands_k9_warmmat`
    - profile: `codex - K9 warm mat cautious`
    - brim: `14 mm`
    - Cura preference: `Add machine prefix to job name` = `off`
    - PLA: `225C` first layer, then `224C`
    - walls: `5`, Z seam: `Random`
    - supports for `mainFlasherTop.STL`: everywhere, interface / roof enabled, support angle `35`
+   - start G-code contains `;LH_EXPERIMENTAL_HOTBED_TARGET:35` and `M140 S35`
 
 The tracked public Cura baseline is in [docs/cura/](docs/cura/).
 Manual settings for other slicer versions are in [docs/cura/SETTINGS.md](docs/cura/SETTINGS.md).

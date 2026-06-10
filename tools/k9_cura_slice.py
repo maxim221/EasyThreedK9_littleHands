@@ -29,6 +29,7 @@ VALIDATED_MODULEBOT_ORIENTED_STL = DEFAULT_OUTPUT_DIR / "mbnorm01_moduleBot_norm
 K9_MAX_EMITTED_PRINT_ACCEL = 250.0
 K9_MAX_EMITTED_TRAVEL_ACCEL = 200.0
 K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 40.0
+K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET = 35.0
 HOTBED_EXPERIMENTAL_MARKER = ";LH_EXPERIMENTAL_HOTBED_TARGET:"
 
 
@@ -537,8 +538,11 @@ def main() -> int:
     parser.add_argument(
         "--experimental-hotbed-target",
         type=float,
-        default=0.0,
-        help="Optional experimental controlled-hotbed target in C. Emits an LH marker and M140, but leaves Cura bed temperature at 0.",
+        default=K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET,
+        help=(
+            "Experimental controlled-hotbed target in C; use 0 to disable. "
+            "Emits an LH marker and M140, but leaves Cura bed temperature at 0."
+        ),
     )
     parser.add_argument("--sd-mount", type=Path, default=None, help="Optional mounted SD card path to copy to")
     parser.add_argument("--sd-name", default=None, help="Optional filename to use on SD")

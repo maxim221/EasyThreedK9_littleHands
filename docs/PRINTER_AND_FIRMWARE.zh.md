@@ -149,6 +149,7 @@ G92 X0 Y0 Z0
 - 打印后返回现在统一使用手动 `回到保存起点` 按钮；旧的 SD 面板 `打印后返回` 独立按钮已移除，以保留唯一的受保护 recovery 入口
 - 如果 Little Hands 重启或重新连接，并且随后检测到从日志恢复的打印已结束，它不得自动移动各轴；清空平台后需要手动恢复起点
 - SD 启动会被阻止，除非应用确认打印机实际停在已保存的 `X0 Y0 Z0`
+- 如果 G-code 上传被取消、验证失败，或留下 Little Hands 无法删除的部分 SD 文件，该文件和可能的 8.3 别名都会被禁止启动，直到文件被删除或由一次干净上传覆盖
 - 在 `M24` 前，Little Hands 总是先用分段 `M104` 目标和最终 host-side `M109` 证明 hotend 已经加热，并被动读取温度行；如果加热没有确认，就不会发送 `M24`，也不应出现冷态运动
 - 如果 Little Hands 为安全加热抬起了喷嘴，应用会在 `M24` 前明确把喷嘴返回保存起点；如果预热失败，会先用相同距离的相对 Z 向下移动撤销这次抬升，然后再显示错误
 - 如果这个相对返回没有收到确认，Little Hands 会保留 failed-preheat-lift recovery 标记；只有操作者确认打印没有开始且各轴没有被手动移动后，`回到保存起点` 才能重试返回；成功返回后应用会立即用 `G92 X0 Y0 Z0` 重新声明已恢复的物理起点，因为断电重启后 Marlin 的逻辑 Z 可能已经过期；失败的手动 jog 不能清除这个标记，因为固件没有确认任何实际移动
@@ -191,9 +192,9 @@ G92 X0 Y0 Z0
 - 操作者在平台中心附近的独立 surface sensor 显示约 `24C -> 33C -> 31C`，因此在这套首次安装中，真实表面温度可能比 Marlin `B:` 高几度
 - 第二次由操作者看守的 heat sanity check 使用 `M140 S35`；`B:` 从约 `24C` 平稳升到 `34.57C`，之后发送 `M140 S0`，热床输出保持 `B@:0`，Marlin `B:` 因惯性接近 `36C` 后开始下降；操作者的外部 surface sensor 最高约 `40C`，测试结束时约 `36C`
 - 安装 hotbed 后，在 Little Hands 的五个调平点（`前左` / `中` / `前右` / `后左` / `后右`）使用 `0.05 mm` 塞尺在 `Z0` 调平；塞尺应有轻微且一致的阻力。`0.10 mm` 目前只作为上限检查，因为 `G92 X0 Y0 Z0` 后 Cura 首层本身已经约为 `Z0.20`
-- 普通 Cura bed temperature 仍保持 `0`；在上一件 PLA 打印出现边角翘起后，下一次有人看守的测试可使用单独的 experimental-hotbed 文件，带 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 标记和非阻塞 `M140 S35`
+- 普通 Cura bed temperature 仍保持 `0`；在有人看守的 `35C` sanity test 成功后，当前本地 controlled-hotbed 切片默认使用明确标记的 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 文件和非阻塞 `M140 S35`
 - 对这类文件，Little Hands 会在 `M24` 前先把 hotbed 预热到目标，然后执行正常的分段 hotend 预热；不要在 SD 文件中加入 `M190`
-- 手动 `Hotbed 35C` / `Hotbed 40C` / `Hotbed off` 按钮用于有人看守的测试和关闭；边角翘起后的第一步是 `35C`，只有 `35C` 不够时才测试 `40C`
+- 手动 `Hotbed 35C` / `Hotbed 40C` / `Hotbed off` 按钮用于有人看守的测试和关闭；`35C` 是保守的 controlled-hotbed 常规目标，只有 `35C` 不够时才测试 `40C`
 - 后续 validation heat tests 仍必须由操作者看守：先确认冷态 `B:` 合理，再使用有限目标，确认 `B:` 上升，然后用 `M140 S0` 关闭热床
 
 ## 8. Cura 基线
@@ -201,10 +202,11 @@ G92 X0 Y0 Z0
 对于当前已验证的公开基线：
 
 - machine: `lilHands K9 warm mat`
+- Cura active machine id：`lilHands_k9_warmmat`
 - profile: `codex - K9 warm mat cautious`
 - brim width: `14 mm`
 - PLA 温度：第一层 `225C`，之后 `224C`
-- G-code 中的热床温度：`0C`，因为热床是外部供电
+- Cura material bed temperature：`0C`；controlled-hotbed 文件只使用明确的 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 标记和非阻塞 `M140 S35`
 - `mainFlasherTop.STL` 的支撑：supports everywhere、normal supports、启用 interface / roof、support angle `35`
 
 重要 G-code 规则：
@@ -215,7 +217,7 @@ G92 X0 Y0 Z0
 - 通过当前 Little Hands 上传时，早期阻塞式 `M109` 会被保留；应用仍会在 `M24` 前预热 hotend，文件中的 `M109` 作为安全等待保留
 - 旧的已准备 `M104`-only 文件也被支持：应用在 SD 启动前使用同一个分段 host-side 加热门槛预热热端
 - 上传前可以使用 `Check G-code`；同一套校验也会在 `Upload G-code` 和 `Upload & start` 前自动运行
-- 如果文件出现 `Filament used: 0m`、不可能的 bounds、超出 `100 x 100 x 100 mm`、热床加热 `M140/M190 S>0`、`M18/M84`、缺少热端目标温度，或 body `M204` 过激，请重新切片
+- 如果文件出现 `Filament used: 0m`、不可能的 bounds、超出 `100 x 100 x 100 mm`、未标记的热床加热 `M140/M190 S>0`、阻塞式 `M190`、`M18/M84`、缺少热端目标温度，或 body `M204` 过激，请重新切片
 - anti-warp 配置调整后，`14 mm` brim 现在是默认值；旧的启动失败与加热 / SD 启动顺序有关，不是 brim 宽度本身造成的
 
 当前 end-gcode 规则：

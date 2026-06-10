@@ -2,18 +2,20 @@
 
 Use this file when the bundled Cura profile cannot be imported, or when another slicer version is used.
 
-These settings describe the currently validated EasyThreeD K9 / Little Hands baseline. They are intentionally conservative: slow PLA printing, external warm bed, manual-zero start, no firmware-controlled bed.
+These settings describe the currently validated EasyThreeD K9 / Little Hands baseline. They are intentionally conservative: slow PLA printing, manual-zero start, and controlled hotbed use only through the explicit Little Hands marker.
 
 ## Machine
 
 - Printer model name: `lilHands K9 warm mat`
+- Cura active machine id: `lilHands_k9_warmmat`
 - Printable area: `100 x 100 x 100 mm`
 - Origin at center: `off`
-- Heated bed in firmware: `off`
+- Standard Cura bed temperature: `0C`; controlled hotbed is requested only by the start G-code marker below
 - G-code flavor: `RepRap (RepRap)` or the closest Marlin / RepRap-style mode available
 - Filament diameter: `1.75 mm`
 - Nozzle diameter: use the real installed nozzle; the validated profile does not override Cura's nozzle diameter
 - Cura preference: turn `Preferences -> General -> Add machine prefix to job name` off. In `cura.cfg` this is `[cura] jobname_prefix = False`. This prevents useless `CFFFP_` prefixes in exported G-code names.
+- Cura active-machine preference: in `~/.config/cura/5.11/cura.cfg`, `[cura] active_machine` must be `lilHands_k9_warmmat`. If it is the old `lilHands`, Cura can save a file that looks valid but has no `;LH_EXPERIMENTAL_HOTBED_TARGET:35` marker and therefore will not heat the controlled bed.
 
 ## Start G-code
 
@@ -27,6 +29,8 @@ Use exactly this style of start G-code. Do not add `G28`.
 G92 X0 Y0 Z0
 G1 Z10.0 F600
 G92 E0
+;LH_EXPERIMENTAL_HOTBED_TARGET:35
+M140 S35 ;Experimental controlled hotbed target; Little Hands preheats before M24
 ```
 
 ## End G-code
@@ -52,8 +56,9 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Material: PLA
 - First layer hotend: `225C`
 - Normal hotend: `224C`
-- Bed temperature in G-code: `0C`
-- Real external warm mat: manually preheated to about `40-50C`; experimental controlled hotbed for the current test starts at `35C`
+- Cura material bed temperature: `0C`
+- Controlled hotbed start target: `35C`, emitted only as `;LH_EXPERIMENTAL_HOTBED_TARGET:35` plus non-blocking `M140 S35`
+- Real external warm mat fallback: manually preheated to about `40-50C`
 - Part cooling in Cura: `off`
 - Important: the current K9 has one physical fan, used as the firmware-managed hotend fan. Little Hands / the helper strip slicer `M106/M107` commands so Cura cannot treat that fan as part cooling.
 - Minimum layer time: `10 s`
@@ -181,12 +186,13 @@ The generated G-code must satisfy all of these:
 - contains a hotend target command such as `M104` / `M109`
 - early blocking `M109` should stay in the SD file; Little Hands still confirms hotend heatup with staged host-side preheat plus a final `M109` before `M24`, and the file-local `M109` remains as an extra safety wait
 - old already-prepared `M104`-only files are also supported by the same staged host preheat before `M24`
-- ordinary bed target remains `0C`; experimental-hotbed tests use a separate file marked `;LH_EXPERIMENTAL_HOTBED_TARGET:35`, not the standard Cura bed temperature
+- Cura material bed target remains `0C`; controlled-hotbed files must be explicitly marked `;LH_EXPERIMENTAL_HOTBED_TARGET:35` and use only non-blocking `M140 S35`
 - Cura / slicer bounds are sane and fit inside the `100 x 100 mm` bed
 - height fits inside `100 mm`
 - not `Filament used: 0m`
 - no `M18/M84`, no blocking `M190`, no unmarked bed heat `M140/M190 S>0`, and no body `M204` above the safe K9 baseline
 - preview shows supports where the model needs them
 - exported file name should not start with `CFFFP_`; if it does, turn off Cura's `Add machine prefix to job name` preference and save again
+- a fresh Cura export should start with `; Little Hands manual-zero workflow for EasyThreed K9 / K9 Plus`, use `G1 Z10.0 F600`, and include `;LH_EXPERIMENTAL_HOTBED_TARGET:35`; if it starts with the older shorter `; Little Hands manual-zero workflow` and `G1 Z10.0 F1800`, switch Cura back to `lilHands K9 warm mat` and save again
 
 If any of these fail, re-slice from settings. Do not manually edit the G-code unless you intentionally create a new file and clearly mark it as modified.

@@ -35,6 +35,9 @@ def main() -> int:
     cura_quality = read("docs/cura/quality_changes/codex_k9_warmmat_quality.inst.cfg")
     cura_extruder = read("docs/cura/quality_changes/codex_k9_warmmat_extruder_quality.inst.cfg")
     cura_machine = read("docs/cura/definition_changes/lilHands_k9_warmmat_settings.inst.cfg")
+    readme = read("README.md")
+    cura_readme = read("docs/cura/README.md")
+    cura_settings = read("docs/cura/SETTINGS.md")
     firmware_watch_patch = read("docs/firmware/LH-v5-watch180.patch")
 
     require("SOFT_TRAVEL_ACCEL = 80" in marlin, "K9 service travel acceleration must remain M204 T80.", failures)
@@ -315,6 +318,15 @@ def main() -> int:
         failures,
     )
     require(
+        "suspect_sd_uploads" in app
+        and "_mark_suspect_sd_upload" in app
+        and "_guard_not_suspect_sd_upload" in app
+        and "похож на частичный файл после сорванной загрузки" in app
+        and "self._clear_suspect_sd_upload(path)" in app,
+        "Failed or cancelled SD uploads must block suspect partial-file aliases until deletion or clean re-upload.",
+        failures,
+    )
+    require(
         "_preheat_hotbed_before_sd_start" in app
         and "_preheat_hotbed_for_sd_start" in app
         and "self._preheat_hotbed_before_sd_start(dest, source.name, upload_source)" in app
@@ -354,10 +366,12 @@ def main() -> int:
     require(
         "--experimental-hotbed-target" in slicer
         and "K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 40.0" in slicer
+        and "K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET = 35.0" in slicer
+        and "default=K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET" in slicer
         and "HOTBED_EXPERIMENTAL_MARKER" in slicer
         and "M140 S{hotbed_target:g}" in slicer
         and '"material_bed_temperature": "0"' in slicer,
-        "Cura helper may emit only explicitly marked experimental M140 hotbed files while keeping Cura bed temperature at 0.",
+        "Cura helper must default to marked 35C controlled-hotbed files while keeping Cura bed temperature at 0.",
         failures,
     )
 
@@ -515,6 +529,22 @@ def main() -> int:
     require("bridge_skin_speed = 7" in cura_extruder and "bridge_wall_speed = 7" in cura_extruder, "Bridge speeds must remain reduced for the small K9 mechanics.", failures)
     require("cool_fan_enabled = False" in cura_extruder, "K9 part-cooling must remain disabled.", failures)
     require("G1 Y95 F240" in cura_machine, "Tracked Cura machine end G-code must present bed toward operator at F240.", failures)
+    require(
+        "LH_EXPERIMENTAL_HOTBED_TARGET:35" in cura_machine
+        and "M140 S35" in cura_machine
+        and "material_bed_temperature = 0" in cura_quality
+        and "material_bed_temperature = 0" in cura_extruder,
+        "Tracked Cura machine start must mark the 35C controlled-hotbed target while keeping Cura bed temperature at 0.",
+        failures,
+    )
+    require(
+        "active_machine = lilHands_k9_warmmat" in readme
+        and "active_machine = lilHands_k9_warmmat" in cura_readme
+        and "lilHands_k9_warmmat" in cura_settings
+        and "G1 Z10.0 F1800" in cura_settings,
+        "Project/Cura docs must warn that the old lilHands active machine drops the 35C hotbed marker.",
+        failures,
+    )
     require("M84" not in cura_machine and "M18" not in cura_machine, "Tracked Cura machine end G-code must not disable steppers.", failures)
 
     stopped_sample = (

@@ -2,18 +2,20 @@
 
 Используй этот файл, если bundled Cura profile не импортируется или используется другая версия Cura / другой слайсер.
 
-Это текущий проверенный baseline для EasyThreeD K9 / Little Hands. Настройки специально консервативные: медленная PLA-печать, внешний тёплый стол, manual-zero start, без управляемого firmware hotbed.
+Это текущий проверенный baseline для EasyThreeD K9 / Little Hands. Настройки специально консервативные: медленная PLA-печать, manual-zero start, а управляемый hotbed включается только явной меткой Little Hands.
 
 ## Машина
 
 - Название принтера: `lilHands K9 warm mat`
+- Active machine id в Cura: `lilHands_k9_warmmat`
 - Область печати: `100 x 100 x 100 mm`
 - Origin at center: `off`
-- Heated bed в прошивке: `off`
+- Стандартная Cura bed temperature: `0C`; управляемый hotbed запрашивается только меткой в start G-code ниже
 - G-code flavor: `RepRap (RepRap)` или ближайший Marlin / RepRap-style режим
 - Диаметр филамента: `1.75 mm`
 - Диаметр сопла: фактически установленное сопло; проверенный профиль Cura не переопределяет nozzle diameter
 - Настройка Cura: выключи `Preferences -> General -> Add machine prefix to job name`. В `cura.cfg` это `[cura] jobname_prefix = False`. Так Cura не будет добавлять бесполезный префикс `CFFFP_` к G-code файлам.
+- Active-machine настройка Cura: в `~/.config/cura/5.11/cura.cfg` значение `[cura] active_machine` должно быть `lilHands_k9_warmmat`. Если там старый `lilHands`, Cura может сохранить внешне нормальный файл без `;LH_EXPERIMENTAL_HOTBED_TARGET:35`, и управляемый стол не будет греться.
 
 ## Start G-code
 
@@ -27,6 +29,8 @@
 G92 X0 Y0 Z0
 G1 Z10.0 F600
 G92 E0
+;LH_EXPERIMENTAL_HOTBED_TARGET:35
+M140 S35 ;Experimental controlled hotbed target; Little Hands preheats before M24
 ```
 
 ## End G-code
@@ -52,8 +56,9 @@ G1 Y95 F240 ;Move bed toward the operator
 - Материал: PLA
 - Hotend первый слой: `225C`
 - Hotend дальше: `224C`
-- Температура стола в G-code: `0C`
-- Реальный внешний warm mat: вручную прогрет примерно до `40-50C`; experimental controlled hotbed для текущего теста начинается с `35C`
+- Cura material bed temperature: `0C`
+- Управляемый hotbed target в start G-code: `35C`, только как `;LH_EXPERIMENTAL_HOTBED_TARGET:35` плюс non-blocking `M140 S35`
+- Запасной вариант с внешним warm mat: вручную прогрет примерно до `40-50C`
 - Part-cooling в Cura: `off`
 - Важно: у текущего K9 один физический вентилятор, он используется как firmware-managed hotend fan. Little Hands / helper удаляют slicer-команды `M106/M107`, чтобы Cura не управляла этим вентилятором как обдувом детали.
 - Minimum layer time: `10 s`
@@ -181,12 +186,13 @@ G1 Y95 F240 ;Move bed toward the operator
 - есть команда цели hotend, например `M104` / `M109`
 - ранний блокирующий `M109` должен оставаться в SD-файле; Little Hands всё равно сначала подтверждает нагрев hotend ступенчатым host-side preheat и финальным `M109` перед `M24`, а файловый `M109` остаётся дополнительной страховкой
 - старые уже подготовленные `M104`-only файлы тоже поддерживаются тем же ступенчатым host-preheat перед `M24`
-- обычный bed target остаётся `0C`; experimental-hotbed тест делается отдельным файлом с `;LH_EXPERIMENTAL_HOTBED_TARGET:35`, а не через стандартную Cura bed temperature
+- Cura material bed target остаётся `0C`; controlled-hotbed файл должен быть явно помечен `;LH_EXPERIMENTAL_HOTBED_TARGET:35` и использовать только non-blocking `M140 S35`
 - bounds слайсера адекватные и укладываются в стол `100 x 100 mm`
 - высота укладывается в `100 mm`
 - нет `Filament used: 0m`
 - нет `M18/M84`, нет блокирующего `M190`, нет неразмеченного нагрева стола `M140/M190 S>0`, и нет body `M204` выше безопасного K9 baseline
 - preview показывает поддержки там, где они нужны модели
 - имя экспортированного файла не начинается с `CFFFP_`; если начинается, выключи в Cura `Add machine prefix to job name` и сохрани файл заново
+- свежий Cura export должен начинаться с `; Little Hands manual-zero workflow for EasyThreed K9 / K9 Plus`, использовать `G1 Z10.0 F600` и содержать `;LH_EXPERIMENTAL_HOTBED_TARGET:35`; если в начале старый короткий `; Little Hands manual-zero workflow` и `G1 Z10.0 F1800`, переключи Cura обратно на `lilHands K9 warm mat` и сохрани заново
 
 Если что-то не сходится, переслайсь из настроек. Не правь G-code руками, если только специально не создаёшь новый файл и явно не маркируешь его как modified.

@@ -6,7 +6,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 - 主板家族：`ET4000+ / ET4000PLUS`
 - 当前候选固件：`LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - 切片器基线：`Cura 5.11`
-- 热床基线：外部 warm mat / hotbed，不直接连接到打印机主板
+- 热床基线：公开文件使用外部 warm mat；当前本地 experimental controlled-hotbed 路径通过明确的 Little Hands 标记启用，而不是 Cura 的普通热床温度字段
 
 这个项目还不算完全打磨完成，但已经能够实际打印。
 
@@ -17,6 +17,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 - Cura 导出可用
 - 上传前的 G-code 校验可以拦截危险或明显损坏的文件
 - 温度与打印进度监控可用
+- 当前本地 K9 可使用带标记的 `35C` experimental controlled-hotbed 预热流程
 
 还比较粗糙的地方：
 
@@ -66,6 +67,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 - 测试基线固件：`LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - 已验证应用：`tools/k9_control_center.py`
 - 已验证 Cura 机器：`lilHands K9 warm mat`
+- 期望的 Cura active machine id：`lilHands_k9_warmmat`
 - 已验证 Cura 配置：`codex - K9 warm mat cautious`
 
 不要假设任意一台 `K9` 都能直接照搬这个配置。
@@ -112,6 +114,10 @@ Little Hands 使用的是 manual-zero 工作流：
 - 打印机仍然应该表现为“无加热床控制”
 - 已验证的工作温度大约为 `40–50C`
 
+对于本地 controlled-hotbed 分支，普通 Cura bed temperature 仍保持 `0C`；文件必须包含明确的 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 标记和非阻塞 `M140 S35`，Little Hands 会在 `M24` 前自行检查 `B:`。
+
+如果新的 Desktop G-code 没有这个标记，Cura 很可能仍在使用旧的 `lilHands` 机器切片。请检查 `~/.config/cura/5.11/cura.cfg`：应为 `[cura] active_machine = lilHands_k9_warmmat`，然后重新保存 G-code。
+
 ## 快速开始
 
 1. 安装 Linux 依赖：
@@ -126,10 +132,12 @@ python3 tools/k9_control_center.py
 
 4. 在 Cura 中选择：
    - machine: `lilHands K9 warm mat`
+   - `cura.cfg` 中的 active machine id：`lilHands_k9_warmmat`
    - profile: `codex - K9 warm mat cautious`
    - brim: `14 mm`
    - Cura 偏好设置：`Add machine prefix to job name` = `off`
    - `mainFlasherTop.STL` 支撑：everywhere，启用 interface / roof，support angle `35`
+   - start G-code 包含 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 和 `M140 S35`
 
 公开固定的 Cura 基线副本位于 [docs/cura/](docs/cura/)。
 其他切片器版本的手动设置说明：[docs/cura/SETTINGS.zh.md](docs/cura/SETTINGS.zh.md)。

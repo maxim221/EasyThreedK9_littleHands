@@ -152,6 +152,7 @@ So:
 - post-print return uses the manual `Go to saved start` button; the old separate SD-panel `After print: return` button was removed to keep only one guarded recovery entry point
 - if Little Hands is restarted or reconnects and later detects that a restored print has finished, it must not move axes automatically; restore the start pose manually after clearing the bed
 - SD start is now blocked unless the app knows the printer is physically at the saved `X0 Y0 Z0`
+- if a G-code upload is cancelled, fails verification, or leaves a partial SD file that Little Hands cannot delete, that SD file and likely 8.3 aliases are blocked from starting until the file is deleted or overwritten by a clean upload
 - before `M24`, Little Hands always proves hotend heatup with staged `M104` targets followed by one final host-side `M109` session while passively reading temperature lines; if heatup is not confirmed, `M24` is not sent and cold movements should not happen
 - if Little Hands lifted the nozzle for safe heatup, the app explicitly returns the nozzle to the saved start before `M24`; if the preheat fails, it first undoes the known lift with a relative Z-down move before showing the error
 - if that relative return is not acknowledged, Little Hands preserves a failed-preheat-lift recovery marker; `Go to saved start` can retry only after the operator confirms that the print did not start and the axes were not moved by hand; after a successful retry Little Hands immediately re-declares the recovered physical start with `G92 X0 Y0 Z0`, because Marlin's logical Z may be stale after a power cycle; a failed manual jog must not clear this marker because no motion was acknowledged
@@ -199,9 +200,9 @@ Experimental controlled-hotbed branch:
 - the operator's independent surface sensor near the bed center read about `24C -> 33C -> 31C`, so the real surface can be a few degrees hotter than Marlin `B:` during this first setup
 - second operator-watched heat sanity check used `M140 S35`; `B:` rose smoothly from about `24C` to `34.57C`, then after `M140 S0` the bed output stayed `B@:0` while Marlin `B:` peaked near `36C` and began cooling; the operator's external surface sensor peaked around `40C` and was around `36C` at the end of the test
 - after the hotbed install, level the bed at all five Little Hands points (`FL` / `C` / `FR` / `BL` / `BR`) with a `0.05 mm` feeler at `Z0`; it should have light, even drag. Treat `0.10 mm` only as an upper sanity check for now, because Cura already prints the first layer around `Z0.20` after `G92 X0 Y0 Z0`
-- keep ordinary Cura bed temperature at `0`; for the next watched PLA test after lifted corners, use a separate experimental-hotbed file marked `;LH_EXPERIMENTAL_HOTBED_TARGET:35` with non-blocking `M140 S35`
+- keep ordinary Cura bed temperature at `0`; after the successful watched `35C` sanity test, the current local controlled-hotbed slice default is an explicitly marked `;LH_EXPERIMENTAL_HOTBED_TARGET:35` file with non-blocking `M140 S35`
 - for such files, Little Hands preheats the hotbed to the target before `M24`, then runs the normal staged hotend preheat; do not add `M190` to SD files
-- manual `Hotbed 35C` / `Hotbed 40C` / `Hotbed off` buttons are available for watched tests and shutdown; `35C` is the first step after lifted corners, `40C` only if `35C` is not enough
+- manual `Hotbed 35C` / `Hotbed 40C` / `Hotbed off` buttons are available for watched tests and shutdown; `35C` is the normal conservative controlled-hotbed target, `40C` only if `35C` is not enough
 - further validation heat tests should remain operator-watched: confirm plausible cold `B:` first, use a bounded target, verify `B:` rises, and turn the bed off with `M140 S0`
 
 ## 8. Cura Baseline
@@ -209,10 +210,11 @@ Experimental controlled-hotbed branch:
 For the current validated public baseline:
 
 - machine: `lilHands K9 warm mat`
+- active Cura machine id: `lilHands_k9_warmmat`
 - profile: `codex - K9 warm mat cautious`
 - brim width: `14 mm`
 - PLA temperature: `225C` first layer, `224C` after that
-- bed temperature in G-code: `0C` because the warm bed is external
+- Cura material bed temperature: `0C`; controlled-hotbed files use only the explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:35` marker plus non-blocking `M140 S35`
 - support mode for `mainFlasherTop.STL`: supports everywhere, normal supports, interface / roof enabled, support angle `35`
 
 Important G-code rules:
@@ -223,7 +225,7 @@ Important G-code rules:
 - when a file is uploaded through current Little Hands, early blocking `M109` is preserved; the app still preheats the hotend before `M24`, and the file-local `M109` remains as a safety wait
 - old already-prepared `M104`-only files are also supported because the app preheats the hotend with the same staged host-side heat gate before SD start
 - use `Check G-code` before upload; the same validation also runs automatically before `Upload G-code` and `Upload & start`
-- reject or re-slice files with `Filament used: 0m`, impossible bounds, motion outside `100 x 100 x 100 mm`, bed heat `M140/M190 S>0`, `M18/M84`, missing hotend target, or aggressive body `M204`
+- reject or re-slice files with `Filament used: 0m`, impossible bounds, motion outside `100 x 100 x 100 mm`, unmarked bed heat `M140/M190 S>0`, blocking `M190`, `M18/M84`, missing hotend target, or aggressive body `M204`
 - `14 mm` brim is now the current default after the anti-warp profile tuning; the old start failure was tied to heat / SD-start sequencing, not to brim width itself
 
 Current end-G-code rule:

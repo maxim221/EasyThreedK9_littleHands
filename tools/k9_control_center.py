@@ -677,6 +677,8 @@ class K9ControlCenter:
         self.last_print_state_save_ts = 0.0
         raw_profiles = self.ui_state.get("sd_gcode_profiles", {})
         self.sd_gcode_profiles = raw_profiles if isinstance(raw_profiles, dict) else {}
+        raw_suspect_uploads = self.ui_state.get("suspect_sd_uploads", {})
+        self.suspect_sd_uploads = raw_suspect_uploads if isinstance(raw_suspect_uploads, dict) else {}
         self.printer_halted = False
         self.last_temp_sample_ts = 0.0
         self.last_temp_log_ts = 0.0
@@ -927,6 +929,9 @@ class K9ControlCenter:
         profiles = data.get("sd_gcode_profiles")
         if isinstance(profiles, dict):
             self.sd_gcode_profiles.update(profiles)
+        suspect_uploads = data.get("suspect_sd_uploads")
+        if isinstance(suspect_uploads, dict):
+            self.suspect_sd_uploads.update(suspect_uploads)
         if data.get("next_sd_start_requires_power_cycle"):
             self.next_sd_start_requires_power_cycle = True
             self.next_sd_start_power_cycle_reason = str(
@@ -1085,6 +1090,7 @@ class K9ControlCenter:
             "next_sd_start_requires_power_cycle": self.next_sd_start_requires_power_cycle,
             "next_sd_start_power_cycle_reason": self.next_sd_start_power_cycle_reason,
             "sd_gcode_profiles": self.sd_gcode_profiles,
+            "suspect_sd_uploads": self.suspect_sd_uploads,
         }
 
     def _save_print_state(self, phase: str = "printing", *, force: bool = False) -> None:
@@ -1132,6 +1138,49 @@ class K9ControlCenter:
 
     def _profile_key(self, sd_path: str) -> str:
         return self._normalize_sd_key(sd_path)
+
+    def _sd_upload_alias_keys(self, sd_path: str) -> set[str]:
+        raw_name = Path(sd_path.strip().lstrip("/")).name
+        if not raw_name:
+            return set()
+        keys = {self._normalize_sd_key(raw_name), self._normalize_sd_key(sd_path)}
+        try:
+            keys.add(self._normalize_sd_key(sdtool.make_sd_name(raw_name)))
+        except Exception:
+            pass
+        name_path = Path(raw_name)
+        base = "".join(ch for ch in name_path.stem.upper() if ch.isalnum() or ch in {"_", "-"})
+        ext = "".join(ch for ch in name_path.suffix.lstrip(".").upper() if ch.isalnum())[:3]
+        if base and ext:
+            if len(base) > 8:
+                keys.add(self._normalize_sd_key(f"{base[:8]}.{ext}"))
+                keys.add(self._normalize_sd_key(f"{base[:7]}{base[-1]}.{ext}"))
+                keys.add(self._normalize_sd_key(f"{base[:6]}~1.{ext}"))
+            else:
+                keys.add(self._normalize_sd_key(f"{base}.{ext}"))
+        return {key for key in keys if key}
+
+    def _mark_suspect_sd_upload(self, sd_path: str, reason: str) -> None:
+        reason = reason.strip() or "previous upload did not complete cleanly"
+        for key in self._sd_upload_alias_keys(sd_path):
+            self.suspect_sd_uploads[key] = reason
+        self._save_print_state("idle", force=True)
+
+    def _clear_suspect_sd_upload(self, sd_path: str) -> None:
+        changed = False
+        for key in self._sd_upload_alias_keys(sd_path):
+            if key in self.suspect_sd_uploads:
+                del self.suspect_sd_uploads[key]
+                changed = True
+        if changed:
+            self._save_print_state("idle", force=True)
+
+    def _suspect_sd_upload_reason(self, sd_path: str) -> str:
+        for key in self._sd_upload_alias_keys(sd_path):
+            reason = self.suspect_sd_uploads.get(key)
+            if isinstance(reason, str) and reason.strip():
+                return reason.strip()
+        return ""
 
     def _remember_gcode_profile(self, sd_path: str, display: str, source: Path) -> dict[str, object]:
         info = self._inspect_gcode_file(source)
@@ -2085,6 +2134,7 @@ class K9ControlCenter:
         except (tk.TclError, TypeError, ValueError):
             state["filament_step"] = FILAMENT_DEFAULT_STEP_MM
         state["sd_gcode_profiles"] = self.sd_gcode_profiles
+        state["suspect_sd_uploads"] = self.suspect_sd_uploads
         if self.pending_flash_finalize:
             state["pending_flash_finalize"] = self.pending_flash_finalize
         try:
@@ -3609,11 +3659,13 @@ class K9ControlCenter:
                 f"Загрузка отменена, но частичный файл {dest} удалить автоматически не удалось: {exc}. "
                 "Не запускай этот файл; удали его вручную после обновления списка SD."
             )
+            self._mark_suspect_sd_upload(dest, msg)
             self._post("log", msg)
             self._post("files-status", msg)
             return False, msg
 
         self._post("log", out.strip() or f"Частичный файл {dest} удалён после отмены загрузки.")
+        self._clear_suspect_sd_upload(dest)
         try:
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
@@ -5656,6 +5708,10 @@ class K9ControlCenter:
             except sdtool.UploadCancelled as exc:
                 _ok, msg = self._cleanup_cancelled_upload(dest)
                 raise sdtool.UploadCancelled(msg) from exc
+            except Exception as exc:
+                self._mark_suspect_sd_upload(dest, f"upload failed before clean verification: {exc}")
+                raise
+            self._clear_suspect_sd_upload(dest)
             self._remember_gcode_profile(dest, source.name, upload_source)
             self._post("progress", ("Upload complete: 100.0%", 100.0))
             self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method})")
@@ -5713,6 +5769,10 @@ class K9ControlCenter:
             except sdtool.UploadCancelled as exc:
                 _ok, msg = self._cleanup_cancelled_upload(dest)
                 raise sdtool.UploadCancelled(f"{msg} Печать не запускалась.") from exc
+            except Exception as exc:
+                self._mark_suspect_sd_upload(dest, f"upload failed before clean verification: {exc}")
+                raise
+            self._clear_suspect_sd_upload(dest)
             self._post("files-status", f"G-code залит: {source.name} -> {dest} ({method}). Запускаю печать...")
             self._post("log", f"Залит G-code: {source.name} -> {dest} ({method})")
             files = sdtool.list_files(self._port(), self._baud())
@@ -5820,6 +5880,20 @@ class K9ControlCenter:
         self._show_post_print_recovery_window("blocked-start")
         return False
 
+    def _guard_not_suspect_sd_upload(self, path: str, display: str) -> bool:
+        reason = self._suspect_sd_upload_reason(path)
+        if not reason:
+            return True
+        msg = (
+            f"Старт SD заблокирован: {display or path} похож на частичный файл после сорванной загрузки.\n\n"
+            f"Причина: {reason}\n\n"
+            "Удали этот файл с SD, затем залей G-code заново и запускай только после успешной проверки/видимого списка SD. "
+            "Так Little Hands не запустит файл без known hotbed profile или с неполным содержимым."
+        )
+        self.log(msg)
+        messagebox.showerror("Little Hands", msg)
+        return False
+
     def _confirm_power_cycle_before_next_sd_start(self) -> bool:
         if not self.next_sd_start_requires_power_cycle:
             return True
@@ -5903,6 +5977,8 @@ class K9ControlCenter:
         if not path:
             messagebox.showerror("K9 Control Center", "Выбери файл в секции 'Файлы для печати'.")
             return
+        if not self._guard_not_suspect_sd_upload(path, display):
+            return
         if not self._guard_sd_start_preconditions():
             return
 
@@ -5934,6 +6010,8 @@ class K9ControlCenter:
         display = self._selected_sd_display() or path or "-"
         if not path:
             messagebox.showerror("Little Hands", "Выбери файл в секции 'Файлы для печати'.")
+            return
+        if not self._guard_not_suspect_sd_upload(path, display):
             return
         if not self._guard_sd_start_preconditions():
             return
@@ -6187,6 +6265,7 @@ class K9ControlCenter:
         def task() -> None:
             out = sdtool.delete_file(self._port(), self._baud(), path)
             self._post("log", out.strip() or f"Удалён {path}")
+            self._clear_suspect_sd_upload(path)
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
 

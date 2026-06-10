@@ -6,7 +6,7 @@ Little Hands — это Linux-приложение для управления �
 - семейство плат: `ET4000+ / ET4000PLUS`
 - текущая кандидатная прошивка: `LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - базовый слайсер: `Cura 5.11`
-- нагрев стола: внешний `hotbed / warm mat`, не подключённый электрически к плате принтера
+- нагрев стола: внешний `hotbed / warm mat` для публичных файлов; локальный экспериментальный controlled-hotbed путь включается явной меткой Little Hands, а не обычным полем bed temperature в Cura
 
 Проект пока ещё сыроват, но уже реально работает и печатает.
 
@@ -17,6 +17,7 @@ Little Hands — это Linux-приложение для управления �
 - работает экспорт Cura
 - проверка G-code перед заливкой ловит опасные или явно битые файлы
 - работает мониторинг температуры и прогресса печати
+- для текущего локального K9 доступен experimental controlled-hotbed workflow с размеченным предпрогревом `35C`
 
 Что ещё сыровато:
 
@@ -66,6 +67,7 @@ Little Hands — это Linux-приложение для управления �
 - базовая прошивка для тестов: `LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin`
 - протестированное приложение: `tools/k9_control_center.py`
 - протестированная машина Cura: `lilHands K9 warm mat`
+- ожидаемый active machine id в Cura: `lilHands_k9_warmmat`
 - протестированный профиль Cura: `codex - K9 warm mat cautious`
 
 Важно:
@@ -125,6 +127,10 @@ Little Hands — это Linux-приложение для управления �
 - используй термостойкую поверхность печати
 - в проверенном сетапе использовался штатный перфорированный гибкий коврик на тёплой поверхности
 
+Для локальной controlled-hotbed ветки обычная Cura bed temperature остаётся `0C`; файл должен содержать явную метку `;LH_EXPERIMENTAL_HOTBED_TARGET:35` и non-blocking `M140 S35`, а Little Hands сам проверяет `B:` перед `M24`.
+
+Если свежий G-code с Desktop не содержит этой метки, Cura, скорее всего, слайсит старой машиной `lilHands`. Проверь `~/.config/cura/5.11/cura.cfg`: там должно быть `[cura] active_machine = lilHands_k9_warmmat`, затем сохрани G-code заново.
+
 ## Быстрый Старт
 
 1. Поставь Linux-зависимости:
@@ -139,10 +145,12 @@ python3 tools/k9_control_center.py
 
 4. В Cura выбери:
    - машина: `lilHands K9 warm mat`
+   - active machine id в `cura.cfg`: `lilHands_k9_warmmat`
    - профиль: `codex - K9 warm mat cautious`
    - brim: `14 mm`
    - настройка Cura: `Add machine prefix to job name` = `off`
    - поддержки для `mainFlasherTop.STL`: everywhere, interface / roof включены, support angle `35`
+   - start G-code содержит `;LH_EXPERIMENTAL_HOTBED_TARGET:35` и `M140 S35`
 
 Публичная зафиксированная копия Cura baseline лежит в [docs/cura/](docs/cura/).
 Ручное описание настроек для других версий слайсера: [docs/cura/SETTINGS.ru.md](docs/cura/SETTINGS.ru.md).
