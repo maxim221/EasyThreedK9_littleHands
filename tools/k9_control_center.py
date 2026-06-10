@@ -2325,7 +2325,7 @@ class K9ControlCenter:
 
         width = max(int(c.winfo_width() or 0), int(c.cget("width")))
         height = max(int(c.winfo_height() or 0), int(c.cget("height")))
-        left, right = 36, width - 8
+        left, right = 38, width - 46
         top, bottom = 26, height - 22
         plot_w = max(20, right - left)
         plot_h = max(20, bottom - top)
@@ -2354,38 +2354,66 @@ class K9ControlCenter:
         if not scale_data:
             scale_data = data
 
-        series = [
-            temp
-            for row in scale_data
-            for temp in row[1:]
-            if temp is not None and temp > 0.0
-        ]
-        if not series:
-            series = [temp for row in scale_data for temp in row[1:2] if temp is not None]
-        vmin = min(series)
-        vmax = max(series)
-        span = max(8.0, vmax - vmin)
-        pad = max(2.0, span * 0.18)
-        graph_min = max(0.0, vmin - pad)
-        graph_max = min(260.0, vmax + pad)
-        if (graph_max - graph_min) < 8.0:
-            center = (graph_max + graph_min) / 2.0
-            graph_min = max(0.0, center - 4.0)
-            graph_max = min(260.0, center + 4.0)
+        def scale_bounds(values: list[float], *, min_span: float, ceiling: float) -> tuple[float, float]:
+            if not values:
+                values = [0.0, ceiling]
+            vmin = min(values)
+            vmax = max(values)
+            span = max(min_span, vmax - vmin)
+            pad = max(min_span * 0.25, span * 0.18)
+            graph_min = max(0.0, vmin - pad)
+            graph_max = min(ceiling, vmax + pad)
+            if (graph_max - graph_min) < min_span:
+                center = (graph_max + graph_min) / 2.0
+                graph_min = max(0.0, center - min_span / 2.0)
+                graph_max = min(ceiling, center + min_span / 2.0)
+            return graph_min, graph_max
 
-        for frac, label_value in ((0.0, graph_min), (0.5, (graph_min + graph_max) / 2.0), (1.0, graph_max)):
+        hotend_series = [
+            value
+            for row in scale_data
+            for value in (
+                row[1] if len(row) > 1 else None,
+                row[2] if len(row) > 2 and row[2] and row[2] > 0.0 else None,
+            )
+            if value is not None
+        ]
+        bed_series = [
+            value
+            for row in scale_data
+            for value in (
+                row[3] if len(row) > 3 else None,
+                row[4] if len(row) > 4 else None,
+            )
+            if value is not None
+        ]
+        hotend_min, hotend_max = scale_bounds(hotend_series, min_span=8.0, ceiling=260.0)
+        bed_min, bed_max = scale_bounds(bed_series, min_span=6.0, ceiling=120.0)
+
+        for frac, label_value in ((0.0, hotend_min), (0.5, (hotend_min + hotend_max) / 2.0), (1.0, hotend_max)):
             y = bottom - int(plot_h * frac)
             c.create_line(left, y, right, y, fill="#22372d")
-            c.create_text(18, y, text=f"{label_value:.0f}", fill=colors["muted"], font=("DejaVu Sans", 8))
+            c.create_text(left - 8, y, anchor="e", text=f"{label_value:.0f}", fill="#b58900", font=("DejaVu Sans", 8))
+
+        if bed_series:
+            for frac, label_value in ((0.0, bed_min), (0.5, (bed_min + bed_max) / 2.0), (1.0, bed_max)):
+                y = bottom - int(plot_h * frac)
+                c.create_text(right + 8, y, anchor="w", text=f"{label_value:.0f}", fill="#2aa198", font=("DejaVu Sans", 8))
+            c.create_text(left - 8, top - 10, anchor="e", text="H C", fill="#b58900", font=("DejaVu Sans", 8, "bold"))
+            c.create_text(right + 8, top - 10, anchor="w", text="B C", fill="#2aa198", font=("DejaVu Sans", 8, "bold"))
 
         def map_x(ts: float) -> float:
             return left + ((ts - t0) / max(1e-6, (t1 - t0))) * plot_w
 
-        def map_y(temp: float) -> float:
-            temp = max(graph_min, min(graph_max, temp))
-            return bottom - ((temp - graph_min) / max(1e-6, (graph_max - graph_min))) * plot_h
+        def map_hotend_y(temp: float) -> float:
+            temp = max(hotend_min, min(hotend_max, temp))
+            return bottom - ((temp - hotend_min) / max(1e-6, (hotend_max - hotend_min))) * plot_h
 
-        def collect_points(index: int, *, positive_only: bool = False) -> list[float]:
+        def map_bed_y(temp: float) -> float:
+            temp = max(bed_min, min(bed_max, temp))
+            return bottom - ((temp - bed_min) / max(1e-6, (bed_max - bed_min))) * plot_h
+
+        def collect_points(index: int, map_y, *, positive_only: bool = False) -> list[float]:
             points: list[float] = []
             for row in data:
                 value = row[index] if len(row) > index else None
@@ -2394,10 +2422,10 @@ class K9ControlCenter:
                 points.extend((map_x(row[0]), map_y(value)))
             return points
 
-        hotend_points = collect_points(1)
-        hotend_target_points = collect_points(2, positive_only=True)
-        bed_points = collect_points(3)
-        bed_target_points = collect_points(4, positive_only=True)
+        hotend_points = collect_points(1, map_hotend_y)
+        hotend_target_points = collect_points(2, map_hotend_y, positive_only=True)
+        bed_points = collect_points(3, map_bed_y)
+        bed_target_points = collect_points(4, map_bed_y)
 
         if len(hotend_target_points) >= 4:
             c.create_line(*hotend_target_points, fill="#d33682", width=1, dash=(4, 2))
@@ -2440,6 +2468,9 @@ class K9ControlCenter:
             else "B ?/?C"
         )
         c.create_text(left + 4, height - 8, anchor="w", text=f"{hotend_text}   {bed_text}", fill=colors["text"], font=("DejaVu Sans", 9, "bold"))
+        bed_pwm = self.last_bed_heater_power if self.last_bed_heater_power is not None else 0
+        bed_badge = f"{bed_text}  B@:{bed_pwm}"
+        c.create_text(right - 6, top + 16, anchor="e", text=bed_badge, fill="#2aa198", font=("DejaVu Sans", 10, "bold"))
         c.create_text(right - 4, height - 7, anchor="e", text="15 min", fill=colors["muted"], font=("DejaVu Sans", 8))
 
     def _apply_theme(self) -> None:

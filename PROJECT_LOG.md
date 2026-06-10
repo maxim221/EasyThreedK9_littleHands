@@ -3157,3 +3157,14 @@ After each test print, append:
 - Verification:
   - no physical printer motion or heating was run
   - printer responded after power cycle; `UFCLASSI.GCO` was removed from SD
+
+## 2026-06-10 Hotbed Graph Readability
+
+- Field trigger:
+  - during the first UF Measure Tool print, the operator reported that `Hotbed` and `Hotbed target` looked merged and nearly flat on the shared hotend-scale temperature graph
+  - with hotend temperatures near print range and hotbed near room/warm-bed range, a single `0-260C`-ish visual scale hides useful bed changes
+- UI change:
+  - the temperature graph now keeps hotend on the left scale and draws hotbed/hotbed target against a separate right-side bed scale
+  - the graph overlays a bold current hotbed readout (`B current/target`, `B@`) so bed values remain readable even when the line is flat
+- Verification:
+  - no running printer process was touched; the change applies after restarting Little Hands
