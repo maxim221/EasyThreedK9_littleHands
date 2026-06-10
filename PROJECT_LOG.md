@@ -3142,6 +3142,8 @@ After each test print, append:
 - App/tool change:
   - `tools/k9_marlin_sd.py make_sd_name()` now preserves the last meaningful CamelCase token for long names, ignoring local suffixes such as `K9TEST`
   - the UF test files now map to distinct short SD names: `UFBOT.GCO` and `UFTOP.GCO`
+  - if binary G-code upload fails, Little Hands now includes a short fallback reason in the progress stage instead of only showing plain `Upload (fallback)`
+  - the upload log now distinguishes normal faster binary upload from much slower text fallback for large G-code files
 - Regression:
   - `tools/regression_checks.py` now checks this Top/Bot case directly so future helpers do not silently collapse distinct test models onto the same SD filename
 - Verification:

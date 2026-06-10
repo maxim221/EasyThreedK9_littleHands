@@ -1103,7 +1103,8 @@ def upload_gcode_auto(
     except Exception as exc:
         transfer_error = exc
         if progress_cb:
-            progress_cb("Upload (fallback)", 0.0)
+            reason = " ".join(str(exc).split())[:140] or exc.__class__.__name__
+            progress_cb(f"Upload (fallback: {reason})", 0.0)
         try:
             upload_gcode_text(port, baud, source, dest_name, progress_cb=progress_cb)
         except UploadCancelled:

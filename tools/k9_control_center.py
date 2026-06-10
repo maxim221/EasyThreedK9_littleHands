@@ -5355,7 +5355,10 @@ class K9ControlCenter:
             self._post("log", f"Локальный файл: {source}")
             if patched:
                 self._post("log", f"На SD будет записана подготовленная копия: {upload_source}")
-            self._post("log", f"Размер файла: {size_mib:.2f} MiB. Большие G-code могут писаться 1-5 минут.")
+            self._post(
+                "log",
+                f"Размер файла: {size_mib:.2f} MiB. Binary upload обычно быстрее; text fallback для больших G-code может идти 10-25+ минут.",
+            )
             self._post("progress", ("Upload (preflight): 0.0%", 0.0))
             self._post("files-status", f"Заливка G-code: preflight 0.0%")
             try:
@@ -5410,7 +5413,10 @@ class K9ControlCenter:
             self._post("log", f"Локальный файл: {source}")
             if patched:
                 self._post("log", f"На SD будет записана подготовленная копия: {upload_source}")
-            self._post("log", f"Размер файла: {size_mib:.2f} MiB. Большие G-code могут писаться 1-5 минут.")
+            self._post(
+                "log",
+                f"Размер файла: {size_mib:.2f} MiB. Binary upload обычно быстрее; text fallback для больших G-code может идти 10-25+ минут.",
+            )
             self._post("files-status", "Заливка и старт: preflight 0.0%")
             try:
                 method = sdtool.upload_gcode_auto(self._port(), self._baud(), upload_source, dest, progress_cb=on_progress)
