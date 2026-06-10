@@ -4863,7 +4863,7 @@ class K9ControlCenter:
         path = filedialog.askopenfilename(
             title="Выбрать G-code",
             parent=self.files_window if self.files_window and self.files_window.winfo_exists() else self.root,
-            filetypes=[("G-code", "*.gcode *.gco *.g"), ("All files", "*.*")],
+            filetypes=[("G-code", "*.gcode *.gco *.g *.GCODE *.GCO *.G"), ("All files", "*.*")],
         )
         if path:
             self.local_gcode_var.set(path)

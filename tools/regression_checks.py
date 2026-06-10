@@ -310,6 +310,11 @@ def main() -> int:
         failures,
     )
     require(
+        "*.GCODE *.GCO *.G" in app,
+        "The local G-code file picker must show uppercase .GCO files prepared for 8.3 SD names.",
+        failures,
+    )
+    require(
         "_preheat_hotbed_before_sd_start" in app
         and "_preheat_hotbed_for_sd_start" in app
         and "self._preheat_hotbed_before_sd_start(dest, source.name, upload_source)" in app

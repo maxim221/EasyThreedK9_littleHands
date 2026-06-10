@@ -3194,3 +3194,15 @@ After each test print, append:
   - updated hotbed installation notes, printer/firmware notes, Cura settings, in-app manual text, and regression checks for the experimental controlled-hotbed workflow
 - Verification:
   - no physical printer motion or heating was run during the code change
+
+## 2026-06-10 Uppercase GCO Picker Fix
+
+- Field trigger:
+  - the prepared second-part file `exports/UFTOP35.GCO` existed on disk, but the Little Hands file picker did not show it under the `G-code` filter
+  - screenshot inspection showed the picker filter was `*.gcode *.gco *.g`; on Linux this did not match uppercase `.GCO` filenames used for 8.3 SD names
+- App change:
+  - expanded the local G-code picker filter to include `*.GCODE`, `*.GCO`, and `*.G`
+- Regression:
+  - regression checks now pin uppercase `.GCO` visibility in the picker
+- Operator note:
+  - without restarting the app, switching the picker to `All files` remains the immediate workaround
