@@ -199,7 +199,9 @@ Experimental controlled-hotbed branch:
 - the operator's independent surface sensor near the bed center read about `24C -> 33C -> 31C`, so the real surface can be a few degrees hotter than Marlin `B:` during this first setup
 - second operator-watched heat sanity check used `M140 S35`; `B:` rose smoothly from about `24C` to `34.57C`, then after `M140 S0` the bed output stayed `B@:0` while Marlin `B:` peaked near `36C` and began cooling; the operator's external surface sensor peaked around `40C` and was around `36C` at the end of the test
 - after the hotbed install, level the bed at all five Little Hands points (`FL` / `C` / `FR` / `BL` / `BR`) with a `0.05 mm` feeler at `Z0`; it should have light, even drag. Treat `0.10 mm` only as an upper sanity check for now, because Cura already prints the first layer around `Z0.20` after `G92 X0 Y0 Z0`
-- keep Cura bed temperature at `0` and do not add `M140/M190 S>0` to print G-code until a full print-workflow validation is logged
+- keep ordinary Cura bed temperature at `0`; for the next watched PLA test after lifted corners, use a separate experimental-hotbed file marked `;LH_EXPERIMENTAL_HOTBED_TARGET:35` with non-blocking `M140 S35`
+- for such files, Little Hands preheats the hotbed to the target before `M24`, then runs the normal staged hotend preheat; do not add `M190` to SD files
+- manual `Hotbed 35C` / `Hotbed 40C` / `Hotbed off` buttons are available for watched tests and shutdown; `35C` is the first step after lifted corners, `40C` only if `35C` is not enough
 - further validation heat tests should remain operator-watched: confirm plausible cold `B:` first, use a bounded target, verify `B:` rises, and turn the bed off with `M140 S0`
 
 ## 8. Cura Baseline

@@ -28,6 +28,8 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "exports"
 VALIDATED_MODULEBOT_ORIENTED_STL = DEFAULT_OUTPUT_DIR / "mbnorm01_moduleBot_normal_orientation.stl"
 K9_MAX_EMITTED_PRINT_ACCEL = 250.0
 K9_MAX_EMITTED_TRAVEL_ACCEL = 200.0
+K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 40.0
+HOTBED_EXPERIMENTAL_MARKER = ";LH_EXPERIMENTAL_HOTBED_TARGET:"
 
 
 def is_unvalidated_modulebot_stl(path: Path) -> bool:
@@ -109,14 +111,21 @@ def cura_engine_prefix(mount_point: Path) -> list[str]:
     ]
 
 
-def k9_profile_settings(brim_width: float) -> tuple[dict[str, str], dict[str, str]]:
+def k9_profile_settings(brim_width: float, hotbed_target: float = 0.0) -> tuple[dict[str, str], dict[str, str]]:
+    hotbed_target = max(0.0, min(float(hotbed_target), K9_MAX_EXPERIMENTAL_HOTBED_TARGET))
+    hotbed_start = ""
+    if hotbed_target > 0.0:
+        hotbed_start = (
+            f"\n{HOTBED_EXPERIMENTAL_MARKER}{hotbed_target:g}"
+            f"\nM140 S{hotbed_target:g} ;Experimental controlled hotbed target; Little Hands preheats before M24"
+        )
     start_gcode = """; Little Hands manual-zero workflow for EasyThreed K9 / K9 Plus
 ; Expected fixed start pose on this printer:
 ; X = fully left, Y = bed fully back (away from operator), Z = nozzle touching bed
 ; This pose is treated as logical 0,0,0. Do not G28 before print.
 G92 X0 Y0 Z0
 G1 Z10.0 F600
-G92 E0"""
+G92 E0""" + hotbed_start
     end_gcode = """M204 P250 T120 ;Gentle final presentation moves for the small Y-bed
 M104 S0 ;Hotend off
 M140 S0 ;Bed off in G-code even though bed is external
@@ -281,10 +290,11 @@ def build_cura_command(
     brim_width: float,
     mesh_position_x: float,
     mesh_position_y: float,
+    hotbed_target: float = 0.0,
 ) -> list[str]:
     definitions = mount_point / "share/cura/resources/definitions"
     extruders = mount_point / "share/cura/resources/extruders"
-    global_settings, extruder_settings = k9_profile_settings(brim_width)
+    global_settings, extruder_settings = k9_profile_settings(brim_width, hotbed_target=hotbed_target)
 
     cmd = cura_engine_prefix(mount_point) + [
         "slice",
@@ -435,7 +445,12 @@ def cap_m204_commands(lines: list[str]) -> int:
     return replacements
 
 
-def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float, float], brim_width: float) -> None:
+def patch_header_and_footer(
+    path: Path,
+    bounds: tuple[float, float, float, float, float],
+    brim_width: float,
+    hotbed_target: float = 0.0,
+) -> None:
     min_x, max_x, min_y, max_y, max_z = bounds
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     filament_m = estimate_filament_m(lines)
@@ -459,10 +474,13 @@ def patch_header_and_footer(path: Path, bounds: tuple[float, float, float, float
 
     if not any(line.startswith(";LH_M204_CAPPED:") for line in lines[:30]):
         lines.insert(11, f";LH_M204_CAPPED:{capped_m204}")
+    if hotbed_target > 0.0 and not any(line.startswith(HOTBED_EXPERIMENTAL_MARKER) for line in lines[:30]):
+        lines.insert(12, f"{HOTBED_EXPERIMENTAL_MARKER}{hotbed_target:g}")
 
     footer = (
         ';SETTING_3 {"global_quality": "[values]\\n'
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
+        f'experimental_hotbed_target = {hotbed_target:g}\\n'
         'layer_height = 0.16\\nlayer_height_0 = 0.2\\n'
         'speed_print = 11\\nspeed_wall = 8\\nspeed_topbottom = 8\\n'
         'speed_infill = 11\\nspeed_travel = 25\\nspeed_layer_0 = 6\\n'
@@ -516,6 +534,12 @@ def main() -> int:
     parser.add_argument("--appimage", type=Path, default=DEFAULT_APPIMAGE, help="UltiMaker Cura 5.11 AppImage")
     parser.add_argument("--brim-width", type=float, default=14.0, help="Brim width in mm")
     parser.add_argument("--bed-size", type=float, default=100.0, help="Validated square bed size in mm")
+    parser.add_argument(
+        "--experimental-hotbed-target",
+        type=float,
+        default=0.0,
+        help="Optional experimental controlled-hotbed target in C. Emits an LH marker and M140, but leaves Cura bed temperature at 0.",
+    )
     parser.add_argument("--sd-mount", type=Path, default=None, help="Optional mounted SD card path to copy to")
     parser.add_argument("--sd-name", default=None, help="Optional filename to use on SD")
     parser.add_argument(
@@ -549,6 +573,13 @@ def main() -> int:
     if not appimage.is_file():
         print(f"Error: Cura AppImage not found: {appimage}", file=sys.stderr)
         return 1
+    hotbed_target = float(args.experimental_hotbed_target or 0.0)
+    if hotbed_target < 0.0 or hotbed_target > K9_MAX_EXPERIMENTAL_HOTBED_TARGET:
+        print(
+            f"Error: experimental hotbed target must be 0..{K9_MAX_EXPERIMENTAL_HOTBED_TARGET:g}C for this K9 workflow.",
+            file=sys.stderr,
+        )
+        return 1
 
     output = args.output
     if output is None:
@@ -563,7 +594,15 @@ def main() -> int:
 
     mount_point, mount_proc = mount_appimage(appimage)
     try:
-        cmd = build_cura_command(mount_point, stl, output, args.brim_width, mesh_position_x, mesh_position_y)
+        cmd = build_cura_command(
+            mount_point,
+            stl,
+            output,
+            args.brim_width,
+            mesh_position_x,
+            mesh_position_y,
+            hotbed_target=hotbed_target,
+        )
         started = time.monotonic()
         proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if proc.returncode:
@@ -571,7 +610,7 @@ def main() -> int:
             return proc.returncode
         bounds = gcode_bounds(output)
         validate_bounds(bounds, args.bed_size)
-        patch_header_and_footer(output, bounds, args.brim_width)
+        patch_header_and_footer(output, bounds, args.brim_width, hotbed_target=hotbed_target)
         print(f"Sliced {stl.name} -> {output}")
         print(
             "Bounds: "
@@ -579,6 +618,8 @@ def main() -> int:
             f"Y {bounds[2]:.3f}..{bounds[3]:.3f}, Z {bounds[4]:.2f}"
         )
         print(f"SHA256: {sha256(output)}")
+        if hotbed_target > 0.0:
+            print(f"Experimental hotbed target: {hotbed_target:g}C")
         print(f"Elapsed: {time.monotonic() - started:.1f}s")
 
         if args.sd_mount:

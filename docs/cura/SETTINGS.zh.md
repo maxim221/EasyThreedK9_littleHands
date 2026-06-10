@@ -53,7 +53,7 @@ G1 Y95 F240 ;Move bed toward the operator
 - 第一层热端：`225C`
 - 后续热端：`224C`
 - G-code 中的热床温度：`0C`
-- 实际外部 warm mat / hotbed：手动预热到约 `40-50C`
+- 实际外部 warm mat：手动预热到约 `40-50C`；当前 experimental controlled hotbed 测试从 `35C` 开始
 - Cura part cooling：`off`
 - 重要：当前 K9 只有一个物理风扇，它作为 firmware-managed hotend fan 使用。Little Hands / helper 会移除 slicer 的 `M106/M107`，避免 Cura 把这个风扇当作模型冷却风扇控制。
 - Minimum layer time：`10 s`
@@ -181,11 +181,11 @@ G1 Y95 F240 ;Move bed toward the operator
 - 包含热端目标温度命令，例如 `M104` / `M109`
 - 早期阻塞 `M109` 应保留在 SD 文件中；Little Hands 仍会在 `M24` 前用分段 host-side 预热和最终 `M109` 确认 hotend 已加热，文件中的 `M109` 作为额外安全等待保留
 - 旧的已准备 `M104`-only 文件也由同一个 `M24` 前分段 host preheat 支持
-- bed target 保持 `0C`
+- 普通 bed target 保持 `0C`；experimental-hotbed 测试使用带 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 标记的单独文件，而不是标准 Cura 热床温度
 - slicer bounds 正常，并位于 `100 x 100 mm` 平台内
 - 高度位于 `100 mm` 内
 - 不出现 `Filament used: 0m`
-- 没有 `M18/M84`、没有热床加热 `M140/M190 S>0`，body `M204` 不超过安全的 K9 baseline
+- 没有 `M18/M84`、没有阻塞式 `M190`、没有未标记的热床加热 `M140/M190 S>0`，body `M204` 不超过安全的 K9 baseline
 - preview 中在模型需要的位置显示支撑
 - 导出的文件名不应以 `CFFFP_` 开头；如果出现该前缀，请关闭 Cura 的 `Add machine prefix to job name` 后重新保存
 

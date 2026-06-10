@@ -3170,3 +3170,27 @@ After each test print, append:
   - added a matching hotend readout (`H current/target`, `@`) above the hotend plot area
 - Verification:
   - no running printer process was touched; the change applies after restarting Little Hands
+
+## 2026-06-10 Experimental Hotbed Start Workflow
+
+- Field trigger:
+  - the first UF Measure Tool part printed successfully, but the operator reported slight lifted corners on the model bottom
+  - the operator also correctly noticed that there was no app button to turn the newly installed controlled hotbed on, and that the second part had been sliced with bed target `0`
+- Decision:
+  - lifted corners are enough signal to try the next PLA print with hotbed, but the first controlled-print target should stay conservative: `35C`
+  - `40C` remains the next watched step only if `35C` still does not hold the corners
+  - do not switch the whole Cura baseline to bed heat; ordinary Cura bed temperature stays `0`
+- App change:
+  - added manual `Hotbed 35C`, `Hotbed 40C`, and `Hotbed off` controls
+  - positive manual hotbed targets are blocked during active SD printing so the operator does not silently override the running G-code stream
+  - `Hotbed off` remains available as a safety `M140 S0` path
+  - added support for explicitly marked experimental hotbed G-code using `;LH_EXPERIMENTAL_HOTBED_TARGET:<target>`
+  - for marked files, Little Hands preheats the hotbed to the target and verifies `B:` before hotend preheat and before `M24`
+  - blocking `M190` remains rejected; bed waiting must happen on the host side where Little Hands can fail safely before the SD print starts
+- Slicer/helper change:
+  - `tools/k9_cura_slice.py` now accepts `--experimental-hotbed-target`
+  - the helper emits the Little Hands hotbed marker and a non-blocking `M140 S<target>`, while keeping Cura `material_bed_temperature` at `0`
+- Documentation:
+  - updated hotbed installation notes, printer/firmware notes, Cura settings, in-app manual text, and regression checks for the experimental controlled-hotbed workflow
+- Verification:
+  - no physical printer motion or heating was run during the code change

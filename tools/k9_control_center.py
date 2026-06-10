@@ -72,6 +72,13 @@ PRINT_PREHEAT_MIN_RISE_C = 8.0
 PRINT_PREHEAT_STAGE_TARGETS_C = (60.0, 100.0, 150.0, 200.0)
 PRINT_PREHEAT_STAGE_MARGIN_C = 5.0
 PRINT_PREHEAT_STAGE_POLL_SEC = 5.0
+HOTBED_PREHEAT_MARGIN_C = 1.0
+HOTBED_PREHEAT_TIMEOUT_SEC = 420.0
+HOTBED_PREHEAT_POLL_SEC = 5.0
+HOTBED_PREHEAT_TARGET_GRACE_SEC = 25.0
+HOTBED_PREHEAT_HEATER_ZERO_GRACE_SEC = 45.0
+HOTBED_PREHEAT_NO_RISE_GRACE_SEC = 120.0
+HOTBED_PREHEAT_MIN_RISE_C = 2.0
 K9_PRINT_BED_SIZE_MM = 100.0
 K9_MAX_PRINT_Z_MM = 100.0
 K9_GCODE_BOUNDS_TOLERANCE_MM = 0.2
@@ -139,6 +146,9 @@ FILAMENT_PREHEAT_TARGET_C = 200.0
 FILAMENT_EXTRUDE_MIN_C = 180.0
 FILAMENT_FEEDRATE = 90
 FILAMENT_MOVE_TIMEOUT_SEC = 75.0
+HOTBED_MANUAL_TARGETS_C = (35.0, 40.0)
+HOTBED_MAX_MANUAL_TARGET_C = 40.0
+HOTBED_EXPERIMENTAL_MARKER = ";LH_EXPERIMENTAL_HOTBED_TARGET:"
 MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
 LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
 M92_RE = re.compile(r"M92\s+X([-\d.]+)\s+Y([-\d.]+)\s+Z([-\d.]+)\s+E([-\d.]+)")
@@ -275,7 +285,7 @@ MANUAL_TEXT = textwrap.dedent(
     Аппаратная база
     - Прошивка: LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin.
     - Единственный вентилятор принтера используется как hotend auto-fan на FAN1: ниже примерно 45C выключен, выше примерно 45C включён.
-    - Внешний warm bed / hotbed не управляется прошивкой принтера.
+    - Публичный baseline остаётся с внешним warm mat / Cura bed temperature 0. Экспериментальная LH v6 ветка умеет управлять подключённым hotbed, но только через явные кнопки Little Hands или помеченный experimental-hotbed G-code.
     - В этом workflow не используется обычный Marlin G28. У этого K9 в проверенной конфигурации нет надёжного home по концевикам.
     - Оси с точки зрения пользователя: X двигает голову влево/вправо, Y двигает стол к себе/от себя в плоскости печати, Z двигает голову вверх/вниз.
 
@@ -294,7 +304,7 @@ MANUAL_TEXT = textwrap.dedent(
     4. Нажми "Запомнить старт".
     5. Выбери файл в блоке "Файлы на SD принтера".
     6. Нажми "Старт печати".
-    7. Little Hands сначала подтверждает нагрев hotend ступенями M104 и финальным M109, затем возвращает сопло в сохранённый X0 Y0 Z0 и только после этого отправляет M23/M24. Если нагрев не подтверждён, печать не стартует.
+    7. Если файл помечен `LH_EXPERIMENTAL_HOTBED_TARGET`, Little Hands сначала прогревает hotbed до этой цели. Затем он подтверждает нагрев hotend ступенями M104 и финальным M109, возвращает сопло в сохранённый X0 Y0 Z0 и только после этого отправляет M23/M24. Если нагрев не подтверждён, печать не стартует.
     8. После старта печати USB-телеметрия может временно молчать. Если принтер греется, двигается или печатает, не делай power cycle только из-за молчания телеметрии.
 
     После штатного завершения печати
@@ -336,6 +346,7 @@ MANUAL_TEXT = textwrap.dedent(
     - "К сохранённому старту" возвращает к сохранённому нулю или предлагает guarded recovery после остановленной/завершённой печати.
     - "Моторы выкл" выключает моторы и сбрасывает доверие к home.
     - "Hotend 200C" задаёт ручной нагрев hotend для загрузки/проверки филамента; "Hotend off" выключает этот ручной нагрев.
+    - "Hotbed 35C" / "40C" задаёт ручную цель стола для наблюдаемого теста; "Hotbed off" отправляет M140 S0. После поднятых краёв первой детали следующий разумный тест — 35C.
     - "Протянуть" и "Назад" двигают только экструдер E на выбранный E-шаг. Протяжка заблокирована во время активной SD-печати и при hotend ниже 180C.
     - Кнопки движения перемещают выбранную ось на выбранный шаг. Ось стола намеренно двигается мягко, чтобы не ловить пропуски шагов.
     - Калибровка стола двигает по известным точкам; её кнопки доступны только после "Запомнить старт", когда текущий старт доверенный.
@@ -354,6 +365,7 @@ MANUAL_TEXT = textwrap.dedent(
     - Если движение выглядит неправильным, выключи питание и заново выставь старт вручную.
     - После завершённой, остановленной или сорванной SD-печати приложение потребует подтверждённый power cycle и повторный "Запомнить старт" перед новым M24.
     - Тихие щелчки в начале прогрева hotend допустимы только если дальше температура проходит ступени и резко растёт. При запахе, громких щелчках, потере цели или отсутствии роста температуры останавливай нагрев.
+    - Не оставляй включённый hotbed без присмотра. При запахе, горячем разъёме, нестабильном B: или B@, который не уходит в 0 после Hotbed off, выключай питание.
     - Если после печати горизонтальная ось головы залипла, не сохраняй новый старт сразу. Сначала освободи/проверь ось короткими jog и убедись, что возврат к старту физически завершился.
     """
 ).strip()
@@ -396,7 +408,7 @@ MANUAL_TEXTS = {
         Hardware baseline
         - Firmware: LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin
         - The single printer fan is used as the hotend auto-fan on FAN1: off below about 45C, on above about 45C.
-        - The warm bed / hotbed is external and is not controlled by the printer firmware.
+        - The public baseline still uses an external warm mat / Cura bed temperature 0. The experimental LH v6 branch can control the connected hotbed, but only through explicit Little Hands buttons or marked experimental-hotbed G-code.
         - Do not use normal Marlin G28 homing in this workflow. This K9 has no reliable endstop-based home in the validated setup.
         - Operator-facing motion: X moves the head left/right, Y moves the bed toward/away in the print plane, Z moves the head up/down.
 
@@ -415,7 +427,7 @@ MANUAL_TEXTS = {
         4. Press "Save start".
         5. Select a file in "Printer SD files".
         6. Press "Start print".
-        7. Little Hands first confirms hotend heatup with staged M104 warmup and a final M109, then returns the nozzle to the saved X0 Y0 Z0 and only then sends M23/M24. If heatup is not confirmed, the print does not start.
+        7. If the file is marked with `LH_EXPERIMENTAL_HOTBED_TARGET`, Little Hands first preheats the hotbed to that target. It then confirms hotend heatup with staged M104 warmup and a final M109, returns the nozzle to the saved X0 Y0 Z0, and only then sends M23/M24. If heatup is not confirmed, the print does not start.
         8. After the print begins, USB telemetry can be quiet for a while. If the printer is heating, moving, or printing, do not power-cycle just because telemetry is quiet.
 
         After a normal print finish
@@ -475,6 +487,7 @@ MANUAL_TEXTS = {
         - If motion looks wrong, cut power and re-establish the start pose manually.
         - After a completed, stopped, or failed SD print/start, the app requires a confirmed power cycle and a fresh "Save start" before the next M24.
         - Faint clicks at the beginning of hotend warmup are acceptable only if the temperature later passes the staged gates and climbs rapidly. Stop heating for smell, loud clicks, target loss, or no temperature rise.
+        - Do not leave the hotbed on unattended. Cut power for smell, hot connectors, unstable B:, or B@ that does not fall to 0 after Hotbed off.
         - If the head-left/right axis sticks after a print, do not save a new start immediately. First free/check the axis with short jogs and confirm that return-to-start physically completed.
         """
     ).strip(),
@@ -488,7 +501,7 @@ MANUAL_TEXTS = {
         硬件基线
         - 固件：LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin
         - 打印机唯一风扇接在 FAN1，作为 hotend auto-fan：约 45C 以下关闭，约 45C 以上开启。
-        - 外部 warm bed / hotbed 不由打印机固件控制。
+        - 公开基线仍使用外部 warm mat / Cura 热床温度 0。实验性 LH v6 分支可以控制已连接的 hotbed，但只能通过 Little Hands 的明确按钮或带标记的 experimental-hotbed G-code。
         - 此工作流不要使用普通 Marlin G28 回零。当前验证配置中，这台 K9 没有可靠的限位开关 home。
         - 面向操作者的运动：X 是喷头左右，Y 是平台前后，Z 是喷头上下。
 
@@ -507,7 +520,7 @@ MANUAL_TEXTS = {
         4. 点击 "Save start"。
         5. 在 "Printer SD files" 中选择文件。
         6. 点击 "Start print"。
-        7. Little Hands 先用分段 M104 预热和最终 M109 确认 hotend 已加热，然后把喷嘴返回保存的 X0 Y0 Z0，最后才发送 M23/M24。如果加热没有确认，打印不会启动。
+        7. 如果文件带有 `LH_EXPERIMENTAL_HOTBED_TARGET` 标记，Little Hands 会先把 hotbed 预热到该目标。然后它用分段 M104 和最终 M109 确认 hotend 已加热，把喷嘴返回保存的 X0 Y0 Z0，最后才发送 M23/M24。如果加热没有确认，打印不会启动。
         8. 打印开始后，USB 遥测可能会安静一段时间。如果打印机正在加热、移动或出料，不要仅因遥测安静就断电。
 
         正常打印完成后
@@ -567,6 +580,7 @@ MANUAL_TEXTS = {
         - 如果运动看起来不对，立即断电，然后手动重新建立起点。
         - 在完成、停止或失败的 SD 打印 / 启动之后，应用会要求确认断电重启并重新 "Save start"，然后才允许下一次 M24。
         - Hotend 预热初期的轻微咔哒声只有在之后温度通过分段门槛并快速上升时才算可接受。若有异味、声音变大、目标丢失或温度不升，请停止加热。
+        - hotbed 开启后不要无人看守。如有异味、接头发热、B: 不稳定，或点击 Hotbed off 后 B@ 没有回到 0，请切断电源。
         - 如果打印后喷头左右轴卡住，不要立刻保存新起点。先用短 jog 释放/检查该轴，并确认 return-to-start 已经实际完成。
         """
     ).strip(),
@@ -1134,6 +1148,7 @@ class K9ControlCenter:
             "max_z": float(max_z) if isinstance(max_z, (int, float)) else None,
             "bounds": bounds,
             "hotend_target": info.get("hotend_target"),
+            "experimental_hotbed_target": info.get("experimental_hotbed_target"),
             "has_blocking_m109": bool(info.get("has_blocking_m109")),
             "cura_estimate_s": info.get("cura_estimate_s"),
         }
@@ -1322,6 +1337,146 @@ class K9ControlCenter:
         display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
         text = self._expected_finish_time_text(self.current_print_file, display)
         self.print_expected_finish_var.set(self._format_label_value("expected_finish", text))
+
+    def _hotbed_target_for_print(self, sd_path: str, display: str, source: Path | None = None) -> float:
+        profile = self._profile_for_print(sd_path, display, source)
+        target = profile.get("experimental_hotbed_target") if isinstance(profile, dict) else None
+        if not isinstance(target, (int, float)):
+            return 0.0
+        target = float(target)
+        if target <= 0.0 or target > HOTBED_MAX_MANUAL_TARGET_C:
+            return 0.0
+        return target
+
+    def _preheat_hotbed_before_sd_start(self, sd_path: str, display: str, source: Path | None = None) -> None:
+        target = self._hotbed_target_for_print(sd_path, display, source)
+        if target <= 0.0:
+            return
+        self._post(
+            "log",
+            f"G-code помечен experimental hotbed {target:.0f}C: сначала прогреваю стол на стороне Little Hands. "
+            "Если B: не подтвердит нагрев, M24 не будет отправлен.",
+        )
+        self._preheat_hotbed_for_sd_start(target)
+
+    def _preheat_hotbed_for_sd_start(self, target: float) -> None:
+        target = max(0.0, min(float(target), HOTBED_MAX_MANUAL_TARGET_C))
+        if target <= 0.0:
+            return
+        self._post("files-status", f"Предпрогрев hotbed: цель {target:.0f}C")
+        self._post("progress", (f"Предпрогрев hotbed: цель {target:.0f}C", 0.0))
+        deadline = time.monotonic() + HOTBED_PREHEAT_TIMEOUT_SEC
+        first_temp: float | None = None
+        first_temp_ts = 0.0
+        last_logged = 0.0
+        target_zero_since = 0.0
+        heater_zero_since = 0.0
+        heater_positive_seen = False
+        slow_rise_warned = False
+
+        def send_hotbed_off() -> None:
+            try:
+                sdtool.run_commands_wait_ok(
+                    self._port(),
+                    self._baud(),
+                    ["M140 S0"],
+                    per_command_timeout=12.0,
+                )
+            except Exception:
+                pass
+
+        try:
+            out = sdtool.run_commands_wait_ok(
+                self._port(),
+                self._baud(),
+                [f"M140 S{target:.0f}", "M105"],
+                per_command_timeout=12.0,
+            )
+            self._post("metrics", ("m105", out))
+            while time.monotonic() < deadline:
+                current, hotend_target, heater, bed_current, bed_target, bed_heater = parse_m105_temperatures(out)
+                if bed_current is not None and bed_target is not None:
+                    now = time.monotonic()
+                    if first_temp is None:
+                        first_temp = bed_current
+                        first_temp_ts = now
+                    if bed_heater is not None and bed_heater > 0:
+                        heater_positive_seen = True
+                        heater_zero_since = 0.0
+                    self._post("temp", (current, hotend_target, heater, bed_current, bed_target, bed_heater))
+                    heater_text = f" B@:{bed_heater}" if bed_heater is not None else " B@:?"
+                    pct = max(0.0, min(100.0, (bed_current / max(target, 1.0)) * 100.0))
+                    self._post("progress", (f"Предпрогрев hotbed: {bed_current:.1f}/{bed_target:.0f}C{heater_text}", pct))
+                    if now - last_logged >= 8.0:
+                        last_logged = now
+                        self._post("log", f"Предпрогрев hotbed: {bed_current:.1f}/{bed_target:.0f}C{heater_text}")
+                    if bed_current >= target - HOTBED_PREHEAT_MARGIN_C and bed_target > 0.0:
+                        self._post("progress", (f"Hotbed готов: {bed_current:.1f}/{bed_target:.0f}C", 100.0))
+                        self._post(
+                            "log",
+                            f"Hotbed готов к печати: {bed_current:.1f}/{bed_target:.0f}C{heater_text}. "
+                            "Перехожу к предпрогреву hotend.",
+                        )
+                        return
+                    if bed_target <= 0.0:
+                        target_zero_since = target_zero_since or now
+                        if now - target_zero_since >= HOTBED_PREHEAT_TARGET_GRACE_SEC:
+                            raise RuntimeError(
+                                "Hotbed не принял цель нагрева перед SD-стартом: M105 показывает B:/0C. "
+                                "Стол выключен командой M140 S0; печать не запускаю."
+                            )
+                    else:
+                        target_zero_since = 0.0
+                    if (
+                        bed_heater is not None
+                        and bed_heater <= 0
+                        and bed_target > 0.0
+                        and bed_current < target - HOTBED_PREHEAT_MARGIN_C
+                        and not heater_positive_seen
+                    ):
+                        heater_zero_since = heater_zero_since or now
+                        if now - heater_zero_since >= HOTBED_PREHEAT_HEATER_ZERO_GRACE_SEC:
+                            raise RuntimeError(
+                                f"Hotbed получил цель {bed_target:.0f}C, но B@ остаётся 0 при {bed_current:.1f}C. "
+                                "Стол выключен командой M140 S0; проверь питание/разъём hotbed."
+                            )
+                    else:
+                        heater_zero_since = 0.0
+                    if (
+                        first_temp is not None
+                        and now - first_temp_ts >= HOTBED_PREHEAT_NO_RISE_GRACE_SEC
+                        and bed_current < first_temp + HOTBED_PREHEAT_MIN_RISE_C
+                        and bed_current < target - HOTBED_PREHEAT_MARGIN_C
+                    ):
+                        if heater_positive_seen and not slow_rise_warned:
+                            slow_rise_warned = True
+                            self._post(
+                                "log",
+                                f"Hotbed греется медленно: {first_temp:.1f}C -> {bed_current:.1f}C "
+                                f"за {HOTBED_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд при положительном B@. "
+                                "Продолжаю ждать до общего таймаута.",
+                            )
+                        elif not heater_positive_seen:
+                            raise RuntimeError(
+                                f"Hotbed почти не греется: {first_temp:.1f}C -> {bed_current:.1f}C "
+                                f"за {HOTBED_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд, и положительный B@ не подтверждён. "
+                                "Стол выключен командой M140 S0; печать не запускаю."
+                            )
+                time.sleep(HOTBED_PREHEAT_POLL_SEC)
+                out = sdtool.run_commands_wait_ok(
+                    self._port(),
+                    self._baud(),
+                    ["M105"],
+                    per_command_timeout=12.0,
+                )
+                self._post("metrics", ("m105", out))
+            raise RuntimeError(
+                f"Hotbed не дошёл до {target:.0f}C перед SD-стартом за {HOTBED_PREHEAT_TIMEOUT_SEC:.0f} секунд. "
+                "Стол выключен командой M140 S0; печать не запускаю."
+            )
+        except Exception:
+            send_hotbed_off()
+            raise
 
     def _hotend_target_for_print(self, sd_path: str, display: str, source: Path | None = None) -> float:
         profile = self._profile_for_print(sd_path, display, source)
@@ -1860,6 +2015,8 @@ class K9ControlCenter:
         go_state = "normal" if (trusted or recovery_ready) and not self.user_task_pending else "disabled"
         start_state = "normal" if trusted and not self.user_task_pending else "disabled"
         filament_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
+        hotbed_heat_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
+        hotbed_off_state = "normal" if not self.user_task_pending else "disabled"
         level_state = "normal" if trusted and self.current_print_file == "-" and not self.user_task_pending else "disabled"
         guarded_buttons = (
             ("go_start_button", go_state),
@@ -1869,6 +2026,9 @@ class K9ControlCenter:
             ("filament_retract_button", filament_state),
             ("filament_heat_button", filament_state),
             ("filament_cool_button", filament_state),
+            ("hotbed_35_button", hotbed_heat_state),
+            ("hotbed_40_button", hotbed_heat_state),
+            ("hotbed_off_button", hotbed_off_state),
         )
         for name, state in guarded_buttons:
             widget = getattr(self, name, None)
@@ -1975,6 +2135,10 @@ class K9ControlCenter:
             "filament_retract": {"ru": "Назад", "en": "Retract", "zh": "回抽"},
             "filament_heat": {"ru": "Hotend 200C", "en": "Hotend 200C", "zh": "Hotend 200C"},
             "filament_cool": {"ru": "Hotend off", "en": "Hotend off", "zh": "关闭 hotend"},
+            "hotbed": {"ru": "Hotbed", "en": "Hotbed", "zh": "热床"},
+            "hotbed_35": {"ru": "35C", "en": "35C", "zh": "35C"},
+            "hotbed_40": {"ru": "40C", "en": "40C", "zh": "40C"},
+            "hotbed_off": {"ru": "Hotbed off", "en": "Hotbed off", "zh": "关闭 hotbed"},
             "head_left": {"ru": "Голова влево", "en": "Head left", "zh": "喷头左移"},
             "head_right": {"ru": "Голова вправо", "en": "Head right", "zh": "喷头右移"},
             "bed_away": {"ru": "Стол от себя", "en": "Bed away", "zh": "平台后移"},
@@ -2969,8 +3133,20 @@ class K9ControlCenter:
         self.filament_cool_button.grid(row=5, column=3, padx=3, pady=(6, 1), sticky="ew")
         self.action_widgets.append(self.filament_cool_button)
 
+        self.hotbed_label = ttk.Label(motion, text="Hotbed")
+        self.hotbed_label.grid(row=6, column=0, sticky="w", padx=3, pady=(6, 1))
+        self.hotbed_35_button = manual_button(motion, "35C", lambda: self.set_hotbed_target(35.0))
+        self.hotbed_35_button.grid(row=6, column=1, padx=3, pady=(6, 1), sticky="ew")
+        self.action_widgets.append(self.hotbed_35_button)
+        self.hotbed_40_button = manual_button(motion, "40C", lambda: self.set_hotbed_target(40.0))
+        self.hotbed_40_button.grid(row=6, column=2, padx=3, pady=(6, 1), sticky="ew")
+        self.action_widgets.append(self.hotbed_40_button)
+        self.hotbed_off_button = manual_button(motion, "Hotbed off", lambda: self.set_hotbed_target(0.0))
+        self.hotbed_off_button.grid(row=6, column=3, padx=3, pady=(6, 1), sticky="ew")
+        self.action_widgets.append(self.hotbed_off_button)
+
         level_row = ttk.Frame(motion, style="Panel.TFrame")
-        level_row.grid(row=6, column=0, columnspan=4, sticky="ew", padx=3, pady=(8, 0))
+        level_row.grid(row=7, column=0, columnspan=4, sticky="ew", padx=3, pady=(8, 0))
         level_row.columnconfigure(0, weight=0)
         for idx in range(1, 6):
             level_row.columnconfigure(idx, weight=1)
@@ -3002,6 +3178,9 @@ class K9ControlCenter:
             self.filament_retract_button,
             self.filament_heat_button,
             self.filament_cool_button,
+            self.hotbed_35_button,
+            self.hotbed_40_button,
+            self.hotbed_off_button,
         ]
         self.manual_wide_width_widgets = [
             self.save_start_button,
@@ -3073,6 +3252,10 @@ class K9ControlCenter:
         self.filament_retract_button.configure(text=self._t("filament_retract"))
         self.filament_heat_button.configure(text=self._t("filament_heat"))
         self.filament_cool_button.configure(text=self._t("filament_cool"))
+        self.hotbed_label.configure(text=self._t("hotbed"))
+        self.hotbed_35_button.configure(text=self._t("hotbed_35"))
+        self.hotbed_40_button.configure(text=self._t("hotbed_40"))
+        self.hotbed_off_button.configure(text=self._t("hotbed_off"))
         self.head_left_button.configure(text=self._t("head_left"))
         self.head_right_button.configure(text=self._t("head_right"))
         self.bed_away_button.configure(text=self._t("bed_away"))
@@ -4747,6 +4930,10 @@ class K9ControlCenter:
             "has_bed_heat": False,
             "bed_heat_line": None,
             "bed_target": None,
+            "has_bed_wait": False,
+            "bed_wait_line": None,
+            "experimental_hotbed_target": None,
+            "experimental_hotbed_marker_line": None,
             "has_motor_disable": False,
             "motor_disable_line": None,
             "end_has_y95": False,
@@ -4821,6 +5008,14 @@ class K9ControlCenter:
             if stripped.startswith("; Little Hands"):
                 info["start_gcode_comment"] = stripped
                 info["has_little_hands_start"] = True
+            if stripped.upper().startswith(HOTBED_EXPERIMENTAL_MARKER):
+                raw_target = stripped.split(":", 1)[1].strip()
+                try:
+                    info["experimental_hotbed_target"] = float(raw_target)
+                    info["experimental_hotbed_marker_line"] = line_number
+                except ValueError:
+                    info["experimental_hotbed_target"] = raw_target
+                    info["experimental_hotbed_marker_line"] = line_number
 
             command = stripped.split(";", 1)[0].strip()
             if not command:
@@ -4919,6 +5114,9 @@ class K9ControlCenter:
                     info["has_bed_heat"] = True
                     info["bed_heat_line"] = info["bed_heat_line"] or line_number
                     info["bed_target"] = target
+                    if word == "M190":
+                        info["has_bed_wait"] = True
+                        info["bed_wait_line"] = info["bed_wait_line"] or line_number
 
             if word in {"M106", "M107"}:
                 info["has_slicer_fan_commands"] = True
@@ -5006,12 +5204,37 @@ class K9ControlCenter:
                 )
             elif target < K9_HOTEND_WARN_LOW_C or target > K9_HOTEND_WARN_HIGH_C:
                 warnings.append(f"Цель hotend {target:g}C необычна для текущего PLA-профиля; проверь материал и профиль Cura.")
-        if info.get("has_bed_heat"):
+        if info.get("has_bed_wait"):
             errors.append(
-                "Найден нагрев стола `M140/M190`"
-                + self._format_gcode_line(info.get("bed_heat_line"))
-                + ". У нашего K9 стол внешний, в G-code температура стола должна быть 0C."
+                "Найден блокирующий нагрев стола `M190`"
+                + self._format_gcode_line(info.get("bed_wait_line"))
+                + ". Для экспериментального hotbed Little Hands должен сам прогреть стол перед M24; "
+                "не заставляй SD-файл ждать стол внутри Marlin."
             )
+        elif info.get("has_bed_heat"):
+            marker_target = info.get("experimental_hotbed_target")
+            bed_target = info.get("bed_target")
+            marked_experimental_hotbed = (
+                isinstance(marker_target, (int, float))
+                and isinstance(bed_target, (int, float))
+                and 0 < float(marker_target) <= HOTBED_MAX_MANUAL_TARGET_C
+                and 0 < float(bed_target) <= HOTBED_MAX_MANUAL_TARGET_C
+                and abs(float(bed_target) - float(marker_target)) <= 0.1
+                and bool(info.get("has_little_hands_start"))
+            )
+            if marked_experimental_hotbed:
+                warnings.append(
+                    f"Экспериментальный hotbed target {float(marker_target):g}C"
+                    + self._format_gcode_line(info.get("experimental_hotbed_marker_line"))
+                    + ": Little Hands прогреет стол перед M24, файл только повторно задаёт `M140` и выключает стол в конце."
+                )
+            else:
+                errors.append(
+                    "Найден нагрев стола `M140/M190`"
+                    + self._format_gcode_line(info.get("bed_heat_line"))
+                    + ". Для текущего K9 положительный bed heat допустим только как явно помеченный "
+                    f"{HOTBED_EXPERIMENTAL_MARKER}<target> с целью не выше {HOTBED_MAX_MANUAL_TARGET_C:g}C."
+                )
         if info.get("has_motor_disable"):
             errors.append(
                 "Найдено отключение моторов `M18/M84`"
@@ -5167,7 +5390,9 @@ class K9ControlCenter:
         else:
             target = info.get("hotend_target")
             target_text = f", hotend {float(target):g}C" if isinstance(target, (int, float)) else ""
-            self.files_status_var.set(f"G-code проверен: {source.name}{target_text}")
+            bed_target = info.get("experimental_hotbed_target")
+            bed_text = f", hotbed {float(bed_target):g}C" if isinstance(bed_target, (int, float)) and bed_target > 0 else ""
+            self.files_status_var.set(f"G-code проверен: {source.name}{target_text}{bed_text}")
 
     def _validate_gcode_for_current_k9(self, source: Path) -> tuple[bool, str]:
         errors, warnings, info = self._gcode_validation_report(source)
@@ -5493,6 +5718,7 @@ class K9ControlCenter:
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
             self._post("upload-cancel-visible", (False, False))
+            self._preheat_hotbed_before_sd_start(dest, source.name, upload_source)
             self._preheat_hotend_before_sd_start(dest, source.name, upload_source)
             self._prime_print_end_contract(dest, source.name, upload_source)
             try:
@@ -5682,6 +5908,7 @@ class K9ControlCenter:
 
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
+            self._preheat_hotbed_before_sd_start(path, display, source_for_profile)
             self._preheat_hotend_before_sd_start(path, display, source_for_profile)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
@@ -5713,6 +5940,7 @@ class K9ControlCenter:
 
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
+            self._preheat_hotbed_before_sd_start(path, display, source_for_profile)
             self._preheat_hotend_before_sd_start(path, display, source_for_profile)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
@@ -6693,6 +6921,61 @@ class K9ControlCenter:
             else:
                 self._post("progress", ("Филамент: hotend off", 0.0))
                 self._post("log", "Hotend выключен после ручной операции с филаментом.")
+
+        self._run_task(label, task)
+
+    def set_hotbed_target(self, target: float) -> None:
+        target = max(0.0, min(float(target), HOTBED_MAX_MANUAL_TARGET_C))
+        label = f"Hotbed {target:.0f}C" if target > 0 else "Hotbed off"
+
+        def task() -> None:
+            if target > 0 and self.current_print_file != "-":
+                raise RuntimeError(
+                    "Ручной нагрев hotbed заблокирован во время активной SD-печати, чтобы не вмешиваться "
+                    "в поток G-code. Для безопасности остаётся доступно только выключение Hotbed off / M140 S0."
+                )
+            out = sdtool.run_commands_wait_ok(
+                self._port(),
+                self._baud(),
+                [f"M140 S{target:.0f}", "M105"],
+                per_command_timeout=12.0,
+            )
+            temp_payload = parse_m105_temperatures(out)
+            hotend_current, hotend_target, hotend_heater, bed_current, bed_target, bed_heater = temp_payload
+            if hotend_current is not None or bed_current is not None:
+                self._post("temp", temp_payload)
+            self._post("metrics", ("m105", out))
+            if target > 0 and (bed_current is None or bed_target is None):
+                try:
+                    sdtool.run_commands_wait_ok(
+                        self._port(),
+                        self._baud(),
+                        ["M140 S0"],
+                        per_command_timeout=12.0,
+                    )
+                finally:
+                    raise RuntimeError(
+                        "Hotbed target был отправлен, но Marlin не вернул понятный `B:` в M105. "
+                        "На всякий случай отправлен `M140 S0`; проверь прошивку/датчик стола перед печатью."
+                    )
+            if target > 0 and bed_target is not None and bed_target < 1.0:
+                raise RuntimeError(
+                    "Marlin принял команду hotbed, но цель стола в M105 осталась 0C. "
+                    "Не начинай печать с hotbed, пока причина не понятна."
+                )
+            if target > 0:
+                bed_text = f"{bed_current:.1f}/{bed_target:.0f}C" if bed_current is not None and bed_target is not None else "?/?C"
+                heater_text = f" B@:{bed_heater}" if bed_heater is not None else " B@:?"
+                self._post("progress", (f"Hotbed: цель {target:.0f}C", 0.0))
+                self._post(
+                    "log",
+                    f"Hotbed задан на {target:.0f}C; сейчас B {bed_text}{heater_text}. "
+                    "Дождись выхода B: к цели на графике, затем запускай SD-печать. "
+                    "При запахе, горячем разъёме или странном B: нажми Hotbed off.",
+                )
+            else:
+                self._post("progress", ("Hotbed off", 0.0))
+                self._post("log", "Hotbed выключен командой M140 S0.")
 
         self._run_task(label, task)
 

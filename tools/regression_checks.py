@@ -287,6 +287,38 @@ def main() -> int:
         failures,
     )
     require(
+        "HOTBED_MAX_MANUAL_TARGET_C = 40.0" in app
+        and "def set_hotbed_target" in app
+        and 'f"M140 S{target:.0f}"' in app
+        and "Hotbed выключен командой M140 S0" in app,
+        "Manual hotbed panel must provide bounded 35/40C targets and an explicit M140 S0 off path.",
+        failures,
+    )
+    require(
+        "Ручной нагрев hotbed заблокирован во время активной SD-печати" in app
+        and '("hotbed_off_button", hotbed_off_state)' in app
+        and 'hotbed_heat_state = "normal" if self.current_print_file == "-"' in app,
+        "Manual hotbed heat must be blocked during active SD printing while Hotbed off remains available.",
+        failures,
+    )
+    require(
+        "HOTBED_EXPERIMENTAL_MARKER" in app
+        and "experimental_hotbed_target" in app
+        and "Найден блокирующий нагрев стола `M190`" in app
+        and "Little Hands прогреет стол перед M24" in app,
+        "Experimental controlled-hotbed G-code must be explicitly marked, non-blocking, and host-preheated before M24.",
+        failures,
+    )
+    require(
+        "_preheat_hotbed_before_sd_start" in app
+        and "_preheat_hotbed_for_sd_start" in app
+        and "self._preheat_hotbed_before_sd_start(dest, source.name, upload_source)" in app
+        and "self._preheat_hotbed_before_sd_start(path, display, source_for_profile)" in app
+        and app.find("_preheat_hotbed_before_sd_start") < app.find("_preheat_hotend_before_sd_start"),
+        "Hotbed-marked files must trigger host-side hotbed preheat before hotend preheat and M24.",
+        failures,
+    )
+    require(
         "elif self._can_return_from_known_post_print_pose() and not self._home_is_trusted():" in app,
         "Post-print M114 recovery must not override a still-trusted live session zero.",
         failures,
@@ -312,6 +344,15 @@ def main() -> int:
         and "def cap_m204_commands" in slicer
         and "LH_M204_CAPPED" in slicer,
         "Cura helper must cap high CuraEngine M204 commands before producing K9 test G-code.",
+        failures,
+    )
+    require(
+        "--experimental-hotbed-target" in slicer
+        and "K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 40.0" in slicer
+        and "HOTBED_EXPERIMENTAL_MARKER" in slicer
+        and "M140 S{hotbed_target:g}" in slicer
+        and '"material_bed_temperature": "0"' in slicer,
+        "Cura helper may emit only explicitly marked experimental M140 hotbed files while keeping Cura bed temperature at 0.",
         failures,
     )
 
