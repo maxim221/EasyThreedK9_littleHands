@@ -2501,7 +2501,7 @@ class K9ControlCenter:
         c.create_text(left + 4, height - 8, anchor="w", text=f"{hotend_text}   {bed_text}", fill=colors["text"], font=("DejaVu Sans", 9, "bold"))
         bed_pwm = self.last_bed_heater_power if self.last_bed_heater_power is not None else 0
         bed_badge = f"{bed_text}  B@:{bed_pwm}"
-        c.create_text(right - 6, bed_top + 14, anchor="e", text=bed_badge, fill="#2aa198", font=("DejaVu Sans", 10, "bold"))
+        c.create_text(right - 6, bed_top - 10, anchor="e", text=bed_badge, fill="#2aa198", font=("DejaVu Sans", 10, "bold"))
         c.create_text(right - 4, height - 7, anchor="e", text="15 min", fill=colors["muted"], font=("DejaVu Sans", 8))
 
     def _apply_theme(self) -> None:
