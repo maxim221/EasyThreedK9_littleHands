@@ -3167,5 +3167,6 @@ After each test print, append:
   - the temperature graph now uses two stacked panels: hotend on top and hotbed/hotbed target below
   - the graph overlays a bold current hotbed readout (`B current/target`, `B@`) so bed values remain readable even when the line is flat
   - after screenshot review, moved that hotbed readout above the hotbed plot area so the `Hotbed` line cannot cross through the text
+  - added a matching hotend readout (`H current/target`, `@`) above the hotend plot area
 - Verification:
   - no running printer process was touched; the change applies after restarting Little Hands

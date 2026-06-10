@@ -2499,6 +2499,9 @@ class K9ControlCenter:
             else "B ?/?C"
         )
         c.create_text(left + 4, height - 8, anchor="w", text=f"{hotend_text}   {bed_text}", fill=colors["text"], font=("DejaVu Sans", 9, "bold"))
+        hotend_pwm = self.last_heater_power if self.last_heater_power is not None else 0
+        hotend_badge = f"{hotend_text}  @:{hotend_pwm}"
+        c.create_text(right - 6, hotend_top - 10, anchor="e", text=hotend_badge, fill="#b58900", font=("DejaVu Sans", 10, "bold"))
         bed_pwm = self.last_bed_heater_power if self.last_bed_heater_power is not None else 0
         bed_badge = f"{bed_text}  B@:{bed_pwm}"
         c.create_text(right - 6, bed_top - 10, anchor="e", text=bed_badge, fill="#2aa198", font=("DejaVu Sans", 10, "bold"))
