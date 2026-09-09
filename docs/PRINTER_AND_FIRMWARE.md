@@ -1,5 +1,7 @@
 # Printer And Firmware Guide
 
+For interrupted prints, use the [Recovery instructions](USER_GUIDE.md#4-finish-stop-and-return). USB loss alone does not establish that SD printing stopped. The app preserves timed observations and an archived source file; only a confirmed, retained pause can be resumed after fresh file/position/temperature checks. A reset with unknown physical position requires manual start setup. The 2026-09-09 HPCTOP incident and remaining root-cause uncertainty are recorded in [PROJECT_LOG](../PROJECT_LOG.md).
+
 ## 1. Supported Hardware Baseline
 
 This repository is currently documented for:

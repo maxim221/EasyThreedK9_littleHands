@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import sys
 import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -726,6 +727,9 @@ def main() -> int:
 
     check_hotbed_workflow(failures)
     check_temperature_reports_and_preheat_cleanup(failures)
+    from recovery_regression_checks import RecoveryChecks
+    recovery_result = unittest.TextTestRunner(verbosity=0).run(unittest.defaultTestLoader.loadTestsFromTestCase(RecoveryChecks))
+    require(recovery_result.wasSuccessful(), "Recovery runtime checks failed.", failures)
 
     if failures:
         print("Regression checks failed:")

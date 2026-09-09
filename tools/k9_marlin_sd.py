@@ -917,10 +917,21 @@ def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float,
                     controlled_stop_out += f";LH controlled stop lift failed at {command}: {exc}\n"
                     break
                 time.sleep(0.05)
+        stop_out = ""
+        shutdown_confirmed = True
         for command in ("M108", "M524", "M104 S0", "M140 S0", "M107", "M400"):
-            send_line(ser, command)
-            time.sleep(0.4)
-        stop_out = read_for(ser, 2.5)
+            try:
+                stop_out += send_line_wait_ok(ser, command, timeout_s=5.0)
+            except Exception as exc:
+                shutdown_confirmed = False
+                stop_out += f";LH stop unconfirmed {command}: {exc}\n"
+                # Even after one failure, attempt each heater-off command.
+        if shutdown_confirmed:
+            try:
+                stop_out += send_line_wait_ok(ser, "M114", timeout_s=5.0)
+            except Exception as exc:
+                stop_out += f";LH post-stop position unavailable: {exc}\n"
+        stop_out += f";LH_STOP_CONFIRMED:{int(shutdown_confirmed)}\n"
     out = pose_out + controlled_stop_out + stop_out
     return out, parse_stopped_print_position(out)
 

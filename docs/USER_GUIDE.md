@@ -14,7 +14,7 @@ X moves the head left/right; Y moves the bed toward/away; Z moves the head up/do
 
 1. In Cura, select lilHands K9 warm mat and the cautious K9 profile. Save G-code in the project's gcode/ folder. Check orientation in Preview; do not slice raw moduleBot.STL without inspecting it.
 2. Open Files & Firmware, choose G-code, and click Check G-code. Use Upload G-code or Upload & start.
-3. For an uploaded file, select it in the SD list and click Start print. The printer must physically be at the saved start.
+3. For an uploaded file, select it in the SD list and click Print. The printer must physically be at the saved start.
 4. Wait for preheat: bed first if requested by the file, then hotend stages at 60/100/150/200°C and a final heat gate. Before hotend warmup, the app lifts the nozzle 10 mm and returns it before starting.
 5. USB can be silent for the first 180 seconds after start. Watch the printer; USB silence alone does not mean it stopped. Do not refresh the SD list during this window.
 
@@ -36,9 +36,13 @@ The operator selected 60°C; a setting change does not replace physical validati
 2. Click Go to saved start in manual controls. Confirm recovery only when every condition in the dialog is met.
 3. Before the next print, switch printer power off for 5–10 seconds, power it on, check the physical start, and click Save start again. Confirm this power cycle at the next start.
 
-Pause and Resume control SD printing. Normal Stop saves a recovery pose, attempts a safe nozzle lift, and stops printing and heaters. Hard stop is the emergency path; cut printer power for immediate danger. Motors off invalidates the saved start.
+Pause waits for motion to finish and saves the paused file, SD cursor, coordinates, and temperatures. Resume rechecks them before sending the command. After a USB disconnect or app restart, confirm that printer power stayed on and the axes and part were not moved. A cooled nozzle, changed file/position, power reset, or unconfirmed pause blocks resuming.
+
+Normal Stop attempts a safe lift, saves the interrupted pose, and turns off printing and heaters. If the printer does not acknowledge shutdown, the app shows “Stop is unconfirmed” and blocks automatic return. Hard stop is the emergency path; cut printer power for immediate danger. Motors off invalidates the saved start.
 
 After USB loss or an app restart, axes never return automatically. Recovery from a saved final pose requires a finished print, a removed model, and confirmation that the axes were not moved. The app may select a replacement printer port when exactly one safe port is available.
+
+Open **Recovery** beside USB metrics to inspect or save the last replies. Each sample has its own time; old progress is not an exact stop point. The app retains a copy of the source G-code, but does not automatically replay a file tail from stale coordinates. An unfinished print cannot use the predicted final pose for return. If the controller is unresponsive, restore communication first; after a reset with unknown physical position, set start manually.
 
 If preheat fails after lifting the nozzle, do not save the raised position as start. The app first tries to undo the known lift. If that fails, restore USB, use Go to saved start, and confirm printing never started and the axes were not moved. Heating failed requires a power cycle first. Inspect a sticking axis before retrying; do not force it with faster moves.
 

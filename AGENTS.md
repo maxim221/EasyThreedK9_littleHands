@@ -65,6 +65,12 @@ For changes to the GUI layout, language switching, busy controls, or in-app manu
 - Keep Cura `Preferences -> General -> Add machine prefix to job name` disabled (`[cura] jobname_prefix = False`). The K9 workflow should save `model.gcode`, not `CFFFP_model.gcode`.
 - Keep Cura's active machine on the warm-mat container (`[cura] active_machine = lilHands_k9_warmmat`). If Cura falls back to the older `lilHands` machine, it can save G-code with the old `G1 Z10.0 F1800` start and no `;LH_EXPERIMENTAL_HOTBED_TARGET:60`, so the controlled hotbed will not heat even though the file was just saved from Cura.
 
+## Recovery Evidence And Retained Pauses
+
+- SD telemetry records are diagnostic observations, not exact executable restart checkpoints. Preserve raw G-code XYZ (before UI Y/Z remapping), individual reply timestamps, SD byte/total, source G-code hash/copy, and firmware identity. Write state atomically. Never construct or execute an automatic G92/M26/G-code-tail recovery from stale observations or predicted print-end for an unfinished part.
+- Resume must use an acknowledged M25 pause followed by M400 and captured file/SD cursor/position/temperature. Recheck these through a single serial session before M24; refuse changed/cold/missing state and suspect files. After reconnect/restart, require explicit operator confirmation that printer power, axes, and part were untouched. Consume the pause record durably before sending M24 so a missing acknowledgement cannot cause a repeated start. No M21/M23/G92 during resume checks.
+- A missing Stop acknowledgement is not a successful stop: attempt all heater-off commands, report unknown heat/position, and block automatic return. Never restore a live-session-only return flag across an app restart. Poll using one serial connection per cycle, back off on missing replies, and never refresh the age of an SD sample from a locally generated status string. Metrics/status inspection must not mount or reselect SD during a print.
+
 ## Documentation
 
 Keep manually saved Cura G-code in the project `gcode/` directory instead of the repository root. Local Cura 5.11 uses `[local_file] dialog_save_path` in `~/.config/cura/5.11/cura.cfg` to suggest this directory; edit preferences only while Cura is closed. Existing `exports/` helper output and `card_backups/` archives retain their separate purposes.
