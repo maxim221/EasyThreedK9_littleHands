@@ -46,6 +46,8 @@ Open **Recovery** beside USB metrics to inspect or save the last replies. Each s
 
 If preheat fails after lifting the nozzle, do not save the raised position as start. The app first tries to undo the known lift. If that fails, restore USB, use Go to saved start, and confirm printing never started and the axes were not moved. Heating failed requires a power cycle first. Inspect a sticking axis before retrying; do not force it with faster moves.
 
+If USB disappears while heating and heater shutdown is unconfirmed, switch the printer power off. Restore communication and check both heater targets and outputs are zero before recovery.
+
 ## 5. Level the bed
 
 Save start enables the five points: FL / C / FR / BL / BR. At Z0, use a 0.05 mm feeler with light, even drag. A 0.10 mm feeler is an upper check, not the target gap: Cura already raises the first layer to about Z0.20. Save start again after adjustment and inspect the first layer visually.

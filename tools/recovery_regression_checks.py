@@ -154,6 +154,46 @@ class RecoveryChecks(unittest.TestCase):
         self.assertIn(";LH_STOP_CONFIRMED:0", reply)
         self.assertFalse(any(c.startswith("G") for c in commands))
 
+    def test_rejected_or_corrupt_reply_is_not_acknowledged_by_trailing_ok(self):
+        bad = [b'echo:Unknown command: "M104 S0"\nok\n',
+               b'echo:Unknown command: "\xffM108"\nok\n',
+               b'\xff\nok\n', b'\x0e\nok\n',
+               b'echo: token received\n', b'echo: ok\n',
+               b'Error: heater halted\nok\n', b'Resend: 10\nok\n']
+        for raw in bad:
+            lines = iter(raw.splitlines(keepends=True))
+            ser = Mock()
+            ser.readline.side_effect = lambda: next(lines, b'')
+            with self.subTest(reply=raw), self.assertRaises(RuntimeError):
+                recovery.sdtool.send_line_wait_ok(ser, 'M104 S0', timeout_s=.01)
+
+    def test_real_ack_and_complete_m114_position_remain_supported(self):
+        for command, raw in [('M104 S0', b'ok\n'),
+                             ('M400', b'ok N12 P15 B3\n'),
+                             ('M105', b'ok T:41.23 /0.00 B:55.16 /0.00 @:0 B@:0\n'),
+                             ('M114', b'X:0.00 Y:0.00 Z:10.00 E:0.00\n')]:
+            lines = iter(raw.splitlines(keepends=True))
+            ser = Mock()
+            ser.readline.side_effect = lambda: next(lines, b'')
+            with self.subTest(command=command):
+                self.assertEqual(recovery.sdtool.send_line_wait_ok(ser, command, timeout_s=.01), raw.decode())
+        ser = Mock()
+        lines = iter([b'X:0.00\n'])
+        ser.readline.side_effect = lambda: next(lines, b'')
+        with self.assertRaises(RuntimeError):
+            recovery.sdtool.send_line_wait_ok(ser, 'M114', timeout_s=.01)
+
+    def test_rejected_mode_command_prevents_following_service_move(self):
+        ser = Mock()
+        lines = iter([b'echo:Unknown command: "G90"\n', b'ok\n'])
+        ser.readline.side_effect = lambda: next(lines, b'')
+        with patch.object(recovery.sdtool, 'open_serial') as opened, \
+             patch.object(recovery.sdtool, 'sync_ascii'):
+            opened.return_value.__enter__.return_value = ser
+            with self.assertRaises(RuntimeError):
+                recovery.sdtool.run_commands_wait_ok('fake', 115200, ['G90', 'G1 Z0 F600'])
+        self.assertEqual([call.args[0] for call in ser.write.call_args_list], [b'G90\n'])
+
 
 if __name__ == "__main__":
     unittest.main()

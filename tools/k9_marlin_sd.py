@@ -403,11 +403,16 @@ def send_line_wait_ok(ser: serial.Serial, command: str, *, timeout_s: float = 35
     send_line(ser, command)
     reply = read_until_tokens(ser, ("ok", "Error:", "Resend:"), timeout_s=timeout_s)
     lowered = reply.lower()
-    if "error:" in lowered or "resend:" in lowered:
+    if any(marker in lowered for marker in ("error:", "resend:", "unknown command")):
         raise RuntimeError(f"Printer rejected `{command}`: {reply.strip() or '<no response>'}")
+    if "\ufffd" in reply or any(ord(char) < 32 and char not in "\r\n\t" for char in reply):
+        raise RuntimeError(f"Corrupt printer reply to `{command}`: {reply.strip()}")
     if not reply.strip():
         raise RuntimeError(f"Printer did not acknowledge `{command}`")
-    acknowledged = "ok" in lowered or (command.upper().startswith("M114") and "x:" in lowered)
+    acknowledged = bool(re.search(r"(?im)^\s*ok(?:\s|$)", reply)) or (
+        bool(re.fullmatch(r"M114(?:\s+.*)?", command.strip(), re.IGNORECASE))
+        and parse_position(reply) is not None
+    )
     if not acknowledged:
         raise RuntimeError(f"Printer did not finish `{command}` cleanly: {reply.strip()}")
     return reply
