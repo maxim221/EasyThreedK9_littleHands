@@ -32,6 +32,67 @@ class OfflineUiChecks(unittest.TestCase):
         self.app = appmod.K9ControlCenter(self.root)
         self.root.update_idletasks()
 
+    def test_preheat_cancel_stays_available_in_every_language(self):
+        self.app.user_task_pending = True
+        self.app.preheat_active = True
+        self.app._run_task = Mock()
+        for language in ('ru', 'en', 'zh'):
+            self.app.preheat_cancel_requested.clear()
+            self.app.lang_var.set(language)
+            self.app._apply_language()
+            self.app._set_busy_ui(True)
+            self.assertEqual(str(self.app.stop_button.cget('state')), 'normal')
+            self.assertEqual(self.app.stop_button.cget('text'), self.app._t('cancel_preheat'))
+            for geometry in ('1080x680+0+0', '1280x780+0+0'):
+                self.root.geometry(geometry)
+                self.root.update()
+                self.app._init_pane_layout()
+                self.root.update()
+                self.app._resize_panels()
+                self.root.update()
+                button = self.app.stop_button
+                font = appmod.tkfont.Font(font=appmod.ttk.Style().lookup(button.cget('style') or 'TButton', 'font'))
+                self.assertLessEqual(font.measure(button.cget('text')) + 8, button.winfo_width())
+                self.assertLessEqual(button.winfo_rooty() + button.winfo_height(), self.root.winfo_rooty()+self.root.winfo_height())
+            for button in (self.app.head_down_button, self.app.find_port_button, self.app.disconnect_port_button):
+                self.assertEqual(str(button.cget('state')), 'disabled')
+            self.app.stop_button.invoke()
+            self.assertTrue(self.app.preheat_cancel_requested.is_set())
+            self.assertEqual(str(self.app.stop_button.cget('state')), 'disabled')
+        self.app._run_task.assert_not_called()
+
+    def test_close_during_preheat_waits_for_verified_shutdown(self):
+        for verified in (False, True):
+            self.app.user_task_pending = True
+            self.app.preheat_active = True
+            self.app.preheat_cancel_requested.clear()
+            with patch.object(self.root, 'destroy') as destroy, patch.object(appmod.messagebox, 'showinfo') as info:
+                self.app._on_close()
+                self.assertTrue(self.app.preheat_cancel_requested.is_set())
+                self.assertTrue(self.app.close_after_preheat)
+                destroy.assert_not_called()
+                info.assert_not_called()
+                self.app.preheat_active = False
+                self.app.preheat_cleanup_confirmed = verified
+                self.app.user_task_pending = False
+                self.app._post('preheat-task-finished', None)
+                self.app._drain_events()
+                self.assertEqual(destroy.called, verified)
+
+    def test_save_start_cannot_silently_discard_a_failed_lift(self):
+        self.app.preheat_lift_recovery_available = True
+        self.app._run_task = Mock()
+        with patch.object(appmod.messagebox, 'askyesno', return_value=False) as question:
+            self.app.set_current_home_zero()
+        self.app._run_task.assert_not_called()
+        self.assertTrue(self.app.preheat_lift_recovery_available)
+        self.assertEqual(question.call_args.kwargs['default'], appmod.messagebox.NO)
+        with patch.object(appmod.messagebox, 'askyesno', return_value=True):
+            self.app.set_current_home_zero()
+        self.app._run_task.assert_called_once()
+        # The worker must finish successfully before discarding the marker.
+        self.assertTrue(self.app.preheat_lift_recovery_available)
+
     def test_manual_switches_language_in_place(self):
         self.app.show_manual()
         for language in ("ru", "en", "zh"):

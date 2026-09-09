@@ -112,7 +112,10 @@ def check_hotbed_workflow(failures: list[str]) -> None:
             current = 59 if reaches_target and clock[0] >= 600 else 30
             return f"ok T:24 /0 B:{current} /{reported_target} @:0 B@:127"
 
-        with patch.object(sdtool, "run_commands_wait_ok", side_effect=reply) as serial, \
+        with patch.object(sdtool, "open_serial") as opened, \
+                patch.object(sdtool, "sync_ascii"), \
+                patch.object(sdtool, "send_line_wait_ok", side_effect=reply) as serial, \
+                patch.object(sdtool, "run_commands_wait_ok", return_value="ok") as off, \
                 patch.object(appmod.time, "monotonic", side_effect=lambda: clock[0]), \
                 patch.object(appmod.time, "sleep", side_effect=sleep):
             succeeded = True
@@ -122,11 +125,13 @@ def check_hotbed_workflow(failures: list[str]) -> None:
                 succeeded = False
             require(succeeded == should_succeed,
                     f"60C heat gate result wrong for B target {reported_target}, rising={reaches_target}.", failures)
-            commands = [call.args[2] for call in serial.call_args_list]
-            require(commands[0] == ["M140 S60", "M105"], "Preheat must request the full 60C target.", failures)
-            require((commands[-1] == ["M140 S0"]) == (not should_succeed),
-                    "Failed bed preheat must turn the heater off.", failures)
-            require(all(cmd in (["M140 S60", "M105"], ["M105"], ["M140 S0"]) for cmd in commands),
+            commands = [call.args[1] for call in serial.call_args_list]
+            require(commands[:2] == ["M140 S60", "M105"], "Preheat must request the full 60C target.", failures)
+            require(opened.call_count == 1, "Bed warmup must retain a single serial connection.", failures)
+            require(off.called == (not should_succeed), "Failed bed preheat must turn the heater off.", failures)
+            if off.called:
+                require(off.call_args.args[2] == ["M140 S0"], "Bed failure cleanup must only turn heat off.", failures)
+            require(all(cmd in ("M140 S60", "M105") for cmd in commands),
                     "Bed preheat must not move axes or start SD printing.", failures)
 
 
@@ -152,6 +157,10 @@ def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
         app._set_home_trust = Mock()
         app._save_print_state = Mock()
         app.preheat_lift_recovery_available = fail_stage == "hotend"
+        app.preheat_cancel_requested = appmod.threading.Event()
+        app.preheat_state_lock = appmod.threading.Lock()
+        app._t = lambda key: key
+        app._hotbed_target_for_print = lambda *args: 60
         order = []
 
         def heat(stage: str) -> None:
@@ -161,7 +170,8 @@ def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
 
         app._preheat_hotbed_before_sd_start = lambda *args: heat("bed")
         app._preheat_hotend_before_sd_start = lambda *args: heat("hotend")
-        with patch.object(sdtool, "run_commands_wait_ok", return_value="ok") as serial:
+        with patch.object(appmod.heater_shutdown, "port_identity", return_value=None), \
+                patch.object(appmod.heater_shutdown, "shutdown_heaters", return_value={"confirmed": True, "reply": ""}) as shutdown:
             try:
                 app._preheat_for_sd_start("TEST.GCO", "Test")
             except RuntimeError:
@@ -170,9 +180,8 @@ def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
                 require(fail_stage is None, "Preheat failure must reach the caller before M24.", failures)
             require(order == (["bed"] if fail_stage == "bed" else ["bed", "hotend"]),
                     "Every SD start must heat the bed before the hotend.", failures)
-            commands = [call.args[2] for call in serial.call_args_list]
-            require(commands == ([["M108"], ["M104 S0"], ["M140 S0"]] if fail_stage else []),
-                    "Failed preheat must abort waiting and shut off both heaters without axis moves.", failures)
+            require(shutdown.call_count == (1 if fail_stage else 0),
+                    "Failed preheat must verify shutdown before releasing the worker.", failures)
             if fail_stage:
                 require(app._require_power_cycle_before_next_sd_start.called and app._set_home_trust.called,
                         "Failed preheat must require a power cycle and an operator-confirmed start.", failures)
@@ -727,8 +736,8 @@ def main() -> int:
 
     check_hotbed_workflow(failures)
     check_temperature_reports_and_preheat_cleanup(failures)
-    from recovery_regression_checks import RecoveryChecks
-    recovery_result = unittest.TextTestRunner(verbosity=0).run(unittest.defaultTestLoader.loadTestsFromTestCase(RecoveryChecks))
+    import recovery_regression_checks
+    recovery_result = unittest.TextTestRunner(verbosity=0).run(unittest.defaultTestLoader.loadTestsFromModule(recovery_regression_checks))
     require(recovery_result.wasSuccessful(), "Recovery runtime checks failed.", failures)
 
     if failures:

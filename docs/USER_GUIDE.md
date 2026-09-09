@@ -18,7 +18,9 @@ X moves the head left/right; Y moves the bed toward/away; Z moves the head up/do
 4. Wait for preheat: bed first if requested by the file, then hotend stages at 60/100/150/200°C and a final heat gate. Before hotend warmup, the app lifts the nozzle 10 mm and returns it before starting.
 5. USB can be silent for the first 180 seconds after start. Watch the printer; USB silence alone does not mean it stopped. Do not refresh the SD list during this window.
 
-Cancelled or damaged uploads remain blocked until deletion or a verified replacement. Do not start an unknown partial copy from the card. Port changes and app closure are blocked during an operation; use Cancel to stop an upload.
+During preheat, **Stop becomes Cancel**. Cancellation turns heat off and undoes the known nozzle lift. Closing the window requests cancellation and waits for verified heater shutdown; manual axes stay locked until cleanup finishes.
+
+Cancelled or damaged uploads remain blocked until deletion or a clean upload. Do not start an unknown partial SD copy. Port changes are locked during USB operations; use Cancel to stop an upload.
 
 ## 3. Heat and filament
 
@@ -45,6 +47,8 @@ After USB loss or an app restart, axes never return automatically. Recovery from
 Open **Recovery** beside USB metrics to inspect or save the last replies. Each sample has its own time; old progress is not an exact stop point. The app retains a copy of the source G-code, but does not automatically replay a file tail from stale coordinates. An unfinished print cannot use the predicted final pose for return. If the controller is unresponsive, restore communication first; after a reset with unknown physical position, set start manually.
 
 If preheat fails after lifting the nozzle, do not save the raised position as start. The app first tries to undo the known lift. If that fails, restore USB, use Go to saved start, and confirm printing never started and the axes were not moved. Heating failed requires a power cycle first. Inspect a sticking axis before retrying; do not force it with faster moves.
+
+If the app remembers a failed lift, Save start requires confirmation that the nozzle was physically returned near the bed. Saving a raised pose does not lower the nozzle.
 
 If USB disappears while heating and heater shutdown is unconfirmed, switch the printer power off. Restore communication and check both heater targets and outputs are zero before recovery.
 

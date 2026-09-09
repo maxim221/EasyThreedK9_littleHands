@@ -194,6 +194,132 @@ class RecoveryChecks(unittest.TestCase):
                 recovery.sdtool.run_commands_wait_ok('fake', 115200, ['G90', 'G1 Z0 F600'])
         self.assertEqual([call.args[0] for call in ser.write.call_args_list], [b'G90\n'])
 
+class PreheatChecks(unittest.TestCase):
+    def setUp(self):
+        self.app = object.__new__(appmod.K9ControlCenter)
+        self.app.preheat_state_lock = appmod.threading.Lock()
+        self.app.preheat_cancel_requested = appmod.threading.Event()
+        self.app.preheat_lift_recovery_available = False
+        self.app._port = lambda: 'fake'
+        self.app._baud = lambda: 115200
+        self.app._t = lambda key: key
+        self.app._post = Mock()
+        self.app._save_print_state = Mock()
+        self.app._require_power_cycle_before_next_sd_start = Mock()
+        self.app._set_home_trust = Mock()
+        self.app._hotbed_target_for_print = lambda *args: 60
+        self.app._preheat_hotbed_before_sd_start = Mock()
+        self.app._preheat_hotend_before_sd_start = Mock()
+        self.identity = {'device': '/dev/ttyUSB0', 'vid': '1A86', 'pid': '7523',
+                         'location': '1-4.4.4', 'serial_number': ''}
+        self.off = 'ok T:34 /0 B:47 /0 @:0 B@:0\n'
+
+    def test_cancel_bed_heat_never_reaches_hotend_or_sd(self):
+        self.app._preheat_hotbed_before_sd_start = lambda *args: self.app._preheat_hotbed_for_sd_start(60)
+        commands = []
+        def reply(ser, command, **kwargs):
+            commands.append(command)
+            if command == 'M105':
+                self.app.preheat_cancel_requested.set()
+            return 'ok T:25 /0 B:30 /60 @:0 B@:127\n'
+        with patch.object(appmod.heater_shutdown, 'port_identity'), \
+             patch.object(appmod.heater_shutdown, 'shutdown_heaters', return_value={'confirmed': True, 'reply': self.off}) as shutdown, \
+             patch.object(appmod.sdtool, 'open_serial') as opened, \
+             patch.object(appmod.sdtool, 'sync_ascii'), \
+             patch.object(appmod.sdtool, 'send_line_wait_ok', side_effect=reply), \
+             patch.object(appmod.sdtool, 'run_commands_wait_ok'):
+            with self.assertRaises(appmod.heater_shutdown.PreheatCancelled):
+                self.app._preheat_for_sd_start('TEST.GCO', 'Test')
+        self.app._preheat_hotend_before_sd_start.assert_not_called()
+        self.assertEqual(commands, ['M140 S60', 'M105'])
+        self.assertEqual(opened.call_count, 1)
+        shutdown.assert_called_once()
+        self.assertFalse(self.app.preheat_active)
+        self.assertTrue(self.app.preheat_cleanup_confirmed)
+        self.app._require_power_cycle_before_next_sd_start.assert_called_once()
+
+    def test_cancel_hotend_stage_and_m109_undoes_lift_without_m24(self):
+        for trigger, initial in [('M104 S60', 25), ('M109 S226', 224)]:
+            self.app.preheat_cancel_requested.clear()
+            self.app.preheat_lift_recovery_available = True
+            commands = []
+            self.app._preheat_hotend_before_sd_start = lambda *args: self.app._preheat_hotend_for_sd_start_with_clearance(226)
+            self.app._lift_from_saved_start_for_preheat_if_needed = Mock(return_value=True)
+            self.app._return_to_saved_start_after_failed_preheat = Mock(side_effect=lambda **kwargs: commands.append('RETURN'))
+            self.app._return_to_saved_start_after_successful_preheat = Mock()
+            def send(ser, command):
+                commands.append(command)
+                if command == trigger:
+                    self.app.preheat_cancel_requested.set()
+            with patch.object(appmod.heater_shutdown, 'port_identity'), \
+                 patch.object(appmod.heater_shutdown, 'shutdown_heaters', return_value={'confirmed': True, 'reply': self.off}), \
+                 patch.object(appmod.sdtool, 'open_serial'), \
+                 patch.object(appmod.sdtool, 'sync_ascii'), \
+                 patch.object(appmod.sdtool, 'send_line', side_effect=send), \
+                 patch.object(appmod.sdtool, 'read_for', return_value=f'ok T:{initial} /226 B:60 /60 @:0 B@:0\n'), \
+                 patch.object(appmod.sdtool, 'query_command') as query, \
+                 patch.object(appmod.time, 'sleep'):
+                with self.subTest(trigger=trigger), self.assertRaises(appmod.heater_shutdown.PreheatCancelled):
+                    self.app._preheat_for_sd_start('TEST.GCO', 'Test')
+            self.app._return_to_saved_start_after_failed_preheat.assert_called_once_with(lifted_for_preheat=True)
+            self.app._return_to_saved_start_after_successful_preheat.assert_not_called()
+            self.assertNotIn('M24', commands)
+            if trigger.startswith('M109'):
+                self.assertLess(commands.index('M108'), commands.index('RETURN'))
+                self.assertLess(commands.index('M108'), commands.index('M104 S0'))
+            else:
+                self.assertEqual([call.args[2] for call in query.call_args_list], ['M108', 'M104 S0'])
+
+    def test_failed_shutdown_does_not_refresh_old_temperature_evidence(self):
+        self.app._preheat_hotbed_before_sd_start = Mock(side_effect=RuntimeError("USB lost"))
+        with patch.object(appmod.heater_shutdown, 'port_identity'), \
+             patch.object(appmod.heater_shutdown, 'shutdown_heaters', return_value={'confirmed': False, 'reply': self.off}):
+            with self.assertRaisesRegex(RuntimeError, 'USB lost'):
+                self.app._preheat_for_sd_start('TEST.GCO', 'Test')
+        self.assertFalse(self.app.preheat_cleanup_confirmed)
+        self.assertNotIn('temp', [call.args[0] for call in self.app._post.call_args_list])
+        self.assertNotIn('metrics', [call.args[0] for call in self.app._post.call_args_list])
+        self.app._preheat_hotend_before_sd_start.assert_not_called()
+
+    def test_shutdown_waits_for_matching_reenumerated_port_and_zero_pwm(self):
+        clock = [0.0]
+        candidates = [[], [], [{**self.identity, 'device': '/dev/ttyUSB1'}]]
+        commands = []
+        reports = iter(['ok T:34 /0 B:47 /0 @:0 B@:127\n', self.off])
+        def listing():
+            return candidates.pop(0) if len(candidates) > 1 else candidates[0]
+        def send(ser, command, **kwargs):
+            commands.append(command)
+            return next(reports) if command == 'M105' else 'ok\n'
+        with patch.object(appmod.sdtool, 'list_serial_ports', side_effect=listing), \
+             patch.object(appmod.sdtool, 'open_serial') as opened, \
+             patch.object(appmod.sdtool, 'sync_ascii'), \
+             patch.object(appmod.sdtool, 'send_line_wait_ok', side_effect=send), \
+             patch.object(appmod.heater_shutdown.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(appmod.heater_shutdown.time, 'sleep', side_effect=lambda delay: clock.__setitem__(0, clock[0]+delay)):
+            result = appmod.heater_shutdown.shutdown_heaters('/dev/ttyUSB0', 115200, appmod.parse_m105_temperatures, identity=self.identity)
+        self.assertTrue(result['confirmed'])
+        self.assertEqual(opened.call_args.args[0], '/dev/ttyUSB1')
+        self.assertEqual(commands, ['M108', 'M104 S0', 'M140 S0', 'M105', 'M105'])
+
+    def test_shutdown_cannot_choose_another_printer_or_trust_incomplete_report(self):
+        shutdown = appmod.heater_shutdown
+        self.assertIsNone(shutdown.matching_port('/dev/ttyUSB0', self.identity, [{**self.identity, 'location': '1-2'}]))
+        self.assertIsNone(shutdown.matching_port('/dev/ttyUSB0', self.identity, [self.identity, {**self.identity, 'device': '/dev/ttyUSB1'}]))
+        for values in [(34, 0, 0, 47, 0, 127), (34, 0, 0, None, None, None),
+                       (34, None, 0, 47, 0, 0), (float('nan'), 0, 0, 47, 0, 0)]:
+            self.assertFalse(shutdown.heaters_are_off(values, True))
+        self.assertTrue(shutdown.heaters_are_off((34, 0, 0, None, None, None), False))
+        clock = [0.0]
+        with patch.object(appmod.sdtool, 'list_serial_ports', return_value=[]), \
+             patch.object(appmod.sdtool, 'open_serial') as opened, \
+             patch.object(shutdown.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(shutdown.time, 'sleep', side_effect=lambda delay: clock.__setitem__(0, clock[0]+delay)):
+            result = shutdown.shutdown_heaters('/dev/ttyUSB0', 115200, appmod.parse_m105_temperatures, identity=self.identity, timeout_s=3)
+        self.assertFalse(result['confirmed'])
+        opened.assert_not_called()
+        self.assertEqual(clock[0], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

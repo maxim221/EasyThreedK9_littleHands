@@ -67,6 +67,7 @@ def list_serial_ports() -> list[dict[str, str]]:
             "manufacturer": info.manufacturer or "",
             "product": info.product or "",
             "serial_number": info.serial_number or "",
+            "location": info.location or "",
             "vid": f"{info.vid:04X}" if info.vid is not None else "",
             "pid": f"{info.pid:04X}" if info.pid is not None else "",
         })
@@ -673,12 +674,11 @@ def _start_sd_print_from_home_once(port: str, baud: int, target: str) -> str:
 
 
 def set_current_home_zero(port: str, baud: int) -> str:
-    return run_commands(
+    return run_commands_wait_ok(
         port,
         baud,
         ["M17", "G90", "G92 X0 Y0 Z0", "M114"],
-        final_wait=0.8,
-        read_seconds=1.5,
+        per_command_timeout=12.0,
     )
 
 

@@ -31,6 +31,7 @@ from tkinter.scrolledtext import ScrolledText
 
 import k9_marlin_sd as sdtool
 import k9_recovery as recovery
+import k9_heater_shutdown as heater_shutdown
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -344,6 +345,11 @@ class K9ControlCenter:
         self.monitor_enabled = True
         self.next_poll_ts = 0.0
         self.user_task_pending = False
+        self.preheat_active = False
+        self.preheat_cancel_requested = threading.Event()
+        self.preheat_state_lock = threading.Lock()
+        self.preheat_cleanup_confirmed = False
+        self.close_after_preheat = False
         self.upload_cancel_requested = False
 
         self.preferred_port = str(self.ui_state.get("last_port", "")).strip()
@@ -1151,23 +1157,78 @@ class K9ControlCenter:
             raise ValueError(f"Hotbed: допустимая цель 0–{HOTBED_MAX_MANUAL_TARGET_C:g}C.")
         return target
 
+    def _check_preheat_cancelled(self) -> None:
+        event = getattr(self, "preheat_cancel_requested", None)
+        if event is not None and event.is_set():
+            raise heater_shutdown.PreheatCancelled(self._t("preheat_cancelled"))
+
+    def _wait_preheat(self, seconds: float) -> None:
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            self._check_preheat_cancelled()
+            time.sleep(min(.1, max(0.0, end - time.monotonic())))
+        self._check_preheat_cancelled()
+
+    def cancel_preheat(self) -> bool:
+        with self.preheat_state_lock:
+            if not self.preheat_active:
+                return False
+            self.preheat_cancel_requested.set()
+        self.progress_var.set(self._t("preheat_cancelling"))
+        self.log(self._t("preheat_cancelling"))
+        self._sync_home_controls()
+        return True
+
     def _preheat_for_sd_start(self, path: str, display: str, source: Path | None = None) -> None:
+        port = self._port()
+        identity = heater_shutdown.port_identity(port)
+        require_bed = True
+        with self.preheat_state_lock:
+            self.preheat_cancel_requested.clear()
+            self.preheat_active = True
+            self.preheat_cleanup_confirmed = False
+        self._post("sync-controls", None)
         try:
+            require_bed = self._hotbed_target_for_print(path, display, source) > 0
+            self._check_preheat_cancelled()
             self._preheat_hotbed_before_sd_start(path, display, source)
+            self._check_preheat_cancelled()
             self._preheat_hotend_before_sd_start(path, display, source)
+            # Atomically close the cancellation window before handing off to SD.
+            with self.preheat_state_lock:
+                self._check_preheat_cancelled()
+                self.preheat_active = False
         except Exception:
-            # No M24 has been sent. Shut down both heaters even if the bed
-            # warmed successfully before the hotend or clearance return failed.
-            for command in ("M108", "M104 S0", "M140 S0"):
-                try:
-                    sdtool.run_commands_wait_ok(self._port(), self._baud(), [command], per_command_timeout=12.0)
-                except Exception as shutdown_error:
-                    self._post("log", f"Не подтверждено выключение нагрева ({command}): {shutdown_error}")
-            self._require_power_cycle_before_next_sd_start("SD preheat failed", save=False)
-            self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD preheat failed", log_change=True)
-            phase = "preheat-lift-failed" if self.preheat_lift_recovery_available else "failed-start"
-            self._save_print_state(phase, force=True)
+            try:
+                result = heater_shutdown.shutdown_heaters(
+                    port, self._baud(), parse_m105_temperatures, identity=identity,
+                    require_bed=require_bed, notify=lambda message: self._post("log", message),
+                )
+                self.preheat_cleanup_confirmed = result["confirmed"]
+                if result["confirmed"] and result["reply"]:
+                    self._post("metrics", ("m105", result["reply"]))
+                    self._post("temp", parse_m105_temperatures(result["reply"]))
+                elif result["reply"]:
+                    self._post("log", f"Последний ответ при неподтверждённом выключении: {result['reply'].strip()}")
+                for error in result.get("errors", [])[-3:]:
+                    self._post("log", f"USB cleanup: {error}")
+                self._post("log", self._t("heaters_off_confirmed" if result["confirmed"] else "heaters_off_unknown"))
+                if not result["confirmed"]:
+                    self._post("info", self._t("heaters_off_unknown"))
+            except Exception as shutdown_error:
+                self.preheat_cleanup_confirmed = False
+                self._post("log", f"{self._t('heaters_off_unknown')} {shutdown_error}")
+                self._post("info", self._t("heaters_off_unknown"))
+            finally:
+                self._require_power_cycle_before_next_sd_start("SD preheat cancelled or failed", save=False)
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD preheat cancelled or failed", log_change=True)
+                phase = "preheat-lift-failed" if self.preheat_lift_recovery_available else "failed-start"
+                self._save_print_state(phase, force=True)
             raise
+        finally:
+            with self.preheat_state_lock:
+                self.preheat_active = False
+            self._post("sync-controls", None)
 
     def _preheat_hotbed_before_sd_start(self, sd_path: str, display: str, source: Path | None = None) -> None:
         target = self._hotbed_target_for_print(sd_path, display, source)
@@ -1207,93 +1268,89 @@ class K9ControlCenter:
                 pass
 
         try:
-            out = sdtool.run_commands_wait_ok(
-                self._port(),
-                self._baud(),
-                [f"M140 S{target:.0f}", "M105"],
-                per_command_timeout=12.0,
-            )
-            self._post("metrics", ("m105", out))
-            while time.monotonic() < deadline:
-                current, hotend_target, heater, bed_current, bed_target, bed_heater = parse_m105_temperatures(out)
-                if bed_current is not None and bed_target is not None:
-                    now = time.monotonic()
-                    if first_temp is None:
-                        first_temp = bed_current
-                        first_temp_ts = now
-                    if bed_heater is not None and bed_heater > 0:
-                        heater_positive_seen = True
-                        heater_zero_since = 0.0
-                    self._post("temp", (current, hotend_target, heater, bed_current, bed_target, bed_heater))
-                    heater_text = f" B@:{bed_heater}" if bed_heater is not None else " B@:?"
-                    pct = max(0.0, min(100.0, (bed_current / max(target, 1.0)) * 100.0))
-                    self._post("progress", (f"Предпрогрев hotbed: {bed_current:.1f}/{bed_target:.0f}C{heater_text}", pct))
-                    if now - last_logged >= 8.0:
-                        last_logged = now
-                        self._post("log", f"Предпрогрев hotbed: {bed_current:.1f}/{bed_target:.0f}C{heater_text}")
-                    if (
-                        bed_current >= target - HOTBED_PREHEAT_MARGIN_C
-                        and abs(bed_target - target) <= 0.5
-                    ):
-                        self._post("progress", (f"Hotbed готов: {bed_current:.1f}/{bed_target:.0f}C", 100.0))
-                        self._post(
-                            "log",
-                            f"Hotbed готов к печати: {bed_current:.1f}/{bed_target:.0f}C{heater_text}. "
-                            "Перехожу к предпрогреву hotend.",
-                        )
-                        return
-                    if bed_target <= 0.0:
-                        target_zero_since = target_zero_since or now
-                        if now - target_zero_since >= HOTBED_PREHEAT_TARGET_GRACE_SEC:
-                            raise RuntimeError(
-                                "Hotbed не принял цель нагрева перед SD-стартом: M105 показывает B:/0C. "
-                                "Стол выключен командой M140 S0; печать не запускаю."
-                            )
-                    else:
-                        target_zero_since = 0.0
-                    if (
-                        bed_heater is not None
-                        and bed_heater <= 0
-                        and bed_target > 0.0
-                        and bed_current < target - HOTBED_PREHEAT_MARGIN_C
-                        and not heater_positive_seen
-                    ):
-                        heater_zero_since = heater_zero_since or now
-                        if now - heater_zero_since >= HOTBED_PREHEAT_HEATER_ZERO_GRACE_SEC:
-                            raise RuntimeError(
-                                f"Hotbed получил цель {bed_target:.0f}C, но B@ остаётся 0 при {bed_current:.1f}C. "
-                                "Стол выключен командой M140 S0; проверь питание/разъём hotbed."
-                            )
-                    else:
-                        heater_zero_since = 0.0
-                    if (
-                        first_temp is not None
-                        and now - first_temp_ts >= HOTBED_PREHEAT_NO_RISE_GRACE_SEC
-                        and bed_current < first_temp + HOTBED_PREHEAT_MIN_RISE_C
-                        and bed_current < target - HOTBED_PREHEAT_MARGIN_C
-                    ):
-                        if heater_positive_seen and not slow_rise_warned:
-                            slow_rise_warned = True
+            self._check_preheat_cancelled()
+            with sdtool.open_serial(self._port(), self._baud(), timeout=.25) as ser:
+                sdtool.sync_ascii(ser)
+                self._check_preheat_cancelled()
+                sdtool.send_line_wait_ok(ser, f"M140 S{target:.0f}", timeout_s=12.0)
+                out = sdtool.send_line_wait_ok(ser, "M105", timeout_s=12.0)
+                self._post("metrics", ("m105", out))
+                while time.monotonic() < deadline:
+                    self._check_preheat_cancelled()
+                    current, hotend_target, heater, bed_current, bed_target, bed_heater = parse_m105_temperatures(out)
+                    if bed_current is not None and bed_target is not None:
+                        now = time.monotonic()
+                        if first_temp is None:
+                            first_temp = bed_current
+                            first_temp_ts = now
+                        if bed_heater is not None and bed_heater > 0:
+                            heater_positive_seen = True
+                            heater_zero_since = 0.0
+                        self._post("temp", (current, hotend_target, heater, bed_current, bed_target, bed_heater))
+                        heater_text = f" B@:{bed_heater}" if bed_heater is not None else " B@:?"
+                        pct = max(0.0, min(100.0, (bed_current / max(target, 1.0)) * 100.0))
+                        self._post("progress", (f"Предпрогрев hotbed: {bed_current:.1f}/{bed_target:.0f}C{heater_text}", pct))
+                        if now - last_logged >= 8.0:
+                            last_logged = now
+                            self._post("log", f"Предпрогрев hotbed: {bed_current:.1f}/{bed_target:.0f}C{heater_text}")
+                        if (
+                            bed_current >= target - HOTBED_PREHEAT_MARGIN_C
+                            and abs(bed_target - target) <= 0.5
+                        ):
+                            self._post("progress", (f"Hotbed готов: {bed_current:.1f}/{bed_target:.0f}C", 100.0))
                             self._post(
                                 "log",
-                                f"Hotbed греется медленно: {first_temp:.1f}C -> {bed_current:.1f}C "
-                                f"за {HOTBED_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд при положительном B@. "
-                                "Продолжаю ждать до общего таймаута.",
+                                f"Hotbed готов к печати: {bed_current:.1f}/{bed_target:.0f}C{heater_text}. "
+                                "Перехожу к предпрогреву hotend.",
                             )
-                        elif not heater_positive_seen:
-                            raise RuntimeError(
-                                f"Hotbed почти не греется: {first_temp:.1f}C -> {bed_current:.1f}C "
-                                f"за {HOTBED_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд, и положительный B@ не подтверждён. "
-                                "Стол выключен командой M140 S0; печать не запускаю."
-                            )
-                time.sleep(HOTBED_PREHEAT_POLL_SEC)
-                out = sdtool.run_commands_wait_ok(
-                    self._port(),
-                    self._baud(),
-                    ["M105"],
-                    per_command_timeout=12.0,
-                )
-                self._post("metrics", ("m105", out))
+                            return
+                        if bed_target <= 0.0:
+                            target_zero_since = target_zero_since or now
+                            if now - target_zero_since >= HOTBED_PREHEAT_TARGET_GRACE_SEC:
+                                raise RuntimeError(
+                                    "Hotbed не принял цель нагрева перед SD-стартом: M105 показывает B:/0C. "
+                                    "Стол выключен командой M140 S0; печать не запускаю."
+                                )
+                        else:
+                            target_zero_since = 0.0
+                        if (
+                            bed_heater is not None
+                            and bed_heater <= 0
+                            and bed_target > 0.0
+                            and bed_current < target - HOTBED_PREHEAT_MARGIN_C
+                            and not heater_positive_seen
+                        ):
+                            heater_zero_since = heater_zero_since or now
+                            if now - heater_zero_since >= HOTBED_PREHEAT_HEATER_ZERO_GRACE_SEC:
+                                raise RuntimeError(
+                                    f"Hotbed получил цель {bed_target:.0f}C, но B@ остаётся 0 при {bed_current:.1f}C. "
+                                    "Стол выключен командой M140 S0; проверь питание/разъём hotbed."
+                                )
+                        else:
+                            heater_zero_since = 0.0
+                        if (
+                            first_temp is not None
+                            and now - first_temp_ts >= HOTBED_PREHEAT_NO_RISE_GRACE_SEC
+                            and bed_current < first_temp + HOTBED_PREHEAT_MIN_RISE_C
+                            and bed_current < target - HOTBED_PREHEAT_MARGIN_C
+                        ):
+                            if heater_positive_seen and not slow_rise_warned:
+                                slow_rise_warned = True
+                                self._post(
+                                    "log",
+                                    f"Hotbed греется медленно: {first_temp:.1f}C -> {bed_current:.1f}C "
+                                    f"за {HOTBED_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд при положительном B@. "
+                                    "Продолжаю ждать до общего таймаута.",
+                                )
+                            elif not heater_positive_seen:
+                                raise RuntimeError(
+                                    f"Hotbed почти не греется: {first_temp:.1f}C -> {bed_current:.1f}C "
+                                    f"за {HOTBED_PREHEAT_NO_RISE_GRACE_SEC:.0f} секунд, и положительный B@ не подтверждён. "
+                                    "Стол выключен командой M140 S0; печать не запускаю."
+                                )
+                    self._wait_preheat(HOTBED_PREHEAT_POLL_SEC)
+                    out = sdtool.send_line_wait_ok(ser, "M105", timeout_s=12.0)
+                    self._post("metrics", ("m105", out))
             raise RuntimeError(
                 f"Hotbed не дошёл до {target:.0f}C перед SD-стартом за {HOTBED_PREHEAT_TIMEOUT_SEC:.0f} секунд. "
                 "Стол выключен командой M140 S0; печать не запускаю."
@@ -1445,6 +1502,7 @@ class K9ControlCenter:
         def wait_for_m104_stage(ser: object, stage_target: float) -> None:
             nonlocal target_zero_since, heater_zero_since
 
+            self._check_preheat_cancelled()
             stage_goal = min(stage_target - PRINT_PREHEAT_STAGE_MARGIN_C, target - PRINT_PREHEAT_MARGIN_C)
             if last_temp is not None and last_temp >= stage_goal:
                 return
@@ -1455,6 +1513,7 @@ class K9ControlCenter:
             sdtool.read_for(ser, 0.5)
             next_poll = 0.0
             while time.monotonic() < deadline:
+                self._check_preheat_cancelled()
                 now = time.monotonic()
                 if now < next_poll:
                     time.sleep(0.1)
@@ -1517,6 +1576,7 @@ class K9ControlCenter:
         def wait_for_final_m109(ser: object) -> None:
             nonlocal last_reply_ts, target_zero_since, heater_zero_since
 
+            self._check_preheat_cancelled()
             self._post("log", f"Финальная проверка: M109 S{target:.0f}, жду подтверждения перед M24.")
             try:
                 ser.reset_input_buffer()
@@ -1526,6 +1586,9 @@ class K9ControlCenter:
             last_reply_ts = time.monotonic()
 
             while time.monotonic() < deadline:
+                if getattr(self, "preheat_cancel_requested", threading.Event()).is_set():
+                    send_hotend_off(ser)
+                    self._check_preheat_cancelled()
                 raw = ser.readline()
                 now = time.monotonic()
                 if not raw:
@@ -1604,6 +1667,7 @@ class K9ControlCenter:
         )
 
     def _lift_from_saved_start_for_preheat_if_needed(self) -> bool:
+        self._check_preheat_cancelled()
         if not self.at_saved_start_pose:
             return False
         self._post("log", "Сопло сейчас в сохранённом старте: поднимаю Z перед предпрогревом, затем вернусь к старту перед M24.")
@@ -1843,6 +1907,8 @@ class K9ControlCenter:
         hotbed_off_state = "normal" if not self.user_task_pending else "disabled"
         level_state = "normal" if trusted and self.current_print_file == "-" and not self.user_task_pending else "disabled"
         guarded_buttons = (
+            ("stop_button", "normal" if self.preheat_active and not self.preheat_cancel_requested.is_set()
+             else "disabled" if self.user_task_pending else "normal"),
             ("resume_button", "normal" if not self.user_task_pending and self._port()
              and not self.next_sd_start_requires_power_cycle
              and getattr(self, "recovery_record", {}).get("pause", {}).get("confirmed") else "disabled"),
@@ -1876,6 +1942,10 @@ class K9ControlCenter:
                     widget.configure(state=level_state)
                 except Exception:
                     pass
+
+        if hasattr(self, "stop_button"):
+            self.stop_button.configure(text=self._t("cancel_uploading" if self.preheat_cancel_requested.is_set()
+                else "cancel_preheat") if self.preheat_active else self._t("stop"))
 
     def _apply_home_trust(self, state: str, reason: str = "", *, log_change: bool = False) -> None:
         if state not in {HOME_TRUST_TRUSTED, HOME_TRUST_UNCERTAIN, HOME_TRUST_INVALID}:
@@ -1960,6 +2030,12 @@ class K9ControlCenter:
             "resume": {"ru": "Продолжить", "en": "Resume", "zh": "继续"},
             "stop": {"ru": "Стоп", "en": "Stop", "zh": "停止"},
             "manual_controls": {"ru": "Ручное управление", "en": "Manual control", "zh": "手动控制"},
+            "cancel_preheat": {"ru": "Отменить", "en": "Cancel", "zh": "取消预热"},
+            "preheat_cancelling": {"ru": "Отменяю прогрев: выключаю нагрев и завершаю возврат сопла…", "en": "Cancelling preheat: shutting down heat and completing nozzle return…", "zh": "正在取消预热：关闭加热并完成喷嘴返回…"},
+            "preheat_cancelled": {"ru": "Прогрев отменён. Печать не запускалась.", "en": "Preheat cancelled. Printing did not start.", "zh": "预热已取消，打印未启动。"},
+            "heaters_off_confirmed": {"ru": "Нагрев выключен: свежий ответ подтверждает нулевые цели и выходы обоих нагревателей.", "en": "Heat is off: a fresh report confirms zero heater targets and outputs.", "zh": "加热已关闭：新回复确认目标温度和输出均为零。"},
+            "heaters_off_unknown": {"ru": "Выключение нагрева не подтверждено. Выключите питание принтера; оси не двигайте.", "en": "Heater shutdown is unconfirmed. Switch printer power off; do not move axes.", "zh": "无法确认加热已关闭。请关闭打印机电源，不要移动各轴。"},
+            "save_raised_start_confirm": {"ru": "После сбоя сопло осталось поднятым. «Запомнить старт» не опускает его.\n\nВы уже вручную вернули сопло к правильному физическому старту у стола?\nЕсли нет, выберите «Нет» и используйте «К сохранённому старту».", "en": "The nozzle was left raised after a failure. Save start does not lower it.\n\nHave you already manually restored the correct physical start near the bed?\nIf not, choose No and use Go to saved start.", "zh": "故障后喷嘴停在抬高位置，“保存起点”不会降低喷嘴。\n\n是否已手动恢复平台附近的正确实际起点？\n如果没有，请选择“否”，然后使用“回到保存起点”。"},
             "close_wait": {
                 "ru": "Дождись завершения операции. Загрузку можно отменить кнопкой «Отменить». При опасности отключи питание принтера.",
                 "en": "Wait for the operation to finish. Use Cancel to stop an upload. In an emergency, cut printer power.",
@@ -2235,6 +2311,10 @@ class K9ControlCenter:
 
     def _on_close(self) -> None:
         if self.user_task_pending:
+            if self.preheat_active:
+                self.close_after_preheat = True
+                self.cancel_preheat()
+                return
             messagebox.showinfo("Little Hands", self._t("close_wait"))
             return
         self.monitor_enabled = False
@@ -3536,8 +3616,7 @@ class K9ControlCenter:
                 widget.configure(state=state)
             except Exception:
                 pass
-        if not busy:
-            self._sync_home_controls()
+        self._sync_home_controls()
         if busy and label and "g-code" in label.lower():
             self.progress_var.set("Upload: writing to SD...")
             self.progress_bar.configure(mode="indeterminate")
@@ -3650,6 +3729,12 @@ class K9ControlCenter:
                 self.progress_bar["value"] = float(value)
             elif kind == "melody":
                 self._play_completion_melody()
+            elif kind == "preheat-task-finished":
+                if self.close_after_preheat:
+                    self.close_after_preheat = False
+                    if self.preheat_cleanup_confirmed:
+                        self._on_close()
+                        return
             elif kind == "busy":
                 busy, label = payload  # type: ignore[misc]
                 self._set_busy_ui(bool(busy), str(label))
@@ -4742,6 +4827,9 @@ class K9ControlCenter:
                 self._post("log-i18n", ("task_start", {"label": display_label}))
                 func()
                 self._post("log-i18n", ("task_done", {"label": display_label}))
+            except heater_shutdown.PreheatCancelled as exc:
+                self._post("log", str(exc))
+                self._post("progress", (self._t("preheat_cancelled"), 0.0))
             except sdtool.UploadCancelled as exc:
                 self._post("log", str(exc))
                 self._post("files-status", str(exc))
@@ -4752,6 +4840,7 @@ class K9ControlCenter:
                 self.serial_lock.release()
                 self.user_task_pending = False
                 self._post("busy", (False, "USB: idle"))
+                self._post("preheat-task-finished", None)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -6200,6 +6289,8 @@ class K9ControlCenter:
         self._post("sd", "SD: idle")
 
     def stop_print(self) -> None:
+        if self.cancel_preheat():
+            return
         def task() -> None:
             self._invalidate_retained_pause("stop requested")
             self._save_print_state("stop-requested", force=True)
@@ -6366,6 +6457,12 @@ class K9ControlCenter:
         self._run_task("Home всех осей", task)
 
     def set_current_home_zero(self) -> None:
+        if self.user_task_pending:
+            return
+        if self.preheat_lift_recovery_available and not messagebox.askyesno(
+            "Little Hands", self._t("save_raised_start_confirm"), default=messagebox.NO,
+        ):
+            return
         def task() -> None:
             self._invalidate_retained_pause("new saved start")
             out = sdtool.set_current_home_zero(self._port(), self._baud())
