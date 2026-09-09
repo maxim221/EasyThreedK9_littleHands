@@ -1,5 +1,7 @@
 # Linux / Raspberry Pi Setup
 
+For connection, printing, heat and recovery, see the [quick guide](USER_GUIDE.md), also shown by the app's Manual button. The app resolves paths from the checkout; keep the docs/ folder with tools/.
+
 This guide is for:
 
 - Linux desktop
@@ -81,6 +83,8 @@ The repo already contains:
 - `Little Hands Control Center.desktop`
 
 To install it locally:
+
+Before installing the desktop launcher, edit its Exec, Path and Icon entries to match your checkout directory.
 
 ```bash
 mkdir -p ~/.local/share/applications

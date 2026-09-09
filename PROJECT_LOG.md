@@ -3242,3 +3242,36 @@ After each test print, append:
   - `40C` remains reserved for a later watched test only if `35C` is not enough
 - Verification:
   - no physical printer motion or heating was run during the settings change
+
+## 2026-09-09 G-code Folder and Cura Save Location
+
+- Moved all 13 loose G-code files from the repository root into `gcode/`, preserving file names and contents; verified every file with SHA-256 before and after the move.
+- Set the local Cura 5.11 `[local_file] dialog_save_path` to `/home/maxim/draftCode/littleHands/gcode` while Cura was closed. Updated its recent-file reference to the moved `flasherTop.gcode`.
+- Preserved a timestamped backup alongside the local `cura.cfg` before editing. Cura remembers the last manually selected save directory, so a later save elsewhere can change this preference.
+- Kept `active_machine = lilHands_k9_warmmat`, `jobname_prefix = False`, slicing settings, existing `exports/` helper output, and SD-card backup archives unchanged.
+- Documented the storage convention in the Cura instructions and repository agent rules.
+- Verification: Python compilation, `tools/regression_checks.py`, `git diff --check`, file checksums, and a comparison confirming only the two intended Cura preferences changed all passed. No physical printer test was needed.
+
+## 2026-09-09 Controlled Hotbed 60C Default
+
+- The operator requested a higher working bed temperature after continued use and selected `60C`. This records a software-default change; no new physical heat test or surface-temperature calibration was performed.
+- New helper slices and the tracked Cura machine start now emit `;LH_EXPERIMENTAL_HOTBED_TARGET:60` and non-blocking `M140 S60`. Ordinary Cura bed temperature remains `0`; file-local hotend `M109` and staged host hotend preheat are preserved, and bed `M190` stays forbidden.
+- Updated the installed Cura 5.11 `lilHands_k9_warmmat_settings` and fallback `lilHands_settings` containers while Cura was closed. Each received only the two temperature substitutions, with timestamped `.bak-hotbed60-*` backups alongside the originals. Verified `active_machine = lilHands_k9_warmmat` and `jobname_prefix = False` remained intact.
+- Little Hands now provides manual `35/40/50/55/60C` buttons. App validation and the helper allow targets up to `60C`, retaining the installed Bed10K Max70 firmware and its thermal protections. Positive manual heating remains blocked during active SD printing; `Hotbed off` remains available.
+- Increased host bed-preheat timeout from `420s` to `900s` for the higher target. Readiness requires both actual `B:` within `1C` of the target and the reported setpoint matching the request within `0.5C`. Target-loss checks and heater-off on failure remain in place.
+- Existing local/SD G-code retains its original temperature: re-slice and upload to apply `60C`. Restart Little Hands when the printer is idle to load the new controls; the running app and printer were not interrupted.
+- Updated repository rules, the in-app manual, Cura instructions, and hotbed/firmware notes. Historical `30/35C` test observations remain unchanged.
+- Verification: required Python compilation and regression checks passed; added offline behavioral checks for valid `0/35/40/50/55/60C` slices, rejected unsafe/mismatched bed heat, manual SD-print blocking/off, slow warmup, target loss/mismatch, and timeout shutdown. An actual CuraEngine cube slice at the new default passed the app validator. An isolated Tk UI check verified button visibility, callbacks, and SD-print locks in Russian, English, and Chinese. No printer serial commands, heat, motion, or print starts were performed.
+
+## 2026-09-09 Application Review and Concise Multilingual Manuals
+
+- Reviewed temperature parsing, SD preheat/start, G-code validation, USB task controls, recovery instructions, language switching, and window layout without connecting to printer hardware.
+- Fixed temperature parsing to use the latest temperature line and keep hotend `@` distinct from bed `B@`. Malformed temperature tokens no longer reach float conversion as invalid strings.
+- G-code validation now checks every positive heater target, rejects earlier excessive targets hidden by later valid commands, rejects conflicting/invalid hotbed markers, and catches every bed `M190` form including `R60`, `S0`, and no target. Invalid cached bed targets and non-finite helper CLI targets fail instead of silently bypassing bed preheat.
+- All three SD-start entry points share bed/hotend preheat cleanup. A failed hotend warmup or clearance return now also turns off the already heated bed, attempts each shutdown command independently, preserves failed-lift recovery, invalidates home trust, and requires a power cycle before another start.
+- USB port controls lock before a worker starts. Closing the app during a pending operation is refused, so cleanup is not abandoned. Rebuilding the files window after language changes preserves guards and removes stale widget references.
+- Offline visual inspection found hotbed/leveling controls below the visible area at the default window size. Compact manual buttons, adaptive graph height, bounded SD/status split, and placement of USB metrics beneath the journal keep actions visible at `1080x680` and `1280x780`. Graph drawing now respects the actual canvas size. Live status refreshes immediately on language changes.
+- Replaced duplicate embedded manuals with three concise guides in `docs/USER_GUIDE*.md`, used directly by the app. Shortened completion/recovery explanations and startup logs, retained operator confirmations and failed-lift conditions, and linked the guides from all README and Linux setup languages.
+- App and SD helper resolve the project root from their source location instead of a workstation-specific absolute path. Linux instructions explain adapting desktop launcher paths.
+- Added offline behavioral and GUI regression coverage for these fixes. GUI tests prohibit serial access and isolate runtime state; they cover all three languages, busy closure/port guards, repeated window rebuilds, and control visibility in both supported test sizes. No physical motion, heating, firmware change, or print start was performed.
+- Verification passed: required Python compilation, workflow regression checks, all six offline GUI tests, local documentation links, and `git diff --check`. Updated all three documentation screenshots from the isolated English UI and visually checked the main, files/firmware, and manual windows.

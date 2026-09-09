@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import k9_control_center as appmod
+import k9_cura_slice as slicermod
 import k9_marlin_sd as sdtool
 
 
@@ -25,6 +28,156 @@ def require(condition: bool, message: str, failures: list[str]) -> None:
 
 def require_regex(text: str, pattern: str, message: str, failures: list[str]) -> None:
     require(re.search(pattern, text, re.MULTILINE | re.DOTALL) is not None, message, failures)
+
+
+def check_hotbed_workflow(failures: list[str]) -> None:
+    """Exercise slicing, validation and heat gates without Tk or printer access."""
+    app = object.__new__(appmod.K9ControlCenter)
+    app._port = lambda: "test-port"
+    app._baud = lambda: 115200
+    app._post = lambda *args: None
+    app._run_task = lambda label, task: task()
+    app.current_print_file = "-"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "hotbed.gcode"
+        for target in (0, 35, 40, 50, 55, 60):
+            settings, extruder = slicermod.k9_profile_settings(14, hotbed_target=target)
+            gcode = (
+                settings["machine_start_gcode"]
+                + "\nM109 S226\nG1 X10 Y10 Z0.2 E1 F360\nG1 X20 Y20 E2\n;End of Gcode\n"
+                + settings["machine_end_gcode"] + "\n"
+            )
+            source.write_text(gcode, encoding="utf-8")
+            errors, _, info = app._gcode_validation_report(source)
+            require(not errors, f"Generated {target}C G-code must validate: {errors}", failures)
+            app._profile_for_print = lambda *args: info
+            require(app._hotbed_target_for_print("TEST.GCO", source.name, source) == target,
+                    f"SD preheat must preserve the {target}C target.", failures)
+            require(settings["material_bed_temperature"] == extruder["material_bed_temperature"] == "0",
+                    "Cura's ordinary bed heater must stay disabled.", failures)
+            require("M190" not in gcode and "M140 S0" in gcode,
+                    "Generated G-code must switch the bed off and never block on M190.", failures)
+            if target == 60:
+                for invalid in (
+                    gcode.replace("TARGET:60", "TARGET:61").replace("M140 S60", "M140 S61"),
+                    gcode.replace(";LH_EXPERIMENTAL_HOTBED_TARGET:60", ""),
+                    gcode.replace("M140 S60", "M140 S55"),
+                    gcode.replace("M140 S60", "M190 S60"),
+                    gcode.replace("M140 S60", "M140 S70\nM140 S60"),
+                    gcode.replace("M140 S60", "M140 S60\nM140 S55\nM140 S60"),
+                    gcode.replace("M140 S60", "M190 R60\nM140 S60"),
+                    gcode.replace("M140 S60", "M190 S0\nM140 S60"),
+                    gcode.replace("M140 S60", "M190\nM140 S60"),
+                    gcode.replace("M109 S226", "M109 S226\nM104 S300"),
+                    gcode.replace("TARGET:60", "TARGET:nan\n;LH_EXPERIMENTAL_HOTBED_TARGET:60"),
+                ):
+                    source.write_text(invalid, encoding="utf-8")
+                    errors, _, _ = app._gcode_validation_report(source)
+                    require(bool(errors), "Unsafe or mismatched hotbed G-code must be rejected.", failures)
+
+    for target in appmod.HOTBED_MANUAL_TARGETS_C:
+        reply = f"ok T:24 /0 B:24 /{target:g} @:0 B@:127"
+        with patch.object(sdtool, "run_commands_wait_ok", return_value=reply) as serial:
+            app.set_hotbed_target(target)
+            require(serial.call_args.args[2] == [f"M140 S{target:g}", "M105"],
+                    f"Manual hotbed control must send exactly {target:g}C.", failures)
+        app.current_print_file = "TEST.GCO"
+        with patch.object(sdtool, "run_commands_wait_ok") as serial:
+            try:
+                app.set_hotbed_target(target)
+            except RuntimeError:
+                pass
+            else:
+                failures.append("Manual bed heating must refuse an active SD print.")
+            require(not serial.called, "Blocked manual heat must not touch serial.", failures)
+        app.current_print_file = "-"
+
+    app.current_print_file = "TEST.GCO"
+    with patch.object(sdtool, "run_commands_wait_ok", return_value="ok B:35 /0 B@:0") as serial:
+        app.set_hotbed_target(0)
+        require(serial.call_args.args[2] == ["M140 S0", "M105"],
+                "Hotbed off must remain available during an SD print.", failures)
+
+    # At 60C the old 420s timeout could reject an otherwise successful warmup.
+    for reported_target, reaches_target, should_succeed in ((60, True, True), (0, False, False),
+                                                           (60, False, False), (55, True, False)):
+        clock = [100.0]
+
+        def sleep(seconds: float) -> None:
+            clock[0] += seconds
+
+        def reply(*args, **kwargs) -> str:
+            current = 59 if reaches_target and clock[0] >= 600 else 30
+            return f"ok T:24 /0 B:{current} /{reported_target} @:0 B@:127"
+
+        with patch.object(sdtool, "run_commands_wait_ok", side_effect=reply) as serial, \
+                patch.object(appmod.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(appmod.time, "sleep", side_effect=sleep):
+            succeeded = True
+            try:
+                app._preheat_hotbed_for_sd_start(60)
+            except RuntimeError:
+                succeeded = False
+            require(succeeded == should_succeed,
+                    f"60C heat gate result wrong for B target {reported_target}, rising={reaches_target}.", failures)
+            commands = [call.args[2] for call in serial.call_args_list]
+            require(commands[0] == ["M140 S60", "M105"], "Preheat must request the full 60C target.", failures)
+            require((commands[-1] == ["M140 S0"]) == (not should_succeed),
+                    "Failed bed preheat must turn the heater off.", failures)
+            require(all(cmd in (["M140 S60", "M105"], ["M105"], ["M140 S0"]) for cmd in commands),
+                    "Bed preheat must not move axes or start SD printing.", failures)
+
+
+def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
+    samples = (
+        ("ok T:200 /226 B:40 /60 @:127 B@:50\nok T:24 /0 B:30 /0 @:0 B@:0\nok",
+         (24.0, 0.0, 0, 30.0, 0.0, 0)),
+        ("ok B:30 /60 B@:127", (None, None, None, 30.0, 60.0, 127)),
+        ("ok T:24 /200 B:30 /60 B@:127 @:0", (24.0, 200.0, 0, 30.0, 60.0, 127)),
+        ("ok T:24 /200 @:127\nok B:30 /60 B@:127", (None, None, None, 30.0, 60.0, 127)),
+        ("ok T:-- /200 B:.. /60", (None, None, None, None, None, None)),
+    )
+    for reply, expected in samples:
+        require(appmod.parse_m105_temperatures(reply) == expected,
+                f"Temperature parsing must keep the newest sample and separate heater outputs: {reply!r}", failures)
+
+    for fail_stage in ("bed", "hotend", None):
+        app = object.__new__(appmod.K9ControlCenter)
+        app._port = lambda: "test-port"
+        app._baud = lambda: 115200
+        app._post = Mock()
+        app._require_power_cycle_before_next_sd_start = Mock()
+        app._set_home_trust = Mock()
+        app._save_print_state = Mock()
+        app.preheat_lift_recovery_available = fail_stage == "hotend"
+        order = []
+
+        def heat(stage: str) -> None:
+            order.append(stage)
+            if stage == fail_stage:
+                raise RuntimeError("simulated preheat failure")
+
+        app._preheat_hotbed_before_sd_start = lambda *args: heat("bed")
+        app._preheat_hotend_before_sd_start = lambda *args: heat("hotend")
+        with patch.object(sdtool, "run_commands_wait_ok", return_value="ok") as serial:
+            try:
+                app._preheat_for_sd_start("TEST.GCO", "Test")
+            except RuntimeError:
+                require(fail_stage is not None, "Successful preheat must not fail.", failures)
+            else:
+                require(fail_stage is None, "Preheat failure must reach the caller before M24.", failures)
+            require(order == (["bed"] if fail_stage == "bed" else ["bed", "hotend"]),
+                    "Every SD start must heat the bed before the hotend.", failures)
+            commands = [call.args[2] for call in serial.call_args_list]
+            require(commands == ([["M108"], ["M104 S0"], ["M140 S0"]] if fail_stage else []),
+                    "Failed preheat must abort waiting and shut off both heaters without axis moves.", failures)
+            if fail_stage:
+                require(app._require_power_cycle_before_next_sd_start.called and app._set_home_trust.called,
+                        "Failed preheat must require a power cycle and an operator-confirmed start.", failures)
+                phase = "preheat-lift-failed" if fail_stage == "hotend" else "failed-start"
+                require(app._save_print_state.call_args.args == (phase,),
+                        "Preheat shutdown must preserve failed-lift recovery state.", failures)
 
 
 def main() -> int:
@@ -212,7 +365,7 @@ def main() -> int:
     )
     require(
         "_preheat_hotend_before_sd_start" in app
-        and app.count("_preheat_hotend_before_sd_start(") >= 4
+        and app.count("self._preheat_for_sd_start(") == 3
         and "сначала доказываю нагрев hotend" in app
         and "Если нагрев не подтвердится, M24 не будет отправлен" in app,
         "Every GUI SD-start path must prove host-side hotend preheat before M24.",
@@ -290,11 +443,11 @@ def main() -> int:
         failures,
     )
     require(
-        "HOTBED_MAX_MANUAL_TARGET_C = 40.0" in app
+        "HOTBED_MAX_MANUAL_TARGET_C = 60.0" in app
         and "def set_hotbed_target" in app
         and 'f"M140 S{target:.0f}"' in app
         and "Hotbed выключен командой M140 S0" in app,
-        "Manual hotbed panel must provide bounded 35/40C targets and an explicit M140 S0 off path.",
+        "Manual hotbed panel must allow targets through 60C and an explicit M140 S0 off path.",
         failures,
     )
     require(
@@ -329,8 +482,8 @@ def main() -> int:
     require(
         "_preheat_hotbed_before_sd_start" in app
         and "_preheat_hotbed_for_sd_start" in app
-        and "self._preheat_hotbed_before_sd_start(dest, source.name, upload_source)" in app
-        and "self._preheat_hotbed_before_sd_start(path, display, source_for_profile)" in app
+        and "self._preheat_for_sd_start(dest, source.name, upload_source)" in app
+        and "self._preheat_for_sd_start(path, display, source_for_profile)" in app
         and app.find("_preheat_hotbed_before_sd_start") < app.find("_preheat_hotend_before_sd_start"),
         "Hotbed-marked files must trigger host-side hotbed preheat before hotend preheat and M24.",
         failures,
@@ -365,13 +518,13 @@ def main() -> int:
     )
     require(
         "--experimental-hotbed-target" in slicer
-        and "K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 40.0" in slicer
-        and "K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET = 35.0" in slicer
+        and "K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 60.0" in slicer
+        and "K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET = 60.0" in slicer
         and "default=K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET" in slicer
         and "HOTBED_EXPERIMENTAL_MARKER" in slicer
         and "M140 S{hotbed_target:g}" in slicer
         and '"material_bed_temperature": "0"' in slicer,
-        "Cura helper must default to marked 35C controlled-hotbed files while keeping Cura bed temperature at 0.",
+        "Cura helper must default to marked 60C controlled-hotbed files while keeping Cura bed temperature at 0.",
         failures,
     )
 
@@ -530,11 +683,11 @@ def main() -> int:
     require("cool_fan_enabled = False" in cura_extruder, "K9 part-cooling must remain disabled.", failures)
     require("G1 Y95 F240" in cura_machine, "Tracked Cura machine end G-code must present bed toward operator at F240.", failures)
     require(
-        "LH_EXPERIMENTAL_HOTBED_TARGET:35" in cura_machine
-        and "M140 S35" in cura_machine
+        "LH_EXPERIMENTAL_HOTBED_TARGET:60" in cura_machine
+        and "M140 S60" in cura_machine
         and "material_bed_temperature = 0" in cura_quality
         and "material_bed_temperature = 0" in cura_extruder,
-        "Tracked Cura machine start must mark the 35C controlled-hotbed target while keeping Cura bed temperature at 0.",
+        "Tracked Cura machine start must mark the 60C controlled-hotbed target while keeping Cura bed temperature at 0.",
         failures,
     )
     require(
@@ -542,7 +695,7 @@ def main() -> int:
         and "active_machine = lilHands_k9_warmmat" in cura_readme
         and "lilHands_k9_warmmat" in cura_settings
         and "G1 Z10.0 F1800" in cura_settings,
-        "Project/Cura docs must warn that the old lilHands active machine drops the 35C hotbed marker.",
+        "Project/Cura docs must warn that the old lilHands active machine drops the controlled hotbed marker.",
         failures,
     )
     require("M84" not in cura_machine and "M18" not in cura_machine, "Tracked Cura machine end G-code must not disable steppers.", failures)
@@ -570,6 +723,9 @@ def main() -> int:
     )
     require(sdtool._stop_recovery_z(0.2) == 10.0, "Low stopped prints must lift to a 10 mm recovery height.", failures)
     require(sdtool._stop_recovery_z(94.0) == 95.0, "High stopped prints must not plan recovery above the K9 Z limit.", failures)
+
+    check_hotbed_workflow(failures)
+    check_temperature_reports_and_preheat_cleanup(failures)
 
     if failures:
         print("Regression checks failed:")

@@ -17,7 +17,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 - Cura 导出可用
 - 上传前的 G-code 校验可以拦截危险或明显损坏的文件
 - 温度与打印进度监控可用
-- 当前本地 K9 可使用带标记的 `35C` experimental controlled-hotbed 预热流程
+- 当前本地 K9 可使用带标记的 `60C` experimental controlled-hotbed 预热流程
 
 还比较粗糙的地方：
 
@@ -35,7 +35,7 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 
 ## 截图
 
-下面的截图使用英文界面。主窗口现在左侧是 manual control，USB metrics 位于其下方，journal 固定显示在右侧。
+下面的截图使用英文界面。手动控制位于温度图下方，右侧同时显示日志和 USB 指标。面板适应 1080 × 680 及以上的窗口。
 
 ![Little Hands main window](docs/screenshots/little-hands-main-window.png)
 
@@ -48,14 +48,17 @@ Little Hands 是一个面向 Linux 的桌面控制中心，针对的是一个非
 - English:
   - [README.md](README.md)
   - [Linux setup](docs/INSTALL_LINUX.md)
+  - [Quick guide / in-app manual](docs/USER_GUIDE.md)
   - [Printer and firmware guide](docs/PRINTER_AND_FIRMWARE.md)
 - Русский:
   - [README.ru.md](README.ru.md)
   - [Установка на Linux / Raspberry Pi](docs/INSTALL_LINUX.ru.md)
+  - [Краткое руководство приложения](docs/USER_GUIDE.ru.md)
   - [Принтер и прошивка](docs/PRINTER_AND_FIRMWARE.ru.md)
 - 中文:
   - [README.zh.md](README.zh.md)
   - [Linux / Raspberry Pi 安装](docs/INSTALL_LINUX.zh.md)
+  - [应用快速指南](docs/USER_GUIDE.zh.md)
   - [打印机与固件说明](docs/PRINTER_AND_FIRMWARE.zh.md)
 
 ## 当前支持的配置
@@ -114,7 +117,7 @@ Little Hands 使用的是 manual-zero 工作流：
 - 打印机仍然应该表现为“无加热床控制”
 - 已验证的工作温度大约为 `40–50C`
 
-对于本地 controlled-hotbed 分支，普通 Cura bed temperature 仍保持 `0C`；文件必须包含明确的 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 标记和非阻塞 `M140 S35`，Little Hands 会在 `M24` 前自行检查 `B:`。
+对于本地 controlled-hotbed 分支，普通 Cura bed temperature 仍保持 `0C`；文件必须包含明确的 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 标记和非阻塞 `M140 S60`，Little Hands 会在 `M24` 前自行检查 `B:`。
 
 如果新的 Desktop G-code 没有这个标记，Cura 很可能仍在使用旧的 `lilHands` 机器切片。请检查 `~/.config/cura/5.11/cura.cfg`：应为 `[cura] active_machine = lilHands_k9_warmmat`，然后重新保存 G-code。
 
@@ -137,7 +140,7 @@ python3 tools/k9_control_center.py
    - brim: `14 mm`
    - Cura 偏好设置：`Add machine prefix to job name` = `off`
    - `mainFlasherTop.STL` 支撑：everywhere，启用 interface / roof，support angle `35`
-   - start G-code 包含 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 和 `M140 S35`
+   - start G-code 包含 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 和 `M140 S60`
 
 公开固定的 Cura 基线副本位于 [docs/cura/](docs/cura/)。
 其他切片器版本的手动设置说明：[docs/cura/SETTINGS.zh.md](docs/cura/SETTINGS.zh.md)。

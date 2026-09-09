@@ -192,9 +192,9 @@ G92 X0 Y0 Z0
 - 操作者在平台中心附近的独立 surface sensor 显示约 `24C -> 33C -> 31C`，因此在这套首次安装中，真实表面温度可能比 Marlin `B:` 高几度
 - 第二次由操作者看守的 heat sanity check 使用 `M140 S35`；`B:` 从约 `24C` 平稳升到 `34.57C`，之后发送 `M140 S0`，热床输出保持 `B@:0`，Marlin `B:` 因惯性接近 `36C` 后开始下降；操作者的外部 surface sensor 最高约 `40C`，测试结束时约 `36C`
 - 安装 hotbed 后，在 Little Hands 的五个调平点（`前左` / `中` / `前右` / `后左` / `后右`）使用 `0.05 mm` 塞尺在 `Z0` 调平；塞尺应有轻微且一致的阻力。`0.10 mm` 目前只作为上限检查，因为 `G92 X0 Y0 Z0` 后 Cura 首层本身已经约为 `Z0.20`
-- 普通 Cura bed temperature 仍保持 `0`；在有人看守的 `35C` sanity test 成功后，当前本地 controlled-hotbed 切片默认使用明确标记的 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 文件和非阻塞 `M140 S35`
+- 普通 Cura bed temperature 保持 `0`；根据操作者 2026-09-09 的要求，新本地切片默认使用 `60C`，通过 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 和非阻塞 `M140 S60` 输出。这是软件默认值变更，并非新的物理验证。
 - 对这类文件，Little Hands 会在 `M24` 前先把 hotbed 预热到目标，然后执行正常的分段 hotend 预热；不要在 SD 文件中加入 `M190`
-- 手动 `Hotbed 35C` / `Hotbed 40C` / `Hotbed off` 按钮用于有人看守的测试和关闭；`35C` 是保守的 controlled-hotbed 常规目标，只有 `35C` 不够时才测试 `40C`
+- 手动按钮提供 `35/40/50/55/60C` 和 `Hotbed off`；`60C` 是 Bed10K Max70 的目标上限。打印前热床最多等待 `15 分钟`，确认设定目标和实际 `B:`，失败时关闭热床。
 - 后续 validation heat tests 仍必须由操作者看守：先确认冷态 `B:` 合理，再使用有限目标，确认 `B:` 上升，然后用 `M140 S0` 关闭热床
 
 ## 8. Cura 基线
@@ -206,7 +206,7 @@ G92 X0 Y0 Z0
 - profile: `codex - K9 warm mat cautious`
 - brim width: `14 mm`
 - PLA 温度：第一层 `225C`，之后 `224C`
-- Cura material bed temperature：`0C`；controlled-hotbed 文件只使用明确的 `;LH_EXPERIMENTAL_HOTBED_TARGET:35` 标记和非阻塞 `M140 S35`
+- Cura material bed temperature：`0C`；controlled-hotbed 文件只使用明确的 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 标记和非阻塞 `M140 S60`
 - `mainFlasherTop.STL` 的支撑：supports everywhere、normal supports、启用 interface / roof、support angle `35`
 
 重要 G-code 规则：

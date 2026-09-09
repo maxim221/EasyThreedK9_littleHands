@@ -30,7 +30,7 @@ from serial.tools import list_ports
 from typing import Callable
 
 
-PROJECT_ROOT = Path("/home/maxim/draftCode/littleHands")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MBP_PATH = PROJECT_ROOT / "firmware_src/ECF-Marlin-upstream/buildroot/share/scripts/MarlinBinaryProtocol.py"
 ProgressCb = Callable[[str, float], None]
 TRANSIENT_SERIAL_ERROR_MARKERS = (

@@ -7,9 +7,9 @@ Features:
 - upload firmware to the printer SD over USB and trigger M997
 - browse, start, pause, resume, stop, and delete SD files
 - live temperature / SD status polling
-- home, disable motors, and jog X/Y/Z
+- save the manual start pose, disable motors, and jog X/Y/Z
 - heat the hotend and feed/retract filament manually
-- bed-leveling helper points for the unusual X/Z bed plane layout
+- bed-leveling helper points in the logical X/Y print plane
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ import subprocess
 import json
 import math
 from pathlib import Path
-import textwrap
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
@@ -32,7 +31,7 @@ from tkinter.scrolledtext import ScrolledText
 import k9_marlin_sd as sdtool
 
 
-PROJECT_ROOT = Path("/home/maxim/draftCode/littleHands")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CURA_ROOT = Path.home() / ".local/share/cura/5.11"
 DEFAULT_FIRMWARE = PROJECT_ROOT / "firmware/LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin"
 LOG_DIR = PROJECT_ROOT / "monitor_logs"
@@ -73,7 +72,7 @@ PRINT_PREHEAT_STAGE_TARGETS_C = (60.0, 100.0, 150.0, 200.0)
 PRINT_PREHEAT_STAGE_MARGIN_C = 5.0
 PRINT_PREHEAT_STAGE_POLL_SEC = 5.0
 HOTBED_PREHEAT_MARGIN_C = 1.0
-HOTBED_PREHEAT_TIMEOUT_SEC = 420.0
+HOTBED_PREHEAT_TIMEOUT_SEC = 900.0
 HOTBED_PREHEAT_POLL_SEC = 5.0
 HOTBED_PREHEAT_TARGET_GRACE_SEC = 25.0
 HOTBED_PREHEAT_HEATER_ZERO_GRACE_SEC = 45.0
@@ -92,9 +91,10 @@ K9_WARN_PRINT_ACCEL = 350.0
 K9_MAX_BODY_PRINT_ACCEL = 600.0
 
 
-TEMP_RE = re.compile(r"T:([-\d.]+)\s*/([-\d.]+)")
-BED_TEMP_RE = re.compile(r"\bB:([-\d.]+)\s*/([-\d.]+)")
-HEATER_RE = re.compile(r"@:(\d+)")
+TEMP_NUMBER = r"([-+]?(?:\d+(?:\.\d*)?|\.\d+))"
+TEMP_RE = re.compile(rf"\bT:{TEMP_NUMBER}\s*/{TEMP_NUMBER}")
+BED_TEMP_RE = re.compile(rf"\bB:{TEMP_NUMBER}\s*/{TEMP_NUMBER}")
+HEATER_RE = re.compile(r"(?<!\S)@:(\d+)")
 BED_HEATER_RE = re.compile(r"\bB@:(\d+)")
 SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
@@ -123,6 +123,9 @@ TempHistoryRow = tuple[float, float | None, float | None, float | None, float | 
 
 
 def parse_m105_temperatures(reply: str) -> TempPayload:
+    # A serial exchange may contain several reports. Keep one complete sample
+    # from the latest temperature line, never fields from different times.
+    reply = next((line for line in reversed(reply.splitlines()) if TEMP_RE.search(line) or BED_TEMP_RE.search(line)), "")
     hotend_match = TEMP_RE.search(reply)
     bed_match = BED_TEMP_RE.search(reply)
     hotend_current = float(hotend_match.group(1)) if hotend_match else None
@@ -146,8 +149,9 @@ FILAMENT_PREHEAT_TARGET_C = 200.0
 FILAMENT_EXTRUDE_MIN_C = 180.0
 FILAMENT_FEEDRATE = 90
 FILAMENT_MOVE_TIMEOUT_SEC = 75.0
-HOTBED_MANUAL_TARGETS_C = (35.0, 40.0)
-HOTBED_MAX_MANUAL_TARGET_C = 40.0
+HOTBED_MANUAL_TARGETS_C = (35.0, 40.0, 50.0, 55.0, 60.0)
+# Bed10K Max70: BED_MAXTEMP 70 minus BED_OVERSHOOT 10.
+HOTBED_MAX_MANUAL_TARGET_C = 60.0
 HOTBED_EXPERIMENTAL_MARKER = ";LH_EXPERIMENTAL_HOTBED_TARGET:"
 MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
 LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
@@ -275,101 +279,6 @@ LH_FIRMWARE_CATALOG = {
     },
 }
 
-MANUAL_TEXT = textwrap.dedent(
-    """
-    Руководство Little Hands
-
-    Для чего это приложение
-    Little Hands — центр управления рабочим процессом EasyThreed K9 / ET-4000+ в этом проекте. Приложение готовит и загружает Cura G-code, запускает печать с SD-карты, показывает температуру и статус SD, ведёт кольцевой лог и помогает вернуть принтер к сохранённой стартовой позе после печати.
-
-    Аппаратная база
-    - Прошивка: LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin.
-    - Единственный вентилятор принтера используется как hotend auto-fan на FAN1: ниже примерно 45C выключен, выше примерно 45C включён.
-    - Публичный baseline остаётся с внешним warm mat / Cura bed temperature 0. Экспериментальная LH v6 ветка умеет управлять подключённым hotbed, но только через явные кнопки Little Hands или помеченный experimental-hotbed G-code.
-    - В этом workflow не используется обычный Marlin G28. У этого K9 в проверенной конфигурации нет надёжного home по концевикам.
-    - Оси с точки зрения пользователя: X двигает голову влево/вправо, Y двигает стол к себе/от себя в плоскости печати, Z двигает голову вверх/вниз.
-
-    Стартовая поза и модель home
-    Принтер не находит home сам. Пользователь выставляет стартовую позу печати, а Little Hands объявляет её логическим нулём командой G92 X0 Y0 Z0.
-
-    Стартовая поза печати:
-    - голова находится в левой стартовой стороне печати
-    - стол находится в дальней / от пользователя стартовой позиции
-    - сопло едва касается стола в выбранной точке нуля
-
-    Обычный сценарий печати
-    1. Нарежь модель в Cura с профилем Little Hands K9.
-    2. Вставь SD-карту в принтер или загрузи подготовленный G-code через Little Hands.
-    3. Выставь принтер в физическую стартовую позу.
-    4. Нажми "Запомнить старт".
-    5. Выбери файл в блоке "Файлы на SD принтера".
-    6. Нажми "Старт печати".
-    7. Если файл помечен `LH_EXPERIMENTAL_HOTBED_TARGET`, Little Hands сначала прогревает hotbed до этой цели. Затем он подтверждает нагрев hotend ступенями M104 и финальным M109, возвращает сопло в сохранённый X0 Y0 Z0 и только после этого отправляет M23/M24. Если нагрев не подтверждён, печать не стартует.
-    8. После старта печати USB-телеметрия может временно молчать. Если принтер греется, двигается или печатает, не делай power cycle только из-за молчания телеметрии.
-
-    После штатного завершения печати
-    1. Сними модель, brim, нитки и мусор со стола.
-    2. Нажми "К сохранённому старту" в блоке ручного управления.
-    3. Подтверди, что стол свободен.
-    4. Little Hands вернётся из известной послепечатной позы в X0 Y0 Z0 через защищённые recovery-движения.
-    5. Когда принтер физически стоит в стартовой позе, сделай power cycle принтера на 5–10 секунд, проверь старт и перед следующей печатью нажми "Запомнить старт".
-
-    Если Little Hands был закрыт, компьютер спал или USB отвалился во время печати
-    - Если у приложения есть сохранённая послепечатная поза, "К сохранённому старту" может использовать её после подтверждения, что деталь снята и оси не двигали руками.
-    - Если приложение только знает, что печать, вероятно, завершилась, оно покажет recovery-окно. Используй "Подтвердить финиш" после снятия детали. Это записывает подтверждение пользователя и включает guarded recovery, если достаточно данных о print-end.
-    - Если доверенной сохранённой позы нет, Little Hands откажется возвращать автоматически. Выставь старт вручную и нажми "Запомнить старт".
-
-    Если печать остановлена или сорвалась
-    - "Стоп" — это управляемая остановка, а не аварийный путь. Он сначала пытается снять M114 до M524, затем поставить печать на паузу, повторить M114, безопасно поднять Z, остановить SD-печать и выключить нагрев.
-    - Если сорвался предпрогрев после автоматического подъёма Z, "К сохранённому старту" предложит отдельный guarded возврат: опустить Z обратно на тот же известный preheat-lift. Подтверждай только если голову/стол после сбоя не двигали руками.
-    - После управляемого Stop сначала убери неудачный пластик, затем нажимай "К сохранённому старту".
-    - "Жёсткий стоп" нужен для срочных остановок. После него доверие к home сбрасывается, стартовую позу нужно заново выставить вручную.
-
-    Верхние кнопки
-    - "Файлы и прошивка" открывает окно загрузки G-code и прошивки.
-    - "Manual" открывает это руководство. Текст соответствует выбранному языку интерфейса.
-    - "Экспорт профиля Cura" сохраняет текущий проверенный профиль и настройки Cura в проект.
-    - "Звук ПК" проигрывает компьютерный звук завершения.
-
-    Блок "Файлы на SD принтера"
-    - "Обновить список" перечитывает список файлов на SD принтера.
-    - "Старт печати" запускает выбранный SD-файл только при доверенной стартовой позе.
-    - "Удалить" удаляет выбранный SD-файл.
-    - "Пауза" и "Продолжить" отправляют SD pause/resume.
-    - "Стоп" выполняет управляемую остановку.
-    - "Старт" показывает время начала печати.
-    - "Ожидаемое завершение" считает время конца по Cura ;TIME или предыдущей реальной длительности этого файла.
-    - "Известное время" показывает Cura-время и/или фактическую длительность, если они известны.
-
-    Блок ручного управления
-    - "Запомнить старт" объявляет текущую физическую позу как X0 Y0 Z0.
-    - "К сохранённому старту" возвращает к сохранённому нулю или предлагает guarded recovery после остановленной/завершённой печати.
-    - "Моторы выкл" выключает моторы и сбрасывает доверие к home.
-    - "Hotend 200C" задаёт ручной нагрев hotend для загрузки/проверки филамента; "Hotend off" выключает этот ручной нагрев.
-    - "Hotbed 35C" / "40C" задаёт ручную цель стола для наблюдаемого теста; "Hotbed off" отправляет M140 S0. После поднятых краёв первой детали следующий разумный тест — 35C.
-    - "Протянуть" и "Назад" двигают только экструдер E на выбранный E-шаг. Протяжка заблокирована во время активной SD-печати и при hotend ниже 180C.
-    - Кнопки движения перемещают выбранную ось на выбранный шаг. Ось стола намеренно двигается мягко, чтобы не ловить пропуски шагов.
-    - Калибровка стола двигает по известным точкам; её кнопки доступны только после "Запомнить старт", когда текущий старт доверенный.
-
-    USB-метрики и логи
-    - Вкладка "Журнал" показывает понятные события.
-    - Вкладка "USB-метрики" показывает raw-ответы статуса и прошивки.
-    - "Снять все метрики" запрашивает M115, M503, M114, M105 и M27.
-    - "Сохранить лог" сохраняет копию кольцевого лога с датой.
-    - Папка логов: /home/maxim/draftCode/littleHands/monitor_logs/
-    - Кольцевой лог: /home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
-
-    Правила безопасности
-    - Во время проверки recovery держи руку рядом с питанием принтера.
-    - Не возвращай к старту, пока модель или неудачный первый слой лежит на столе.
-    - Если движение выглядит неправильным, выключи питание и заново выставь старт вручную.
-    - После завершённой, остановленной или сорванной SD-печати приложение потребует подтверждённый power cycle и повторный "Запомнить старт" перед новым M24.
-    - Тихие щелчки в начале прогрева hotend допустимы только если дальше температура проходит ступени и резко растёт. При запахе, громких щелчках, потере цели или отсутствии роста температуры останавливай нагрев.
-    - Не оставляй включённый hotbed без присмотра. При запахе, горячем разъёме, нестабильном B: или B@, который не уходит в 0 после Hotbed off, выключай питание.
-    - Если после печати горизонтальная ось головы залипла, не сохраняй новый старт сразу. Сначала освободи/проверь ось короткими jog и убедись, что возврат к старту физически завершился.
-    """
-).strip()
-
 CURA_EXPORT_PATTERNS = [
     "machine_instances/lilHands.global.cfg",
     "machine_instances/lilHands_k9_warmmat.global.cfg",
@@ -396,196 +305,24 @@ machine is based on Cura's Custom FFF printer definition.
 DISCONNECTED_PORT_LABEL = "— не подключаться —"
 LANG_CHOICES = [("RU", "ru"), ("EN", "en"), ("中文", "zh")]
 
-MANUAL_TEXTS = {
-    "ru": MANUAL_TEXT,
-    "en": textwrap.dedent(
-        """
-        Little Hands Manual
 
-        What this app is for
-        Little Hands is a control center for the EasyThreed K9 / ET-4000+ workflow used in this project. It prepares and uploads Cura G-code, starts SD-card prints, watches temperature and SD status, keeps a ring log, and helps recover the printer to the saved start pose after a print.
+MANUAL_FILES = {"ru": "USER_GUIDE.ru.md", "en": "USER_GUIDE.md", "zh": "USER_GUIDE.zh.md"}
 
-        Hardware baseline
-        - Firmware: LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin
-        - The single printer fan is used as the hotend auto-fan on FAN1: off below about 45C, on above about 45C.
-        - The public baseline still uses an external warm mat / Cura bed temperature 0. The experimental LH v6 branch can control the connected hotbed, but only through explicit Little Hands buttons or marked experimental-hotbed G-code.
-        - Do not use normal Marlin G28 homing in this workflow. This K9 has no reliable endstop-based home in the validated setup.
-        - Operator-facing motion: X moves the head left/right, Y moves the bed toward/away in the print plane, Z moves the head up/down.
 
-        Start pose and home model
-        The printer does not find home by itself. The operator sets the print start pose and Little Hands declares it as logical zero with G92 X0 Y0 Z0.
+def load_manual(language: str) -> str:
+    path = PROJECT_ROOT / "docs" / MANUAL_FILES.get(language, MANUAL_FILES["ru"])
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return {
+            "ru": "Руководство не найдено. Восстановите папку docs из репозитория.",
+            "en": "Manual not found. Restore the docs folder from the repository.",
+            "zh": "未找到说明。请从代码仓库恢复 docs 文件夹。",
+        }.get(language, "Manual not found.")
 
-        Print start pose:
-        - head at the left print start side
-        - bed in the back/away print start position
-        - nozzle just touching the bed at the selected print zero
 
-        Normal print workflow
-        1. Slice in Cura with the Little Hands K9 profile.
-        2. Put the SD card in the printer, or upload the prepared G-code through Little Hands.
-        3. Move the printer to the physical print start pose.
-        4. Press "Save start".
-        5. Select a file in "Printer SD files".
-        6. Press "Start print".
-        7. If the file is marked with `LH_EXPERIMENTAL_HOTBED_TARGET`, Little Hands first preheats the hotbed to that target. It then confirms hotend heatup with staged M104 warmup and a final M109, returns the nozzle to the saved X0 Y0 Z0, and only then sends M23/M24. If heatup is not confirmed, the print does not start.
-        8. After the print begins, USB telemetry can be quiet for a while. If the printer is heating, moving, or printing, do not power-cycle just because telemetry is quiet.
-
-        After a normal print finish
-        1. Remove the printed part, brim, strings, and debris from the bed.
-        2. Press "Go to saved start" in the manual control panel.
-        3. Confirm that the bed is clear.
-        4. Little Hands returns from the known post-print pose to X0 Y0 Z0 using guarded recovery moves.
-        5. When the printer is physically at the start pose, power-cycle the printer for 5-10 seconds, re-check the start, and press "Save start" before the next print.
-
-        If Little Hands was closed, asleep, or USB dropped during the print
-        - If the app has a saved post-print pose, "Go to saved start" can use it after you confirm that the part is removed and the axes were not moved by hand.
-        - If the app only knows that the print probably ended, it shows the recovery window. Use "Confirm finish" after removing the part. That records operator-confirmed completion and enables guarded recovery when enough print-end data exists.
-        - If there is no trusted saved pose, Little Hands will refuse automatic return. Jog manually to the start pose and press "Save start".
-
-        If a print is stopped or fails
-        - "Stop" is a controlled stop, not the emergency path. It first tries to capture M114 before M524, then pauses, retries M114, lifts safely, stops SD printing, and turns heaters off.
-        - If preheat fails after the automatic Z lift, "Go to saved start" offers a dedicated guarded return: lower Z back by the same known preheat lift. Confirm only if the head/bed were not moved by hand after the failure.
-        - After a controlled stop, remove the failed plastic before pressing "Go to saved start".
-        - "Hard stop" is for urgent stop situations. After hard stop, home trust is invalid and the start pose must be established again manually.
-
-        Top buttons
-        - "Files & Firmware" opens the upload/firmware window.
-        - "Manual" opens this manual. The text follows the selected interface language.
-        - "Export Cura profile" exports the current validated Cura profile/settings into the project.
-        - "PC sound" plays the computer completion sound.
-
-        Printer SD files panel
-        - "Refresh list" rereads the printer SD file list.
-        - "Start print" starts the selected SD file only when the saved start pose is trusted.
-        - "Delete" removes the selected SD file.
-        - "Pause" and "Resume" send SD pause/resume commands.
-        - "Stop" performs the controlled stop workflow.
-        - "Start" shows print start time.
-        - "Expected finish" uses Cura ;TIME or the previous real duration for this file.
-        - "Known time" shows Cura and/or actual duration when known.
-
-        Manual control panel
-        - "Save start" declares the current physical pose as X0 Y0 Z0.
-        - "Go to saved start" returns to the saved zero or offers a guarded recovery path after a stopped/finished print.
-        - "Motors off" disables motors and invalidates home trust.
-        - "Hotend 200C" sets a manual hotend target for loading/checking filament; "Hotend off" turns that manual heat target off.
-        - "Feed" and "Retract" move only the E extruder by the selected E step. Filament movement is blocked during active SD printing and below 180C.
-        - Jog buttons move the selected axis by the selected step. The bed axis is deliberately gentle to avoid missed steps.
-        - Bed leveling moves through known calibration points; its buttons are available only after "Save start", when the current start pose is trusted.
-
-        USB metrics and logs
-        - The "Journal" tab shows human-readable events.
-        - The "USB metrics" tab shows raw metrics and firmware/status replies.
-        - "Capture all metrics" requests M115, M503, M114, M105, and M27.
-        - "Save log" saves a timestamped copy of the ring log.
-        - Runtime log folder: /home/maxim/draftCode/littleHands/monitor_logs/
-        - Ring log file: /home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
-
-        Safety rules
-        - Keep a hand near printer power when testing recovery movement.
-        - Never press return-to-start while a model or failed first layer is still on the bed.
-        - If motion looks wrong, cut power and re-establish the start pose manually.
-        - After a completed, stopped, or failed SD print/start, the app requires a confirmed power cycle and a fresh "Save start" before the next M24.
-        - Faint clicks at the beginning of hotend warmup are acceptable only if the temperature later passes the staged gates and climbs rapidly. Stop heating for smell, loud clicks, target loss, or no temperature rise.
-        - Do not leave the hotbed on unattended. Cut power for smell, hot connectors, unstable B:, or B@ that does not fall to 0 after Hotbed off.
-        - If the head-left/right axis sticks after a print, do not save a new start immediately. First free/check the axis with short jogs and confirm that return-to-start physically completed.
-        """
-    ).strip(),
-    "zh": textwrap.dedent(
-        """
-        Little Hands 使用说明
-
-        这个程序用于什么
-        Little Hands 是本项目 EasyThreed K9 / ET-4000+ 工作流的控制中心。它可以准备和上传 Cura G-code、从 SD 卡启动打印、观察温度和 SD 状态、保存环形日志，并在打印结束后帮助打印机回到保存的起点。
-
-        硬件基线
-        - 固件：LH-v5-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-mksLite.bin
-        - 打印机唯一风扇接在 FAN1，作为 hotend auto-fan：约 45C 以下关闭，约 45C 以上开启。
-        - 公开基线仍使用外部 warm mat / Cura 热床温度 0。实验性 LH v6 分支可以控制已连接的 hotbed，但只能通过 Little Hands 的明确按钮或带标记的 experimental-hotbed G-code。
-        - 此工作流不要使用普通 Marlin G28 回零。当前验证配置中，这台 K9 没有可靠的限位开关 home。
-        - 面向操作者的运动：X 是喷头左右，Y 是平台前后，Z 是喷头上下。
-
-        起点和 home 模型
-        打印机不会自己寻找 home。操作者把机器移动到打印起点，Little Hands 用 G92 X0 Y0 Z0 把该姿态声明为逻辑零点。
-
-        打印起点姿态：
-        - 喷头在左侧打印起点
-        - 平台在后方 / 远离操作者的打印起点
-        - 喷嘴刚好接触平台上的选定零点
-
-        正常打印流程
-        1. 使用 Little Hands K9 Cura 配置切片。
-        2. 将 SD 卡插入打印机，或通过 Little Hands 上传准备好的 G-code。
-        3. 将打印机移动到物理打印起点。
-        4. 点击 "Save start"。
-        5. 在 "Printer SD files" 中选择文件。
-        6. 点击 "Start print"。
-        7. 如果文件带有 `LH_EXPERIMENTAL_HOTBED_TARGET` 标记，Little Hands 会先把 hotbed 预热到该目标。然后它用分段 M104 和最终 M109 确认 hotend 已加热，把喷嘴返回保存的 X0 Y0 Z0，最后才发送 M23/M24。如果加热没有确认，打印不会启动。
-        8. 打印开始后，USB 遥测可能会安静一段时间。如果打印机正在加热、移动或出料，不要仅因遥测安静就断电。
-
-        正常打印完成后
-        1. 从平台上取下模型、brim、拉丝和碎屑。
-        2. 点击手动控制面板中的 "回到保存起点"。
-        3. 确认平台已清空。
-        4. Little Hands 会从已知的打印后位置用受保护 recovery 移动回到 X0 Y0 Z0。
-        5. 当打印机实际位于起点时，关闭打印机电源 5-10 秒再打开，重新检查起点，并在下一次打印前点击 "Save start"。
-
-        如果打印期间 Little Hands 关闭、电脑睡眠或 USB 掉线
-        - 如果应用有保存的打印后位置，"回到保存起点" 可在你确认模型已取下且各轴没有被手动移动后使用。
-        - 如果应用只知道打印可能已经结束，它会显示 recovery 窗口。取下模型后使用 "Confirm finish"。它会记录操作者确认，并在有足够 print-end 数据时允许受保护 recovery。
-        - 如果没有可信保存位置，Little Hands 会拒绝自动返回。请手动点动到起点，然后点击 "Save start"。
-
-        如果打印被停止或失败
-        - "Stop" 是受控停止，不是紧急停止。它会先在 M524 之前尝试读取 M114，然后暂停、再次读取 M114、安全抬 Z、停止 SD 打印并关闭加热。
-        - 如果自动抬 Z 后预热失败，"回到保存起点" 会提供专门的受保护返回：按同一个已知 preheat lift 把 Z 降回去。只有失败后没有手动移动喷头/平台时才确认。
-        - 受控停止后，请先清除失败塑料，再点击 "回到保存起点"。
-        - "Hard stop" 用于紧急停止。硬停止后 home 信任无效，必须重新手动建立起点。
-
-        顶部按钮
-        - "Files & Firmware" 打开上传 / 固件窗口。
-        - "Manual" 打开本说明。文本会跟随当前界面语言。
-        - "Export Cura profile" 将当前验证过的 Cura 配置导出到项目中。
-        - "PC sound" 播放电脑完成提示音。
-
-        Printer SD files 面板
-        - "Refresh list" 重新读取打印机 SD 文件列表。
-        - "Start print" 仅在保存的起点可信时启动选中的 SD 文件。
-        - "Delete" 删除选中的 SD 文件。
-        - "Pause" / "Resume" 发送 SD 暂停 / 继续命令。
-        - "Stop" 执行受控停止流程。
-        - "Start" 显示打印开始时间。
-        - "Expected finish" 使用 Cura ;TIME 或该文件上次真实打印时长。
-        - "Known time" 显示 Cura 和 / 或已知真实时长。
-
-        Manual control 面板
-        - "Save start" 将当前物理姿态声明为 X0 Y0 Z0。
-        - "回到保存起点" 返回保存的零点，或在停止 / 完成打印后提供受保护 recovery。
-        - "Motors off" 关闭电机并使 home 信任失效。
-        - "Hotend 200C" 设置手动 hotend 加热目标，用于装载 / 检查耗材；"Hotend off" 关闭该手动加热。
-        - "Feed" / "Retract" 只移动 E 挤出机，距离为所选 E 步长；活动 SD 打印期间和 hotend 低于 180C 时会被阻止。
-        - Jog 按钮按所选步长移动对应轴。平台轴故意较温和，以避免丢步。
-        - Bed leveling 会移动到已知校准点；按钮只会在点击 "Save start" 且当前起点可信后可用。
-
-        USB metrics 和日志
-        - "Journal" 标签显示人类可读事件。
-        - "USB metrics" 标签显示原始指标和固件 / 状态响应。
-        - "Capture all metrics" 请求 M115、M503、M114、M105、M27。
-        - "Save log" 保存当前环形日志的带时间戳副本。
-        - 运行日志目录：/home/maxim/draftCode/littleHands/monitor_logs/
-        - 环形日志文件：/home/maxim/draftCode/littleHands/monitor_logs/little_hands_runtime.log
-
-        安全规则
-        - 测试 recovery 移动时，手要靠近打印机电源。
-        - 模型或失败首层仍在平台上时，不要执行 return-to-start。
-        - 如果运动看起来不对，立即断电，然后手动重新建立起点。
-        - 在完成、停止或失败的 SD 打印 / 启动之后，应用会要求确认断电重启并重新 "Save start"，然后才允许下一次 M24。
-        - Hotend 预热初期的轻微咔哒声只有在之后温度通过分段门槛并快速上升时才算可接受。若有异味、声音变大、目标丢失或温度不升，请停止加热。
-        - hotbed 开启后不要无人看守。如有异味、接头发热、B: 不稳定，或点击 Hotbed off 后 B@ 没有回到 0，请切断电源。
-        - 如果打印后喷头左右轴卡住，不要立刻保存新起点。先用短 jog 释放/检查该轴，并确认 return-to-start 已经实际完成。
-        """
-    ).strip(),
-}
-
+MANUAL_TEXTS = {language: load_manual(language) for language in MANUAL_FILES}
+MANUAL_TEXT = MANUAL_TEXTS["ru"]
 
 class K9ControlCenter:
     def __init__(self, root: tk.Tk) -> None:
@@ -736,6 +473,7 @@ class K9ControlCenter:
         self._apply_language()
         self._apply_theme()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.bind("<Configure>", self._resize_panels)
         self.root.after(150, self._drain_events)
         self.root.after(300, self._refresh_header_from_cache)
         self.root.after(400, self._refresh_ports_on_startup)
@@ -1390,12 +1128,32 @@ class K9ControlCenter:
     def _hotbed_target_for_print(self, sd_path: str, display: str, source: Path | None = None) -> float:
         profile = self._profile_for_print(sd_path, display, source)
         target = profile.get("experimental_hotbed_target") if isinstance(profile, dict) else None
+        if target is None:
+            return 0.0
         if not isinstance(target, (int, float)):
-            return 0.0
+            raise ValueError("Некорректная цель hotbed в профиле файла. Переслайсь и загрузи G-code заново.")
         target = float(target)
-        if target <= 0.0 or target > HOTBED_MAX_MANUAL_TARGET_C:
-            return 0.0
+        if not math.isfinite(target) or target < 0.0 or target > HOTBED_MAX_MANUAL_TARGET_C:
+            raise ValueError(f"Hotbed: допустимая цель 0–{HOTBED_MAX_MANUAL_TARGET_C:g}C.")
         return target
+
+    def _preheat_for_sd_start(self, path: str, display: str, source: Path | None = None) -> None:
+        try:
+            self._preheat_hotbed_before_sd_start(path, display, source)
+            self._preheat_hotend_before_sd_start(path, display, source)
+        except Exception:
+            # No M24 has been sent. Shut down both heaters even if the bed
+            # warmed successfully before the hotend or clearance return failed.
+            for command in ("M108", "M104 S0", "M140 S0"):
+                try:
+                    sdtool.run_commands_wait_ok(self._port(), self._baud(), [command], per_command_timeout=12.0)
+                except Exception as shutdown_error:
+                    self._post("log", f"Не подтверждено выключение нагрева ({command}): {shutdown_error}")
+            self._require_power_cycle_before_next_sd_start("SD preheat failed", save=False)
+            self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD preheat failed", log_change=True)
+            phase = "preheat-lift-failed" if self.preheat_lift_recovery_available else "failed-start"
+            self._save_print_state(phase, force=True)
+            raise
 
     def _preheat_hotbed_before_sd_start(self, sd_path: str, display: str, source: Path | None = None) -> None:
         target = self._hotbed_target_for_print(sd_path, display, source)
@@ -1459,7 +1217,10 @@ class K9ControlCenter:
                     if now - last_logged >= 8.0:
                         last_logged = now
                         self._post("log", f"Предпрогрев hotbed: {bed_current:.1f}/{bed_target:.0f}C{heater_text}")
-                    if bed_current >= target - HOTBED_PREHEAT_MARGIN_C and bed_target > 0.0:
+                    if (
+                        bed_current >= target - HOTBED_PREHEAT_MARGIN_C
+                        and abs(bed_target - target) <= 0.5
+                    ):
                         self._post("progress", (f"Hotbed готов: {bed_current:.1f}/{bed_target:.0f}C", 100.0))
                         self._post(
                             "log",
@@ -2077,6 +1838,9 @@ class K9ControlCenter:
             ("filament_cool_button", filament_state),
             ("hotbed_35_button", hotbed_heat_state),
             ("hotbed_40_button", hotbed_heat_state),
+            ("hotbed_50_button", hotbed_heat_state),
+            ("hotbed_55_button", hotbed_heat_state),
+            ("hotbed_60_button", hotbed_heat_state),
             ("hotbed_off_button", hotbed_off_state),
         )
         for name, state in guarded_buttons:
@@ -2175,6 +1939,11 @@ class K9ControlCenter:
             "resume": {"ru": "Продолжить", "en": "Resume", "zh": "继续"},
             "stop": {"ru": "Стоп", "en": "Stop", "zh": "停止"},
             "manual_controls": {"ru": "Ручное управление", "en": "Manual control", "zh": "手动控制"},
+            "close_wait": {
+                "ru": "Дождись завершения операции. Загрузку можно отменить кнопкой «Отменить». При опасности отключи питание принтера.",
+                "en": "Wait for the operation to finish. Use Cancel to stop an upload. In an emergency, cut printer power.",
+                "zh": "请等待当前操作结束。上传可通过“取消”停止。遇到危险时请切断打印机电源。",
+            },
             "save_start": {"ru": "Запомнить старт", "en": "Save start", "zh": "保存起点"},
             "go_start": {"ru": "К сохранённому старту", "en": "Go to saved start", "zh": "回到保存起点"},
             "motors_off": {"ru": "Моторы выкл", "en": "Motors off", "zh": "关闭电机"},
@@ -2206,7 +1975,7 @@ class K9ControlCenter:
             "level_back_right": {"ru": "ЗП", "en": "BR", "zh": "后右"},
             "journal": {"ru": "Журнал", "en": "Journal", "zh": "日志"},
             "usb_metrics": {"ru": "USB-метрики", "en": "USB metrics", "zh": "USB 指标"},
-            "capture_metrics": {"ru": "Снять все метрики", "en": "Capture all metrics", "zh": "抓取全部指标"},
+            "capture_metrics": {"ru": "Снять метрики", "en": "Capture metrics", "zh": "抓取指标"},
             "save_log": {"ru": "Сохранить лог", "en": "Save log", "zh": "保存日志"},
             "pick_gcode": {"ru": "Выбрать", "en": "Choose", "zh": "选择"},
             "gcode": {"ru": "G-code", "en": "G-code", "zh": "G-code"},
@@ -2444,6 +2213,9 @@ class K9ControlCenter:
         self._save_ui_state()
 
     def _on_close(self) -> None:
+        if self.user_task_pending:
+            messagebox.showinfo("Little Hands", self._t("close_wait"))
+            return
         self.monitor_enabled = False
         self.auto_sd_refresh_after_port = None
         self._save_ui_state()
@@ -2537,8 +2309,8 @@ class K9ControlCenter:
         c.configure(bg=colors["panel"], highlightbackground=colors["border"])
         c.delete("all")
 
-        width = max(int(c.winfo_width() or 0), int(c.cget("width")))
-        height = max(int(c.winfo_height() or 0), int(c.cget("height")))
+        width = c.winfo_width() if c.winfo_width() > 1 else int(c.cget("width"))
+        height = c.winfo_height() if c.winfo_height() > 1 else int(c.cget("height"))
         left, right = 44, width - 10
         top, bottom = 30, height - 22
         plot_w = max(20, right - left)
@@ -2796,6 +2568,7 @@ class K9ControlCenter:
             background=[("active", colors["accent"]), ("pressed", colors["accent_active"])],
             foreground=[("active", colors["field"]), ("pressed", colors["field"])],
         )
+        style.configure("Manual.TButton", padding=(4, 2))
         style.configure(
             "TRadiobutton",
             background=colors["panel"],
@@ -3012,6 +2785,7 @@ class K9ControlCenter:
         self.main_pane.add(right, weight=4)
 
         graph = ttk.Frame(right, padding=8, height=340)
+        self.graph_frame = graph
         graph.columnconfigure(0, weight=1)
         graph.rowconfigure(1, weight=1)
         graph.grid_propagate(False)
@@ -3090,11 +2864,12 @@ class K9ControlCenter:
         controls_and_views.columnconfigure(0, weight=0)
         controls_and_views.columnconfigure(1, weight=1)
         controls_and_views.rowconfigure(0, weight=1)
+        controls_and_views.rowconfigure(1, weight=1)
         controls_and_views.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
         controls_and_views.grid_propagate(False)
 
         controls = ttk.Frame(controls_and_views)
-        controls.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        controls.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 10))
         controls.columnconfigure(0, weight=1)
         controls.rowconfigure(1, weight=1)
         controls.grid_propagate(False)
@@ -3106,10 +2881,10 @@ class K9ControlCenter:
             motion.columnconfigure(idx, weight=1)
 
         def manual_button(parent, text, command):
-            return ttk.Button(parent, text=text, command=command)
+            return ttk.Button(parent, text=text, command=command, style="Manual.TButton")
 
         def level_button(parent, text, command):
-            return ttk.Button(parent, text=text, command=command, width=4)
+            return ttk.Button(parent, text=text, command=command, width=4, style="Manual.TButton")
 
         self.save_start_button = manual_button(motion, "Запомнить старт", self.set_current_home_zero)
         self.save_start_button.grid(row=0, column=0, columnspan=2, padx=3, pady=2, sticky="ew")
@@ -3195,8 +2970,18 @@ class K9ControlCenter:
         self.hotbed_off_button.grid(row=6, column=3, padx=3, pady=(6, 1), sticky="ew")
         self.action_widgets.append(self.hotbed_off_button)
 
+        self.hotbed_50_button = manual_button(motion, "50C", lambda: self.set_hotbed_target(50.0))
+        self.hotbed_50_button.grid(row=7, column=1, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.hotbed_50_button)
+        self.hotbed_55_button = manual_button(motion, "55C", lambda: self.set_hotbed_target(55.0))
+        self.hotbed_55_button.grid(row=7, column=2, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.hotbed_55_button)
+        self.hotbed_60_button = manual_button(motion, "60C", lambda: self.set_hotbed_target(60.0))
+        self.hotbed_60_button.grid(row=7, column=3, padx=3, pady=2, sticky="ew")
+        self.action_widgets.append(self.hotbed_60_button)
+
         level_row = ttk.Frame(motion, style="Panel.TFrame")
-        level_row.grid(row=7, column=0, columnspan=4, sticky="ew", padx=3, pady=(8, 0))
+        level_row.grid(row=8, column=0, columnspan=4, sticky="ew", padx=3, pady=(8, 0))
         level_row.columnconfigure(0, weight=0)
         for idx in range(1, 6):
             level_row.columnconfigure(idx, weight=1)
@@ -3230,6 +3015,9 @@ class K9ControlCenter:
             self.filament_cool_button,
             self.hotbed_35_button,
             self.hotbed_40_button,
+            self.hotbed_50_button,
+            self.hotbed_55_button,
+            self.hotbed_60_button,
             self.hotbed_off_button,
         ]
         self.manual_wide_width_widgets = [
@@ -3240,8 +3028,8 @@ class K9ControlCenter:
         ]
         self._update_manual_controls_width()
 
-        self.metrics_frame = ttk.LabelFrame(controls, text="USB-метрики", padding=8)
-        self.metrics_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        self.metrics_frame = ttk.LabelFrame(controls_and_views, text="USB-метрики", padding=8)
+        self.metrics_frame.grid(row=1, column=1, sticky="nsew", pady=(10, 0))
         self.metrics_frame.columnconfigure(0, weight=1)
         self.metrics_frame.rowconfigure(1, weight=1)
         self.metrics_frame.grid_propagate(False)
@@ -3337,6 +3125,7 @@ class K9ControlCenter:
             self.manual_text_widget.insert("1.0", MANUAL_TEXTS.get(current_lang, MANUAL_TEXT))
             self.manual_text_widget.configure(state="disabled")
         self._refresh_translated_strings()
+        self._render_live_status()
         if hasattr(self, "colors"):
             self._draw_temp_graph()
 
@@ -3504,8 +3293,7 @@ class K9ControlCenter:
         )
         pos_line = self.last_position_line
         zero_line = {"ru": ("да" if self.session_zero_defined else "нет"), "en": ("yes" if self.session_zero_defined else "no"), "zh": ("是" if self.session_zero_defined else "否")}[lang]
-        home_reason = f" ({self.home_trust_reason})" if self.home_trust_reason else ""
-        home_line = f"{ {'ru': 'Home', 'en': 'Home', 'zh': 'Home'}[lang] }: {self._home_trust_label()}{home_reason}"
+        home_line = f"{ {'ru': 'Старт', 'en': 'Start', 'zh': '起点'}[lang] }: {self._home_trust_label()}"
         fw_line = self.last_fw_identity or "-"
         if self.current_print_start_ts:
             self.print_start_var.set(self._format_label_value("start_time", time.strftime('%H:%M:%S', time.localtime(self.current_print_start_ts))))
@@ -3544,15 +3332,35 @@ class K9ControlCenter:
             main_sash = int(self.ui_state.get("main_sash", default_main))
             main_sash = max(280, min(main_sash, left_cap))
             self.main_pane.sashpos(0, main_sash)
-            left_y = int(self.ui_state.get("left_split_y", 415))
+            left_y = int(self.ui_state.get("left_split_y", 200))
             self.left_split.sash_place(0, 0, left_y)
+            self._resize_panels()
         except Exception:
             pass
+
+    def _resize_panels(self, event=None) -> None:
+        if event is not None and event.widget is not self.root:
+            return
+        if not hasattr(self, "graph_frame"):
+            return
+        available = self.graph_frame.master.winfo_height()
+        if available <= 1:
+            return
+        graph_height = max(150, min(340, available - self.motion_frame.winfo_reqheight() - 16))
+        self.graph_frame.configure(height=graph_height)
+        # Keep SD actions visible even when an older saved sash allocated most
+        # of the left column to the status text.
+        sd_height = self.sd_frame.winfo_reqheight()
+        self.left_split.paneconfigure(self.sd_frame, minsize=sd_height)
+        maximum_status = max(140, self.left_split.winfo_height() - sd_height - 8)
+        current_status = self.left_split.sash_coord(0)[1]
+        self.left_split.sash_place(0, 0, min(current_status, maximum_status))
 
     def _populate_files_firmware_container(self, parent) -> None:
         lang = self.lang_var.get().strip() or "ru"
         for child in parent.winfo_children():
             child.destroy()
+        self.action_widgets = [widget for widget in self.action_widgets if widget.winfo_exists()]
         self.files_window_content = parent
         parent.columnconfigure(1, weight=1)
         parent.columnconfigure(2, minsize=110)
@@ -3599,6 +3407,11 @@ class K9ControlCenter:
         self.files_window_status_label = tk.Label(parent, textvariable=self.files_status_var, anchor="w", justify="left", wraplength=700)
         self.files_window_status_label.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 0))
         self.files_window_status_label.configure(bg=self.colors["panel"], fg=self.colors["muted"], font=("DejaVu Sans", 9))
+        if self.user_task_pending:
+            for child in parent.winfo_children():
+                if isinstance(child, ttk.Button):
+                    child.configure(state="disabled")
+        self._sync_home_controls()
 
     def show_files_firmware_window(self) -> None:
         if self.files_window and self.files_window.winfo_exists():
@@ -3678,6 +3491,9 @@ class K9ControlCenter:
     def _set_busy_ui(self, busy: bool, label: str | None = None) -> None:
         self.busy_var.set(label or self._t("usb_busy" if busy else "usb_idle"))
         state = "disabled" if busy else "normal"
+        self.port_combo.configure(state="disabled" if busy else "readonly")
+        self.find_port_button.configure(state=state)
+        self.disconnect_port_button.configure(state=state)
         for widget in self.action_widgets:
             try:
                 widget.configure(state=state)
@@ -4328,15 +4144,8 @@ class K9ControlCenter:
         self._post("progress", ("Печать: старт отправлен, жду вход в SD-печать", 0.0))
         self._post(
             "log",
-            "Старт SD отправлен только после подтверждённого предпрогрева hotend на стороне Little Hands. "
-            "Теперь K9 может несколько минут отвечать busy или молчать, пока входит в SD-печать. "
-            "Не обновляй список SD в этот момент.",
-        )
-        self._post(
-            "log",
-            f"Первые {POST_M24_USB_QUIET_SEC} с после M24 Little Hands не трогает USB вообще. "
-            "Это нужно этой K9-прошивке, чтобы спокойно войти в SD-печать. "
-            "Если вентилятор/моторы ожили или пластик пошёл - не выключай питание, просто наблюдай.",
+            f"SD-старт отправлен. Первые {POST_M24_USB_QUIET_SEC} с USB не опрашивается. "
+            "Наблюдай за печатью; не обновляй SD и не выключай питание работающего принтера.",
         )
 
     def _confirm_operator_finished_prompt(self) -> bool:
@@ -4584,86 +4393,72 @@ class K9ControlCenter:
 
     def _post_print_recovery_text(self, reason: str = "completion") -> str:
         lang = self.lang_var.get().strip() or "ru"
-        failed = reason in {"failed-start", "blocked-start"}
-        if lang == "en":
-            if failed:
-                return (
-                    "The print start was not confirmed reliably.\n\n"
-                    "Use this recovery only if the printer is physically NOT printing, NOT heating, and NOT moving. "
-                    "If the printer is actually working, close this window, do not power-cycle it, and monitor the print visually.\n\n"
-                    "1. If the printer is stuck with clicks or a silent hotend, press 'Hard stop'.\n"
-                    "2. Power the printer off for 5-10 seconds and power it on again.\n"
-                    "3. Press 'Find' if the port is not responsive.\n"
-                    "4. Check the start pose manually.\n"
-                    "5. Press 'Save start'.\n"
-                    "6. Before retrying, verify that the G-code was sliced with the validated Cura profile and was not edited by hand.\n\n"
-                    "Why: this K9 can leave USB/SD half-alive after a bad start, but a silent USB reply alone is not proof that a real print has failed."
-                )
-            intro = (
-                "Print finished. Before the next print, bring the printer back to a clean start state."
-            )
-            return (
-                f"{intro}\n\n"
-                "1. Remove the printed part from the bed.\n"
-                "2. Only after the part is removed, return the printer to the start pose. If Little Hands observed the print finish, 'Go to saved start' can use that known post-print pose.\n"
-                "3. While the printer is physically in that start pose, power it off for 5-10 seconds and power it on again.\n"
-                "4. If the port is not responsive, press 'Find'. If the app sees CH340 but Marlin does not answer, repeat the power cycle.\n"
-                "5. Make sure the printer is still in the start pose and press 'Save start' in this window or in the main controls.\n"
-                "6. Start the next SD print only after the app confirms that the start was saved.\n\n"
-                "Why: after an SD print this K9/Marlin build can leave USB/SD in a half-alive state. Starting again before a power cycle can produce clicks, frozen telemetry, or no motion."
-            )
-        if lang == "zh":
-            if failed:
-                return (
-                    "打印启动没有被可靠确认。\n\n"
-                    "只有在打印机实际没有打印、没有加热、也没有运动时，才按这个恢复流程操作。"
-                    "如果打印机确实已经在工作，请关闭此窗口，不要断电，并目视观察打印。\n\n"
-                    "1. 如果打印机卡住、发出咔哒声或热端不加热，点击 'Hard stop'。\n"
-                    "2. 关闭打印机电源 5-10 秒，然后重新打开。\n"
-                    "3. 如果端口没有响应，点击 'Find'。\n"
-                    "4. 手动检查起始姿态。\n"
-                    "5. 点击 'Save start'。\n"
-                    "6. 再次启动前，确认 G-code 来自已验证的 Cura 配置，并且没有手工改坏。\n\n"
-                    "原因：这台 K9 在异常启动后可能让 USB/SD 处于半工作状态，但 USB 暂时沉默本身并不能证明真实打印失败。"
-                )
-            intro = "打印已完成。下一次打印前，请先回到干净的起始状态。"
-            return (
-                f"{intro}\n\n"
-                "1. 从平台上取下模型。\n"
-                "2. 只有在取下模型之后，才让打印机回到起始姿态。如果 Little Hands 观察到了打印结束，'回到保存起点' 可以使用已知的打印后位置。\n"
-                "3. 打印机实际停在起始姿态时，关闭电源 5-10 秒，然后重新打开。\n"
-                "4. 如果端口没有响应，点击 'Find'。如果只看到 CH340 但 Marlin 不回应，请再次断电重启。\n"
-                "5. 确认打印机仍在起始姿态，然后在此窗口或主控制区点击 'Save start'。\n"
-                "6. 等程序确认起点已保存后，再开始下一次 SD 打印。\n\n"
-                "原因：这台 K9/Marlin 在 SD 打印结束后可能让 USB/SD 留在半工作状态，直接重复启动会导致咔哒声、遥测冻结或无动作。"
-            )
-        if failed:
-            return (
-                "Старт печати не подтвердился надёжно.\n\n"
-                "Используй это восстановление только если принтер физически НЕ печатает, НЕ греется и НЕ двигается. "
-                "Если принтер реально работает, закрой это окно, не выключай питание и наблюдай за печатью визуально.\n\n"
-                "1. Если принтер застрял со щелчками или молчащим хотендом, нажми 'Жёсткий стоп'.\n"
-                "2. Выключи питание принтера на 5–10 секунд и включи снова.\n"
-                "3. Если порт не отвечает, нажми 'Найти'.\n"
-                "4. Вручную проверь стартовую позу.\n"
-                "5. Нажми 'Запомнить старт'.\n"
-                "6. Перед повтором проверь, что G-code сделан проверенным профилем Cura или залит через Little Hands; "
-                "ручной предпрогрев hotend в нормальном сценарии не нужен.\n\n"
-                "Почему так: этот K9 после плохого старта может оставлять USB/SD в полуживом состоянии, "
-                "но одно только молчание USB ещё не доказывает, что реальная печать сорвалась."
-            )
-        intro = "Печать завершена. Перед следующей печатью верни принтер в чистое стартовое состояние."
-        return (
-            f"{intro}\n\n"
-            "1. Сними модель со стола.\n"
-            "2. Только после снятия модели верни принтер в стартовую позу. Если Little Hands видел завершение печати, 'К сохранённому старту' использует известную послепечатную позу.\n"
-            "3. Когда принтер физически стоит в стартовой позе, выключи питание на 5–10 секунд и включи снова.\n"
-            "4. Если порт не отвечает, нажми 'Найти'. Если приложение видит CH340, но Marlin молчит, повтори power cycle.\n"
-            "5. Убедись, что принтер всё ещё в стартовой позе, и нажми 'Запомнить старт' в этом окне или в ручном управлении.\n"
-            "6. Запускай следующую печать с SD только после подтверждения, что старт сохранён.\n\n"
-            "Почему так: после SD-печати эта связка K9/Marlin иногда оставляет USB/SD в полуживом состоянии. "
-            "Повторный старт без power cycle может дать щелчки, замершую телеметрию или отсутствие движения."
-        )
+        if reason in {"failed-start", "blocked-start"}:
+            texts = {
+                "ru": (
+                    "Старт не подтверждён. Если принтер печатает, греется или двигается, "
+                    "закрой это окно и наблюдай; молчание USB не доказывает сбой.\n\n"
+                    "Когда принтер физически простаивает:\n"
+                    "1. Выключи питание на 5–10 секунд и включи снова.\n"
+                    "2. При необходимости нажми «Найти».\n"
+                    "3. Проверь физический старт и нажми «Запомнить старт».\n"
+                    "4. Проверь G-code перед повторной печатью.\n\n"
+                    "Если сопло осталось поднятым после прогрева, сначала используй "
+                    "«К сохранённому старту» и условия восстановления. При опасности отключи питание."
+                ),
+                "en": (
+                    "Start was not confirmed. If the printer is printing, heating or moving, "
+                    "close this window and watch it; USB silence does not prove failure.\n\n"
+                    "Once the printer is physically idle:\n"
+                    "1. Power it off for 5–10 seconds, then on.\n"
+                    "2. Click Find if needed.\n"
+                    "3. Check the physical start and click Save start.\n"
+                    "4. Check G-code before retrying.\n\n"
+                    "If preheat left the nozzle raised, first use Go to saved start and its "
+                    "recovery conditions. Cut power in an emergency."
+                ),
+                "zh": (
+                    "启动尚未确认。如果打印机正在打印、加热或运动，请关闭此窗口并观察；"
+                    "USB 沉默不能证明故障。\n\n"
+                    "打印机实际空闲后：\n"
+                    "1. 断电 5–10 秒，再上电。\n"
+                    "2. 必要时点击“查找”。\n"
+                    "3. 检查实际起点并点击“保存起点”。\n"
+                    "4. 重试前检查 G-code。\n\n"
+                    "如果预热后喷嘴仍抬高，先使用“回到保存起点”并满足恢复条件。遇到危险请切断电源。"
+                ),
+            }
+        else:
+            texts = {
+                "ru": (
+                    "Печать завершена.\n\n"
+                    "1. Сними модель.\n"
+                    "2. Нажми «К сохранённому старту» и выполни условия возврата.\n"
+                    "3. Выключи питание на 5–10 секунд и включи снова.\n"
+                    "4. При необходимости нажми «Найти».\n"
+                    "5. Проверь физический старт и нажми «Запомнить старт».\n\n"
+                    "Перед следующей печатью подтверди цикл питания."
+                ),
+                "en": (
+                    "Print finished.\n\n"
+                    "1. Remove the model.\n"
+                    "2. Click Go to saved start and meet the recovery conditions.\n"
+                    "3. Power off for 5–10 seconds, then on.\n"
+                    "4. Click Find if needed.\n"
+                    "5. Check the physical start and click Save start.\n\n"
+                    "Confirm the power cycle before the next print."
+                ),
+                "zh": (
+                    "打印完成。\n\n"
+                    "1. 取下模型。\n"
+                    "2. 点击“回到保存起点”并满足恢复条件。\n"
+                    "3. 断电 5–10 秒，再上电。\n"
+                    "4. 必要时点击“查找”。\n"
+                    "5. 检查实际起点并点击“保存起点”。\n\n"
+                    "下次打印前确认已完成断电流程。"
+                ),
+            }
+        return texts.get(lang, texts["ru"])
 
     def _save_start_from_post_print_window(self) -> None:
         self.set_current_home_zero()
@@ -4889,6 +4684,7 @@ class K9ControlCenter:
                 messagebox.showerror("Little Hands", safety_error)
                 return
         self.user_task_pending = True
+        self._set_busy_ui(True, f"USB: {display_label.lower()}")
 
         def worker() -> None:
             while not self.serial_lock.acquire(timeout=0.25):
@@ -4970,6 +4766,7 @@ class K9ControlCenter:
             "has_hotend_target": False,
             "hotend_target": None,
             "hotend_target_line": None,
+            "hotend_targets": [],
             "has_blocking_m109": False,
             "has_little_hands_start": False,
             "has_manual_zero": False,
@@ -4982,10 +4779,12 @@ class K9ControlCenter:
             "has_bed_heat": False,
             "bed_heat_line": None,
             "bed_target": None,
+            "bed_heat_targets": [],
             "has_bed_wait": False,
             "bed_wait_line": None,
             "experimental_hotbed_target": None,
             "experimental_hotbed_marker_line": None,
+            "experimental_hotbed_markers": [],
             "has_motor_disable": False,
             "motor_disable_line": None,
             "end_has_y95": False,
@@ -5068,6 +4867,7 @@ class K9ControlCenter:
                 except ValueError:
                     info["experimental_hotbed_target"] = raw_target
                     info["experimental_hotbed_marker_line"] = line_number
+                info["experimental_hotbed_markers"].append(info["experimental_hotbed_target"])
 
             command = stripped.split(";", 1)[0].strip()
             if not command:
@@ -5152,7 +4952,10 @@ class K9ControlCenter:
 
             if word in {"M104", "M109"}:
                 target = self._gcode_param(command_upper, "S")
+                if target is None and word == "M109":
+                    target = self._gcode_param(command_upper, "R")
                 if target is not None and target > 0:
+                    info["hotend_targets"].append((target, line_number))
                     if not info["has_hotend_target"]:
                         info["hotend_target"] = target
                         info["hotend_target_line"] = line_number
@@ -5161,14 +4964,15 @@ class K9ControlCenter:
                         info["has_blocking_m109"] = True
 
             if word in {"M140", "M190"}:
+                if word == "M190":
+                    info["has_bed_wait"] = True
+                    info["bed_wait_line"] = info["bed_wait_line"] or line_number
                 target = self._gcode_param(command_upper, "S")
                 if target is not None and target > 0:
                     info["has_bed_heat"] = True
                     info["bed_heat_line"] = info["bed_heat_line"] or line_number
                     info["bed_target"] = target
-                    if word == "M190":
-                        info["has_bed_wait"] = True
-                        info["bed_wait_line"] = info["bed_wait_line"] or line_number
+                    info["bed_heat_targets"].append(target)
 
             if word in {"M106", "M107"}:
                 info["has_slicer_fan_commands"] = True
@@ -5248,14 +5052,26 @@ class K9ControlCenter:
             errors.append("Не найдена положительная цель hotend `M104 S...` или `M109 S...`; такой файл может выбраться на SD, но не начать печать.")
         else:
             target = float(info.get("hotend_target") or 0.0)
-            if target < K9_HOTEND_MIN_TARGET_C or target > K9_HOTEND_MAX_TARGET_C:
+            invalid_hotend_targets = [
+                (value, line) for value, line in info["hotend_targets"]
+                if not K9_HOTEND_MIN_TARGET_C <= value <= K9_HOTEND_MAX_TARGET_C
+            ]
+            if invalid_hotend_targets:
+                target, target_line = invalid_hotend_targets[0]
                 errors.append(
                     f"Цель hotend {target:g}C"
-                    + self._format_gcode_line(info.get("hotend_target_line"))
+                    + self._format_gcode_line(target_line)
                     + f" вне безопасного диапазона {K9_HOTEND_MIN_TARGET_C:g}-{K9_HOTEND_MAX_TARGET_C:g}C."
                 )
             elif target < K9_HOTEND_WARN_LOW_C or target > K9_HOTEND_WARN_HIGH_C:
                 warnings.append(f"Цель hotend {target:g}C необычна для текущего PLA-профиля; проверь материал и профиль Cura.")
+        marker_target = info.get("experimental_hotbed_target")
+        if info["experimental_hotbed_markers"] and not all(
+            isinstance(value, (int, float)) and math.isfinite(value)
+            and 0 < value <= HOTBED_MAX_MANUAL_TARGET_C and value == marker_target
+            for value in info["experimental_hotbed_markers"]
+        ):
+            errors.append(f"Метка hotbed должна задавать одну цель 1–{HOTBED_MAX_MANUAL_TARGET_C:g}C.")
         if info.get("has_bed_wait"):
             errors.append(
                 "Найден блокирующий нагрев стола `M190`"
@@ -5272,6 +5088,7 @@ class K9ControlCenter:
                 and 0 < float(marker_target) <= HOTBED_MAX_MANUAL_TARGET_C
                 and 0 < float(bed_target) <= HOTBED_MAX_MANUAL_TARGET_C
                 and abs(float(bed_target) - float(marker_target)) <= 0.1
+                and all(abs(value - float(marker_target)) <= 0.1 for value in info["bed_heat_targets"])
                 and bool(info.get("has_little_hands_start"))
             )
             if marked_experimental_hotbed:
@@ -5778,8 +5595,7 @@ class K9ControlCenter:
             files = sdtool.list_files(self._port(), self._baud())
             self._post("sd-files", files)
             self._post("upload-cancel-visible", (False, False))
-            self._preheat_hotbed_before_sd_start(dest, source.name, upload_source)
-            self._preheat_hotend_before_sd_start(dest, source.name, upload_source)
+            self._preheat_for_sd_start(dest, source.name, upload_source)
             self._prime_print_end_contract(dest, source.name, upload_source)
             try:
                 out = self._start_sd_print_from_saved_start(dest)
@@ -5984,8 +5800,7 @@ class K9ControlCenter:
 
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
-            self._preheat_hotbed_before_sd_start(path, display, source_for_profile)
-            self._preheat_hotend_before_sd_start(path, display, source_for_profile)
+            self._preheat_for_sd_start(path, display, source_for_profile)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
                 out = self._start_sd_print_from_saved_start(path)
@@ -6018,8 +5833,7 @@ class K9ControlCenter:
 
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
-            self._preheat_hotbed_before_sd_start(path, display, source_for_profile)
-            self._preheat_hotend_before_sd_start(path, display, source_for_profile)
+            self._preheat_for_sd_start(path, display, source_for_profile)
             self._prime_print_end_contract(path, display, source_for_profile)
             try:
                 out = self._start_sd_print_from_saved_start(path)

@@ -200,9 +200,9 @@ Experimental controlled-hotbed branch:
 - the operator's independent surface sensor near the bed center read about `24C -> 33C -> 31C`, so the real surface can be a few degrees hotter than Marlin `B:` during this first setup
 - second operator-watched heat sanity check used `M140 S35`; `B:` rose smoothly from about `24C` to `34.57C`, then after `M140 S0` the bed output stayed `B@:0` while Marlin `B:` peaked near `36C` and began cooling; the operator's external surface sensor peaked around `40C` and was around `36C` at the end of the test
 - after the hotbed install, level the bed at all five Little Hands points (`FL` / `C` / `FR` / `BL` / `BR`) with a `0.05 mm` feeler at `Z0`; it should have light, even drag. Treat `0.10 mm` only as an upper sanity check for now, because Cura already prints the first layer around `Z0.20` after `G92 X0 Y0 Z0`
-- keep ordinary Cura bed temperature at `0`; after the successful watched `35C` sanity test, the current local controlled-hotbed slice default is an explicitly marked `;LH_EXPERIMENTAL_HOTBED_TARGET:35` file with non-blocking `M140 S35`
+- keep ordinary Cura bed temperature at `0`; at the operator's request on 2026-09-09, new local controlled-hotbed slices default to `60C` using `;LH_EXPERIMENTAL_HOTBED_TARGET:60` and non-blocking `M140 S60`. This is a software-default change, not a new physical validation.
 - for such files, Little Hands preheats the hotbed to the target before `M24`, then runs the normal staged hotend preheat; do not add `M190` to SD files
-- manual `Hotbed 35C` / `Hotbed 40C` / `Hotbed off` buttons are available for watched tests and shutdown; `35C` is the normal conservative controlled-hotbed target, `40C` only if `35C` is not enough
+- manual `35/40/50/55/60C` buttons and `Hotbed off` support watched warmup and shutdown; `60C` is the target cap for Bed10K Max70. Host bed preheat waits up to `15 minutes`, verifies the requested target and actual `B:`, and turns the bed off on failure.
 - further validation heat tests should remain operator-watched: confirm plausible cold `B:` first, use a bounded target, verify `B:` rises, and turn the bed off with `M140 S0`
 
 ## 8. Cura Baseline
@@ -214,7 +214,7 @@ For the current validated public baseline:
 - profile: `codex - K9 warm mat cautious`
 - brim width: `14 mm`
 - PLA temperature: `225C` first layer, `224C` after that
-- Cura material bed temperature: `0C`; controlled-hotbed files use only the explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:35` marker plus non-blocking `M140 S35`
+- Cura material bed temperature: `0C`; controlled-hotbed files use only the explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:60` marker plus non-blocking `M140 S60`
 - support mode for `mainFlasherTop.STL`: supports everywhere, normal supports, interface / roof enabled, support angle `35`
 
 Important G-code rules:

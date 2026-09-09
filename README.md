@@ -28,7 +28,7 @@ This project is still a little rough, but it already works for real printing:
 - G-code upload validation catches unsafe or obviously broken files
 - print progress and temperature monitoring work
 - manual filament feed/retract works after hotend temperature is confirmed
-- experimental controlled-hotbed telemetry and marked `35C` preheat workflow are available for the current local K9
+- experimental controlled-hotbed telemetry and marked `60C` preheat workflow are available for the current local K9
 
 What is still rough:
 
@@ -48,7 +48,7 @@ What is still rough:
 
 ## Screenshot
 
-The screenshots below are captured with the English UI. The main window now keeps manual control on the left, shows USB metrics under it, and keeps the journal visible on the right.
+The screenshots below are captured with the English UI. Manual controls stay below the temperature graph; the journal and USB metrics share the column to their right. Panels adapt to windows from 1080 × 680.
 
 ![Little Hands main window](docs/screenshots/little-hands-main-window.png)
 
@@ -61,14 +61,17 @@ The screenshots below are captured with the English UI. The main window now keep
 - English:
   - [README.md](README.md)
   - [Linux setup](docs/INSTALL_LINUX.md)
+  - [Quick guide / in-app manual](docs/USER_GUIDE.md)
   - [Printer and firmware guide](docs/PRINTER_AND_FIRMWARE.md)
 - Russian:
   - [README.ru.md](README.ru.md)
   - [Установка на Linux / Raspberry Pi](docs/INSTALL_LINUX.ru.md)
+  - [Краткое руководство приложения](docs/USER_GUIDE.ru.md)
   - [Принтер и прошивка](docs/PRINTER_AND_FIRMWARE.ru.md)
 - Chinese:
   - [README.zh.md](README.zh.md)
   - [Linux / Raspberry Pi 安装](docs/INSTALL_LINUX.zh.md)
+  - [应用快速指南](docs/USER_GUIDE.zh.md)
   - [打印机与固件说明](docs/PRINTER_AND_FIRMWARE.zh.md)
 
 ## Current Supported Setup
@@ -152,7 +155,7 @@ There is also an experimental controlled-hotbed branch for a newly installed K9-
 - firmware: [`firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin`](firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin)
 - notes: [docs/HOTBED_INSTALLATION.ru.md](docs/HOTBED_INSTALLATION.ru.md)
 
-Keep Cura material bed temperature at `0C`; the local controlled-hotbed path uses an explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:35` marker plus non-blocking `M140 S35`, and Little Hands verifies `B:` before `M24`.
+Keep Cura material bed temperature at `0C`; the local controlled-hotbed path uses an explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:60` marker plus non-blocking `M140 S60`, and Little Hands verifies `B:` before `M24`.
 
 If a fresh Desktop G-code is missing that marker, Cura is probably slicing with the older `lilHands` machine instead of `lilHands K9 warm mat`. Check `~/.config/cura/5.11/cura.cfg` for `[cura] active_machine = lilHands_k9_warmmat`, then save the G-code again.
 
@@ -177,7 +180,7 @@ python3 tools/k9_control_center.py
    - PLA: `225C` first layer, then `224C`
    - walls: `5`, Z seam: `Random`
    - supports for `mainFlasherTop.STL`: everywhere, interface / roof enabled, support angle `35`
-   - start G-code contains `;LH_EXPERIMENTAL_HOTBED_TARGET:35` and `M140 S35`
+   - start G-code contains `;LH_EXPERIMENTAL_HOTBED_TARGET:60` and `M140 S60`
 
 The tracked public Cura baseline is in [docs/cura/](docs/cura/).
 Manual settings for other slicer versions are in [docs/cura/SETTINGS.md](docs/cura/SETTINGS.md).

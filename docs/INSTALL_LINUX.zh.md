@@ -1,5 +1,7 @@
 # Linux / Raspberry Pi 安装
 
+连接、打印、加热和恢复请参阅[快速指南](USER_GUIDE.zh.md)，应用中的说明按钮也显示同一文本。路径根据仓库位置确定；请将 docs/ 与 tools/ 一起保留。
+
 本说明适用于：
 
 - Linux 桌面系统
@@ -76,6 +78,8 @@ python3 tools/k9_control_center.py
 - `Little Hands Control Center.desktop`
 
 安装到当前用户桌面环境：
+
+安装桌面快捷方式前，请将 Exec、Path 和 Icon 修改为本地仓库路径。
 
 ```bash
 mkdir -p ~/.local/share/applications

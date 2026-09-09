@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import math
 import os
 import re
 import shutil
@@ -28,8 +29,9 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "exports"
 VALIDATED_MODULEBOT_ORIENTED_STL = DEFAULT_OUTPUT_DIR / "mbnorm01_moduleBot_normal_orientation.stl"
 K9_MAX_EMITTED_PRINT_ACCEL = 250.0
 K9_MAX_EMITTED_TRAVEL_ACCEL = 200.0
-K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 40.0
-K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET = 35.0
+# Bed10K Max70: BED_MAXTEMP 70 minus BED_OVERSHOOT 10.
+K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 60.0
+K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET = 60.0
 HOTBED_EXPERIMENTAL_MARKER = ";LH_EXPERIMENTAL_HOTBED_TARGET:"
 
 
@@ -540,7 +542,7 @@ def main() -> int:
         type=float,
         default=K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET,
         help=(
-            "Experimental controlled-hotbed target in C; use 0 to disable. "
+            "Experimental controlled-hotbed target in C (default 60, maximum 60); use 0 to disable. "
             "Emits an LH marker and M140, but leaves Cura bed temperature at 0."
         ),
     )
@@ -578,7 +580,7 @@ def main() -> int:
         print(f"Error: Cura AppImage not found: {appimage}", file=sys.stderr)
         return 1
     hotbed_target = float(args.experimental_hotbed_target or 0.0)
-    if hotbed_target < 0.0 or hotbed_target > K9_MAX_EXPERIMENTAL_HOTBED_TARGET:
+    if not math.isfinite(hotbed_target) or hotbed_target < 0.0 or hotbed_target > K9_MAX_EXPERIMENTAL_HOTBED_TARGET:
         print(
             f"Error: experimental hotbed target must be 0..{K9_MAX_EXPERIMENTAL_HOTBED_TARGET:g}C for this K9 workflow.",
             file=sys.stderr,
