@@ -109,6 +109,17 @@ class OfflineUiChecks(unittest.TestCase):
         self.app._drain_events()
         self.assertGreater(self.app.last_sd_sample_ts, 123.0)
 
+    def test_freshness_covers_poll_interval_but_not_a_failed_reply(self):
+        self.app._port = lambda: "fake"
+        self.app.last_temp_current = 224.0
+        self.app.last_temp_target = 224.0
+        self.app.last_temp_sample_ts = time.time() - 8
+        self.app._refresh_header_from_cache()
+        self.assertIn("224.00", self.app.temp_var.get())
+        self.app.usb_silence_since = time.time()
+        self.app._refresh_header_from_cache()
+        self.assertIn("?", self.app.temp_var.get())
+
     def test_resume_without_confirmed_pause_never_touches_printer(self):
         self.app.recovery_record = {"file": "TEST.GCO", "samples": {"sd": {"byte": 120, "total": 1000}}}
         self.app.show_recovery = Mock()

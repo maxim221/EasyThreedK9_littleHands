@@ -47,6 +47,7 @@ PRINT_STATE_PATH = LOG_DIR / "little_hands_print_state.json"
 TEMP_GRAPH_WINDOW_SEC = 15 * 60
 TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
 TEMP_LOG_INTERVAL_SEC = 5.0
+LIVE_SAMPLE_MAX_AGE_SEC = 12.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
 AUTO_SD_REFRESH_REQUIRE_FRESH_TEMP_SEC = 12.0
 PRINT_START_GRACE_SEC = 5 * 60
@@ -3242,7 +3243,8 @@ class K9ControlCenter:
 
     def _refresh_header_from_cache(self) -> None:
         now = time.time()
-        if self.last_temp_current is not None and (now - self.last_temp_sample_ts) <= 4.0:
+        if (self.last_temp_current is not None and self._port() and not self.usb_silence_since
+                and (now - self.last_temp_sample_ts) <= LIVE_SAMPLE_MAX_AGE_SEC):
             bed_text = (
                 f" | Hotbed: {self.last_bed_temp_current:.2f} / {self.last_bed_temp_target or 0.0:.2f} C"
                 if self.last_bed_temp_current is not None
@@ -3256,7 +3258,7 @@ class K9ControlCenter:
         else:
             self.temp_var.set("Hotend: ? / ? C | Hotbed: ? / ? C")
 
-        if self.last_sd_summary and (now - self.last_sd_sample_ts) <= 8.0:
+        if self._port() and self.last_sd_summary and (now - self.last_sd_sample_ts) <= LIVE_SAMPLE_MAX_AGE_SEC:
             self.sd_var.set(self.last_sd_summary)
         else:
             self.sd_var.set(self._recovery_text("unknown"))
@@ -3310,7 +3312,8 @@ class K9ControlCenter:
             temp_line = {"ru": "Hotend: нет данных", "en": "Hotend: no data", "zh": "Hotend：无数据"}[lang]
             age_line = {"ru": "Возраст телеметрии: нет данных", "en": "Telemetry age: no data", "zh": "遥测年龄：无数据"}[lang]
         else:
-            stale = (now - self.last_temp_sample_ts) > 4.0
+            stale = (not self._port() or bool(self.usb_silence_since)
+                     or (now - self.last_temp_sample_ts) > LIVE_SAMPLE_MAX_AGE_SEC)
             state = {"ru": ("устарели" if stale else "свежие"), "en": ("stale" if stale else "fresh"), "zh": ("过期" if stale else "正常")}[lang]
             temp_line = f"Hotend: {self.last_temp_current:.2f} / {self.last_temp_target or 0.0:.2f} C"
             if self.last_bed_temp_current is not None:
