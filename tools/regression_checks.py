@@ -610,6 +610,14 @@ def main() -> int:
         failures,
     )
     require(
+        "_confirm_physical_saved_start_after_return" in app
+        and 'self._post("physical-return-confirmation", "predicted-print-end")' in app
+        and "return command completed; waiting for operator visual confirmation" in app
+        and "physical return was not confirmed by operator" in app,
+        "An acknowledged X/Y return must remain untrusted until the operator visually confirms the physical saved-start pose.",
+        failures,
+    )
+    require(
         "_confirm_finished_from_post_print_window" in app
         and "Confirm finish" in app
         and "confirm_finish_button" not in app

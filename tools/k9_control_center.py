@@ -3801,6 +3801,8 @@ class K9ControlCenter:
                 reason = "completion-unconfirmed"
                 self.log(self._post_print_recovery_text(reason))
                 self._show_post_print_recovery_window(reason)
+            elif kind == "physical-return-confirmation":
+                self._confirm_physical_saved_start_after_return(str(payload or "return"))
             elif kind == "post-print-recovery-clear":
                 self.post_print_recovery_required = False
                 self._close_post_print_window()
@@ -4669,6 +4671,77 @@ class K9ControlCenter:
         ):
             return
         self.go_print_home(confirm_model_removed=True)
+
+    def _confirm_physical_saved_start_after_return(self, source: str) -> None:
+        lang = self.lang_var.get().strip() or "ru"
+        prompt = {
+            "ru": (
+                "Принтер ФИЗИЧЕСКИ вернулся в сохранённый старт?\n\n"
+                "Проверь глазами:\n"
+                "- головка находится в ближнем левом углу\n"
+                "- стол полностью сзади, от оператора\n"
+                "- сопло находится на сохранённой стартовой высоте\n\n"
+                "Ответ M114 = X0 Y0 Z0 показывает только координаты прошивки. Он не доказывает, что заедающая "
+                "X-каретка действительно переместилась. Если головка осталась справа или любая ось не дошла, выбери «Нет»."
+            ),
+            "en": (
+                "Did the printer PHYSICALLY reach the saved start?\n\n"
+                "Check visually:\n"
+                "- the head is at the near-left corner\n"
+                "- the bed is fully back, away from the operator\n"
+                "- the nozzle is at the saved start height\n\n"
+                "M114 = X0 Y0 Z0 reports firmware coordinates only. It does not prove that a sticking X carriage "
+                "actually moved. Choose No if the head stayed right or any axis did not arrive."
+            ),
+            "zh": (
+                "打印机是否已实际回到保存的起点？\n\n"
+                "请目视检查：\n"
+                "- 喷头位于近端左角\n"
+                "- 平台完全退到远离操作者的一侧\n"
+                "- 喷嘴位于保存的起始高度\n\n"
+                "M114 = X0 Y0 Z0 仅表示固件坐标，不能证明可能卡滞的 X 滑架确实移动。"
+                "如果喷头仍在右侧或任一轴未到位，请选择“否”。"
+            ),
+        }.get(lang) or "Принтер физически вернулся в сохранённый старт?"
+        physically_at_start = bool(
+            messagebox.askyesno("Little Hands", prompt, parent=self.root, default=messagebox.NO)
+        )
+        if physically_at_start:
+            self._apply_home_trust(
+                HOME_TRUST_TRUSTED,
+                "operator visually confirmed physical return to saved start",
+                log_change=True,
+            )
+            self.at_saved_start_pose = True
+            self.bed_clear_before_go_start_required = False
+            self.post_print_recovery_required = False
+            self._save_print_state("recovered-to-start-confirmed", force=True)
+            self._close_post_print_window()
+            self.log("Оператор глазами подтвердил физический старт после возврата; SD-старт можно разблокировать после остальных обязательных проверок.")
+            return
+
+        self._apply_home_trust(HOME_TRUST_UNCERTAIN, "physical return was not confirmed by operator", log_change=True)
+        self.at_saved_start_pose = False
+        self.bed_clear_before_go_start_required = True
+        self.post_print_recovery_required = True
+        self._save_print_state("return-needs-visual-reset", force=True)
+        warning = {
+            "ru": (
+                "Старт оставлен недоверенным, следующая печать заблокирована. Не повторяй длинный возврат силой. "
+                "Осмотри X-каретку, освободи её короткими контролируемыми перемещениями, затем вручную выставь ближний "
+                "левый старт и нажми «Запомнить старт»."
+            ),
+            "en": (
+                "Start remains untrusted and the next print is blocked. Do not force another long return. Inspect the "
+                "X carriage, free it with short watched jogs, then restore the near-left start manually and click Save start."
+            ),
+            "zh": (
+                "起点仍不可信，下一次打印已被阻止。不要强行再次执行长距离返回。请检查 X 滑架，用短距离受监控点动使其恢复，"
+                "然后手动设置近端左侧起点并点击“保存起点”。"
+            ),
+        }.get(lang) or "Старт не подтверждён; следующая печать заблокирована."
+        self.log(f"Физический возврат не подтверждён ({source}). {warning}")
+        messagebox.showwarning("Little Hands", warning, parent=self.root)
 
     def return_to_start_after_print(self) -> None:
         if self.current_print_file != "-":
@@ -7093,10 +7166,20 @@ class K9ControlCenter:
             except Exception:
                 self._set_home_trust(HOME_TRUST_UNCERTAIN, "go-to-start failed; physical position is not trusted", log_change=True)
                 raise
+            physical_xy_return_needs_confirmation = bool(
+                use_stopped_print_pose
+                or use_post_print_pose
+                or use_predicted_print_end_pose
+                or (not use_preheat_lift_recovery and not use_live_stopped_session_return)
+            )
             if use_preheat_lift_recovery:
                 self._set_home_trust(HOME_TRUST_TRUSTED, "returned from failed preheat lift", log_change=True)
-            elif use_stopped_print_pose or use_post_print_pose or use_predicted_print_end_pose:
-                self._set_home_trust(HOME_TRUST_TRUSTED, "recovered to saved start", log_change=True)
+            elif physical_xy_return_needs_confirmation:
+                self._set_home_trust(
+                    HOME_TRUST_UNCERTAIN,
+                    "return command completed; waiting for operator visual confirmation",
+                    log_change=True,
+                )
             elif use_live_stopped_session_return:
                 self._set_home_trust(
                     HOME_TRUST_UNCERTAIN,
@@ -7105,8 +7188,8 @@ class K9ControlCenter:
                 )
             elif self._home_is_trusted():
                 self._set_home_trust(HOME_TRUST_TRUSTED, "returned to saved start", log_change=False)
-            self.at_saved_start_pose = not use_live_stopped_session_return
-            self.bed_clear_before_go_start_required = False
+            self.at_saved_start_pose = bool(use_preheat_lift_recovery)
+            self.bed_clear_before_go_start_required = bool(physical_xy_return_needs_confirmation)
             self.stopped_print_pose = None
             self.stopped_print_display = "-"
             self.stopped_print_live_return_available = False
@@ -7121,10 +7204,10 @@ class K9ControlCenter:
                 self._post("log", "Проверь физически, что сопло снова в стартовой высоте; если всё верно, можно запускать следующую печать.")
             elif use_stopped_print_pose:
                 self._clear_predicted_print_end(save=False)
-                self._save_print_state("recovered-to-start", force=True)
-                self._post("progress", ("Recovery после стопа: старт восстановлен", 0.0))
-                self._post("log", out.strip() or "Recovery после остановленной печати выполнен: стартовая поза заново сохранена")
-                self._post("log", "Теперь можно запускать следующую печать из сохранённого старта.")
+                self._save_print_state("return-awaiting-physical-confirmation", force=True)
+                self._post("progress", ("Recovery после стопа: проверь физический старт", 0.0))
+                self._post("log", out.strip() or "Команды возврата после остановленной печати выполнены")
+                self._post("physical-return-confirmation", "stopped-print")
             elif use_live_stopped_session_return:
                 self._clear_predicted_print_end(save=False)
                 self._save_print_state("live-stop-return-attempted", force=True)
@@ -7137,14 +7220,10 @@ class K9ControlCenter:
                 )
             elif use_post_print_pose:
                 self._clear_predicted_print_end(save=False)
-                self._save_print_state("recovered-to-start", force=True)
-                self._post("progress", ("Recovery print-end: возвращён к старту", 0.0))
-                self._post("log", out.strip() or "Recovery по реальной M114 print-end позе выполнен: принтер возвращён к стартовой позе")
-                self._post(
-                    "log",
-                    "Когда принтер физически стоит в старте, нажми 'Запомнить старт' перед следующей печатью.",
-                )
-                self._post("post-print-recovery", "completion")
+                self._save_print_state("return-awaiting-physical-confirmation", force=True)
+                self._post("progress", ("Recovery print-end: проверь физический старт", 0.0))
+                self._post("log", out.strip() or "Команды возврата по реальной M114 print-end позе выполнены")
+                self._post("physical-return-confirmation", "observed-print-end")
             elif use_predicted_print_end_pose:
                 self.current_print_file = "-"
                 self.current_print_display = "-"
@@ -7158,25 +7237,20 @@ class K9ControlCenter:
                 self.first_sd_progress_ts = None
                 self.last_sd_progress_ts = None
                 self._clear_predicted_print_end(save=False)
-                self._save_print_state("recovered-to-start", force=True)
+                self._save_print_state("return-awaiting-physical-confirmation", force=True)
                 self._post("active-sd", "Печатается: -")
-                self._post("progress", ("Recovery print-end: возвращён к старту", 0.0))
-                self._post("log", out.strip() or "Recovery по print-end выполнен: принтер возвращён к стартовой позе")
+                self._post("progress", ("Recovery print-end: проверь физический старт", 0.0))
+                self._post("log", out.strip() or "Команды возврата по print-end выполнены")
                 self._post(
                     "log",
                     "Если power cycle ещё не был сделан после завершения печати, сделай его перед следующей печатью. "
-                    "Когда принтер физически стоит в старте, нажми 'Запомнить старт'.",
+                    "M114 не подтверждает физическое движение X; ответь на визуальную проверку старта.",
                 )
-                self._post("post-print-recovery", "completion")
+                self._post("physical-return-confirmation", "predicted-print-end")
             else:
-                self._save_print_state("returned-to-start", force=True)
-                self._post("log", out.strip() or "Принтер возвращён к стартовой позе")
-                if self.post_print_recovery_required:
-                    self._post(
-                        "log",
-                        "Если принтер физически стоит в старте, сделай power cycle перед следующей печатью и нажми 'Запомнить старт'. "
-                        "Если физически это не старт, выставь стартовую позу вручную.",
-                    )
+                self._save_print_state("return-awaiting-physical-confirmation", force=True)
+                self._post("log", out.strip() or "Команды возврата к стартовой позе выполнены")
+                self._post("physical-return-confirmation", "saved-zero-return")
 
         self._run_task("Переход к сохранённому 0", task)
 
