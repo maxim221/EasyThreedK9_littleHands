@@ -38,11 +38,15 @@ The operator selected 60°C; a setting change does not replace physical validati
 2. Click Go to saved start in manual controls. Confirm recovery only when every condition in the dialog is met.
 3. Before the next print, switch printer power off for 5–10 seconds, power it on, check the physical start, and click Save start again. Confirm this power cycle at the next start.
 
+If the power cycle was already completed when you click Save start, answer Yes in its separate confirmation. A successfully acknowledged Save start then records both conditions and the next SD start will not ask for the same power cycle again. Answering No saves the pose but keeps the start gate.
+
 Pause waits for motion to finish and saves the paused file, SD cursor, coordinates, and temperatures. Resume rechecks them before sending the command. After a USB disconnect or app restart, confirm that printer power stayed on and the axes and part were not moved. A cooled nozzle, changed file/position, power reset, or unconfirmed pause blocks resuming.
 
 Normal Stop attempts a safe lift, saves the interrupted pose, and turns off printing and heaters. If the printer does not acknowledge shutdown, the app shows “Stop is unconfirmed” and blocks automatic return. Hard stop is the emergency path; cut printer power for immediate danger. Motors off invalidates the saved start.
 
 After USB loss or an app restart, axes never return automatically. Recovery from a saved final pose requires a finished print, a removed model, and confirmation that the axes were not moved. The app may select a replacement printer port when exactly one safe port is available.
+
+If the log says that USB re-enumerated, Linux observed a real detach/attach rather than an ordinary late firmware reply. Check the USB cable, powered hub, connectors, and electrical interference. When possible, place the printer on a short direct or separately powered USB path instead of the same downstream hub as USB audio/video devices.
 
 Open **Recovery** beside USB metrics to inspect or save the last replies. Each sample has its own time; old progress is not an exact stop point. The app retains a copy of the source G-code, but does not automatically replay a file tail from stale coordinates. An unfinished print cannot use the predicted final pose for return. If the controller is unresponsive, restore communication first; after a reset with unknown physical position, set start manually.
 

@@ -567,6 +567,24 @@ def main() -> int:
         failures,
     )
     require(
+        "ACTIVE_PRINT_POSITION_SAMPLE_INTERVAL_SEC = 30.0" in app
+        and "ACTIVE_PRINT_POLL_INTERVAL_SEC = 8.0" in app
+        and "USB_SILENCE_POLL_INTERVAL_SEC = 30.0" in app,
+        "Active-print UART telemetry must remain rate-limited and back off strongly after silence.",
+        failures,
+    )
+    require(
+        "not self.print_state_restored_from_log\n                and (now - self.last_position_sample_ts)" in app,
+        "A restored print must not overwrite retained physical-position evidence with post-reset M114 coordinates.",
+        failures,
+    )
+    require(
+        "serial_port_usb_generation" in marlin
+        and "USB device re-enumerated during SD print" in app,
+        "Physical USB re-enumeration must be distinguished from an ordinary Marlin reply timeout.",
+        failures,
+    )
+    require(
         "_select_single_safe_printer_port_for_recovery" in app
         and "Recovery автоматически переключил порт принтера" in app,
         "Go-to-start recovery must auto-switch to the single safe CH340/ACM printer port after USB re-enumeration.",
@@ -603,6 +621,24 @@ def main() -> int:
     require(
         "operator-confirmed completion restored as predicted print-end recovery" in app,
         "Operator-confirmed predicted print-end recovery must survive app restart.",
+        failures,
+    )
+    require(
+        "restored print is no longer active; completion is not proven" in app
+        and "это не доказывает штатный финиш" in app,
+        "A restored active-print marker plus Not SD printing must not be treated as proven completion.",
+        failures,
+    )
+    require(
+        "PRINT_ABORT_CONFIRMED_BY_OPERATOR" in app and "abort_re.search(line)" in app,
+        "An operator-confirmed unfinished print must remain terminal across app restarts.",
+        failures,
+    )
+    require(
+        "power_cycle_confirmed_with_save" in app
+        and "_clear_next_sd_start_power_cycle_requirement(save=False)" in app
+        and "Повторное предупреждение power cycle" in app,
+        "Save start may clear the next-start power-cycle gate only after an explicit operator confirmation.",
         failures,
     )
     require(

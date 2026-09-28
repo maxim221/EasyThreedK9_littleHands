@@ -74,6 +74,35 @@ def list_serial_ports() -> list[dict[str, str]]:
     return ports
 
 
+def serial_port_usb_generation(port: str) -> str:
+    """Return a stable-per-enumeration identity for a Linux USB serial port.
+
+    The physical USB path stays the same when CH341 re-enumerates, while the
+    kernel ``devnum`` changes.  Including both lets the UI distinguish a real
+    USB detach/attach from a delayed Marlin reply without opening the port.
+    """
+    tty_name = Path(port).name
+    device_link = Path("/sys/class/tty") / tty_name / "device"
+    try:
+        node = device_link.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return ""
+    for parent in (node, *node.parents):
+        vendor_path = parent / "idVendor"
+        product_path = parent / "idProduct"
+        devnum_path = parent / "devnum"
+        if not (vendor_path.is_file() and product_path.is_file() and devnum_path.is_file()):
+            continue
+        try:
+            vendor = vendor_path.read_text(encoding="ascii").strip().lower()
+            product = product_path.read_text(encoding="ascii").strip().lower()
+            devnum = devnum_path.read_text(encoding="ascii").strip()
+        except OSError:
+            return ""
+        return f"{vendor}:{product}:{parent.name}:devnum={devnum}"
+    return ""
+
+
 def is_known_non_printer_port(meta: dict[str, str]) -> bool:
     device = meta.get("device", "")
     hay = " ".join(str(value) for value in meta.values()).lower()

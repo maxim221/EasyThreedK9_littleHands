@@ -57,6 +57,9 @@ POST_M24_USB_QUIET_SEC = 180
 PRINT_ACTIVE_CONFIRM_SAMPLES = 2
 PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 ACTIVE_PRINT_RECENT_PROGRESS_BLOCK_SEC = 90.0
+ACTIVE_PRINT_POSITION_SAMPLE_INTERVAL_SEC = 30.0
+ACTIVE_PRINT_POLL_INTERVAL_SEC = 8.0
+USB_SILENCE_POLL_INTERVAL_SEC = 30.0
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
 PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
 PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
@@ -449,6 +452,9 @@ class K9ControlCenter:
         self.last_m503_raw = ""
         self.last_position_line = "X:? Y:? Z:?"
         self.last_position_sample_ts = 0.0
+        self.current_print_usb_generation = ""
+        self.usb_reenumeration_reported = False
+        self.restored_not_printing_reported = False
         self.last_fw_query_ts = 0.0
         self.last_poll_error_ts = 0.0
         self.header_marquee_source = ""
@@ -572,6 +578,7 @@ class K9ControlCenter:
             r"(\d{2}):(\d{2}):(\d{2}) PRINT_END_EXPECTED file=(.+?) contract=(\S+) end_x=([-\d.]+) end_y=([-\d.]+) end_z=([-\d.?]+)"
         )
         end_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) PRINT_END file=(.+?) temp=")
+        abort_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) PRINT_ABORT_CONFIRMED_BY_OPERATOR file=(.+?)(?:\s+reason=|$)")
         last_active: str | None = None
         last_end: str | None = None
         last_start_ts: float | None = None
@@ -630,6 +637,10 @@ class K9ControlCenter:
             me = end_re.search(line)
             if me:
                 last_end = me.group(4).strip()
+                continue
+            ma = abort_re.search(line)
+            if ma:
+                last_end = ma.group(4).strip()
         if last_active and last_active != "-" and last_active != last_end:
             now = time.time()
             if last_active_evidence_ts and (now - last_active_evidence_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC:
@@ -815,6 +826,7 @@ class K9ControlCenter:
             self.print_completion_armed = bool(self.current_print_progress_pct is not None)
             self.print_was_active = bool(self.current_print_progress_pct is not None)
             self.active_sd_var.set(self._format_label_value("active_sd", self.current_print_display))
+        self.current_print_usb_generation = str(data.get("current_print_usb_generation") or "")
 
     def _print_state_payload(self, phase: str) -> dict[str, object]:
         return {
@@ -826,6 +838,7 @@ class K9ControlCenter:
             "current_print_display": self.current_print_display,
             "current_print_start_ts": self.current_print_start_ts,
             "progress_pct": self.current_print_progress_pct,
+            "current_print_usb_generation": self.current_print_usb_generation,
             "predicted_end": {
                 "valid": self.predicted_print_end_valid,
                 "file": self.predicted_print_end_file,
@@ -4247,6 +4260,8 @@ class K9ControlCenter:
         self.current_print_display = display
         start_ts = time.time()
         self.current_print_start_ts = start_ts
+        self.current_print_usb_generation = sdtool.serial_port_usb_generation(self._port())
+        self.usb_reenumeration_reported = False
         self._start_recovery_record(path, display, start_ts)
         if not self.predicted_print_end_valid or self.predicted_print_end_file != path:
             self.predicted_print_end_valid = True
@@ -6463,6 +6478,36 @@ class K9ControlCenter:
             "Little Hands", self._t("save_raised_start_confirm"), default=messagebox.NO,
         ):
             return
+        power_cycle_confirmed_with_save = False
+        if self.next_sd_start_requires_power_cycle:
+            lang = self.lang_var.get().strip() or "ru"
+            prompt = {
+                "ru": (
+                    "После предыдущей печати/остановки требуется цикл питания.\n\n"
+                    "Принтер уже был выключен на 5–10 секунд и снова включён, а текущая физическая поза проверена как старт?\n\n"
+                    "Да — сохранить старт и записать подтверждение power cycle.\n"
+                    "Нет — сохранить старт, но оставить подтверждение перед следующей печатью.\n"
+                    "Отмена — ничего не менять."
+                ),
+                "en": (
+                    "A power cycle is required after the previous print/stop.\n\n"
+                    "Was printer power already off for 5–10 seconds and turned on again, and is the current physical pose verified as start?\n\n"
+                    "Yes — save start and record the power-cycle confirmation.\n"
+                    "No — save start but keep confirmation before the next print.\n"
+                    "Cancel — change nothing."
+                ),
+                "zh": (
+                    "上一次打印/停止后需要断电重启。\n\n"
+                    "打印机是否已经断电 5–10 秒后重新上电，并且当前实际位置已确认是起点？\n\n"
+                    "是 — 保存起点并记录断电确认。\n"
+                    "否 — 保存起点，但下次打印前仍需确认。\n"
+                    "取消 — 不做更改。"
+                ),
+            }.get(lang)
+            answer = messagebox.askyesnocancel("Little Hands", prompt, default=messagebox.NO)
+            if answer is None:
+                return
+            power_cycle_confirmed_with_save = bool(answer)
         def task() -> None:
             self._invalidate_retained_pause("new saved start")
             out = sdtool.set_current_home_zero(self._port(), self._baud())
@@ -6478,6 +6523,8 @@ class K9ControlCenter:
             self.stopped_print_display = "-"
             self.stopped_print_live_return_available = False
             self._clear_preheat_lift_recovery(save=False)
+            if power_cycle_confirmed_with_save:
+                self._clear_next_sd_start_power_cycle_requirement(save=False)
             self.post_print_pose_known = False
             self.post_print_pose = None
             had_active_print = self.current_print_file != "-"
@@ -6504,6 +6551,12 @@ class K9ControlCenter:
                     "log",
                     "Стартовая поза записана. Так как до этого была печать/остановка/сорванный старт, "
                     "перед следующей SD-печатью приложение попросит подтвердить power cycle принтера.",
+                )
+            elif had_post_print_cycle and power_cycle_confirmed_with_save:
+                self._post(
+                    "log",
+                    "Стартовая поза записана; оператор одновременно подтвердил выполненный цикл питания 5–10 секунд. "
+                    "Повторное предупреждение power cycle перед следующим SD-стартом не требуется.",
                 )
             self._post("log", out.strip() or "Стартовая поза запомнена")
             if self.next_sd_start_requires_power_cycle:
@@ -7493,6 +7546,27 @@ class K9ControlCenter:
             return reply
         try:
             now = time.time()
+            if self.current_print_file != "-":
+                live_usb_generation = sdtool.serial_port_usb_generation(self._port())
+                if (
+                    self.current_print_usb_generation
+                    and live_usb_generation
+                    and live_usb_generation != self.current_print_usb_generation
+                ):
+                    if not self.usb_reenumeration_reported:
+                        self.usb_reenumeration_reported = True
+                        self._record_connection_loss("USB device re-enumerated during SD print")
+                        self._post(
+                            "log",
+                            "Linux заново зарегистрировал USB-UART принтера во время SD-печати. "
+                            "Это физический detach/attach USB, а не обычный таймаут M105. "
+                            "Не считай ожидаемую print-end позу достигнутой, пока печать не завершилась физически.",
+                        )
+                    self.current_print_usb_generation = live_usb_generation
+                    self._save_print_state("printing", force=True)
+                elif not self.current_print_usb_generation and live_usb_generation:
+                    self.current_print_usb_generation = live_usb_generation
+                    self._save_print_state("printing", force=True)
             quiet_remaining = self.post_m24_usb_quiet_until - now
             if self.current_print_file != "-" and quiet_remaining > 0:
                 remaining = max(1, int(math.ceil(quiet_remaining)))
@@ -7707,7 +7781,10 @@ class K9ControlCenter:
                 self._record_recovery_sample("sd", sd)
             else:
                 self._post("sd", self._recovery_text("unknown"))
-            if (now - self.last_position_sample_ts) >= 3.0:
+            if (
+                not self.print_state_restored_from_log
+                and (now - self.last_position_sample_ts) >= ACTIVE_PRINT_POSITION_SAMPLE_INTERVAL_SEC
+            ):
                 m114 = poll_query(
                     "M114",
                     wait_before_read=0.1,
@@ -7804,23 +7881,43 @@ class K9ControlCenter:
                     self._post("progress", ("Печать: старт отправлен, жду SD/прогрев", 0.0))
                 else:
                     self._post("progress", ("Печать: простой", 0.0))
-                if self.print_state_restored_from_log and not self.print_was_active:
-                    self.current_print_file = "-"
-                    self.current_print_display = "-"
-                    self.current_print_start_ts = None
-                    self.current_print_progress_pct = None
-                    self.print_state_restored_from_log = False
-                    self.print_start_watchdog_alerted = False
-                    self.print_was_active = False
-                    self.print_completion_armed = False
-                    self.sd_progress_sample_count = 0
-                    self.first_sd_progress_ts = None
-                    self.last_sd_progress_ts = None
-                    self._clear_predicted_print_end(save=False)
-                    self._save_print_state("idle", force=True)
-                    self._post("active-sd", "Печатается: -")
-                    self._post("log", "Сбросил восстановленное из лога состояние печати: на текущем принтере активной SD-печати нет.")
-                    self._schedule_sd_refresh_after_port(self._port(), force=True)
+                if self.print_state_restored_from_log:
+                    if not self.print_was_active:
+                        self.current_print_file = "-"
+                        self.current_print_display = "-"
+                        self.current_print_start_ts = None
+                        self.current_print_progress_pct = None
+                        self.print_state_restored_from_log = False
+                        self.print_start_watchdog_alerted = False
+                        self.print_was_active = False
+                        self.print_completion_armed = False
+                        self.sd_progress_sample_count = 0
+                        self.first_sd_progress_ts = None
+                        self.last_sd_progress_ts = None
+                        self._clear_predicted_print_end(save=False)
+                        self._save_print_state("idle", force=True)
+                        self._post("active-sd", "Печатается: -")
+                        self._post("log", "Сбросил неподтверждённый старт из лога: на текущем принтере активной SD-печати нет.")
+                        self._schedule_sd_refresh_after_port(self._port(), force=True)
+                    else:
+                        self.bed_clear_before_go_start_required = True
+                        first_unconfirmed_report = not self.restored_not_printing_reported
+                        self._set_home_trust(
+                            HOME_TRUST_UNCERTAIN,
+                            "restored print is no longer active; completion is not proven",
+                            log_change=first_unconfirmed_report,
+                        )
+                        self._post("sd", "SD: не печатает; результат после рестарта не подтверждён")
+                        self._post("progress", ("Печать: финиш или остановка не подтверждены", 0.0))
+                        if first_unconfirmed_report:
+                            self.restored_not_printing_reported = True
+                            self._post(
+                                "log",
+                                "После перезапуска M27 отвечает Not SD printing, но это не доказывает штатный финиш. "
+                                "Если файл допечатался полностью, используй 'Подтвердить финиш'. "
+                                "Если деталь недопечатана, конечную predicted-позу использовать нельзя: убери деталь и выставь старт вручную.",
+                            )
+                        self._save_print_state("printing", force=True)
                     return
                 if self.print_was_active and self.print_completion_armed:
                     finish_ts = now
@@ -8017,7 +8114,11 @@ class K9ControlCenter:
             try:
                 close_poll_session()
             finally:
-                self.next_poll_ts = time.time() + (15.0 if self.usb_silence_since else 4.0)
+                self.next_poll_ts = time.time() + (
+                    USB_SILENCE_POLL_INTERVAL_SEC
+                    if self.usb_silence_since
+                    else ACTIVE_PRINT_POLL_INTERVAL_SEC
+                )
                 self.serial_lock.release()
 
 
