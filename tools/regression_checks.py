@@ -202,6 +202,7 @@ def main() -> int:
     cura_readme = read("docs/cura/README.md")
     cura_settings = read("docs/cura/SETTINGS.md")
     firmware_watch_patch = read("docs/firmware/LH-v5-watch180.patch")
+    firmware_bed_watch_patch = read("docs/firmware/LH-v7-exp-bed-watch180.patch")
 
     require("SOFT_TRAVEL_ACCEL = 80" in marlin, "K9 service travel acceleration must remain M204 T80.", failures)
     require(
@@ -237,6 +238,20 @@ def main() -> int:
     require(
         'LH_FIRMWARE_LABEL "LH v5 YZSwap AutoFan45 FAN1 Z600 E1040 Watch180"' in firmware_watch_patch,
         "Tracked LH v5 firmware patch must expose the Watch180 identity through M115.",
+        failures,
+    )
+    require(
+        "WATCH_BED_TEMP_PERIOD               180" in firmware_bed_watch_patch
+        and "WATCH_BED_TEMP_INCREASE               2" in firmware_bed_watch_patch
+        and "Bed10K Max70 BedWatch180" in firmware_bed_watch_patch
+        and "THERMAL_PROTECTION_BED" not in firmware_bed_watch_patch,
+        "LH v7 must extend only the bed heating-watch window while retaining the 2C rise check and existing thermal protection.",
+        failures,
+    )
+    require(
+        "LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin" in app
+        and "Bed10K Max70 BedWatch180" in app,
+        "Little Hands firmware catalog must recognize the LH v7 BedWatch180 candidate.",
         failures,
     )
     require(
@@ -588,6 +603,22 @@ def main() -> int:
         failures,
     )
     require(
+        "PRINT_TELEMETRY_LOST" in app
+        and "не отправляет M524" in app
+        and "self._save_print_state(\"printing\", force=True)" in app
+        and "sdtool.stop_sd_print(" not in app
+        and 'self._clear_print_session_state("Печать: старт не подтверждён"' not in app,
+        "Missing M105/M27 after M24 must preserve the active SD marker and must never auto-send M524.",
+        failures,
+    )
+    require(
+        "unconfirmed_start_age" not in app
+        and "PRINT_START_UNCONFIRMED" not in app
+        and "Сбросил неподтверждённый старт из лога" not in app,
+        "An unconfirmed post-M24 start must survive telemetry timeouts and application restart.",
+        failures,
+    )
+    require(
         "not self.print_state_restored_from_log\n                and (now - self.last_position_sample_ts)" in app,
         "A restored print must not overwrite retained physical-position evidence with post-reset M114 coordinates.",
         failures,
@@ -605,9 +636,10 @@ def main() -> int:
         failures,
     )
     require(
-        "restore_active_print_marker = False" in app
-        and "stale active print marker restored as predicted print-end recovery" in app,
-        "Persistent restore must keep valid predicted print-end recovery even when active-print state is stale.",
+        "restore_active_print_marker = False" not in app
+        and "stale active print marker preserved until explicit operator result" in app
+        and "phase not in active_phases" in app,
+        "Persistent restore must preserve stale active-print state and predicted recovery until an explicit operator result.",
         failures,
     )
     require(

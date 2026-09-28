@@ -1,0 +1,13 @@
+diff --git a/Marlin/Configuration.h b/Marlin/Configuration.h
+--- a/Marlin/Configuration.h
++++ b/Marlin/Configuration.h
+@@
+-#define LH_FIRMWARE_LABEL "LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70"
++#define LH_FIRMWARE_LABEL "LH v7 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedWatch180"
+diff --git a/Marlin/Configuration_adv.h b/Marlin/Configuration_adv.h
+--- a/Marlin/Configuration_adv.h
++++ b/Marlin/Configuration_adv.h
+@@
+-  #define WATCH_BED_TEMP_PERIOD                60 // Seconds
++  #define WATCH_BED_TEMP_PERIOD               180 // Seconds. Allow slow recovery under the K9 hotend-fan airflow.
+   #define WATCH_BED_TEMP_INCREASE               2 // Degrees Celsius

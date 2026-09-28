@@ -278,6 +278,18 @@ LH_FIRMWARE_CATALOG = {
         "marlin": "2.1.2.5",
         "m92": (606.0, 606.0, 600.0, 1040.0),
     },
+    "LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin": {
+        "lh_version": "LH v6 EXP",
+        "label": "LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 600.0, 1040.0),
+    },
+    "LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin": {
+        "lh_version": "LH v7 EXP",
+        "label": "LH v7 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedWatch180",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 600.0, 1040.0),
+    },
     "ecf-k9-et4000plus-mksLite.bin": {
         "lh_version": "LH ECF",
         "label": "LH ECF Baseline",
@@ -642,12 +654,6 @@ class K9ControlCenter:
             if ma:
                 last_end = ma.group(4).strip()
         if last_active and last_active != "-" and last_active != last_end:
-            now = time.time()
-            if last_active_evidence_ts and (now - last_active_evidence_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC:
-                return
-            unconfirmed_start_age = (now - last_start_ts) if last_start_ts and last_progress_pct is None else None
-            if unconfirmed_start_age is not None and unconfirmed_start_age > PRINT_START_GRACE_SEC:
-                return
             self.current_print_file = last_active
             self.current_print_display = last_active
             self.active_sd_var.set(self._format_label_value("active_sd", last_active))
@@ -687,11 +693,17 @@ class K9ControlCenter:
         if isinstance(record, dict):
             self.recovery_record = recovery.restore_record(record)
             self.pause_session_continuous = False
+        phase = str(data.get("phase") or "")
+        active_phases = {"prepared", "printing", "paused", "resume-sent", "print_end_expected"}
         try:
             updated_ts = float(data.get("updated_ts") or 0.0)
         except (TypeError, ValueError):
             return
-        if updated_ts and (time.time() - updated_ts) > PRINT_STATE_MAX_AGE_SEC:
+        if (
+            updated_ts
+            and (time.time() - updated_ts) > PRINT_STATE_MAX_AGE_SEC
+            and phase not in active_phases
+        ):
             return
         profiles = data.get("sd_gcode_profiles")
         if isinstance(profiles, dict):
@@ -705,12 +717,10 @@ class K9ControlCenter:
                 data.get("next_sd_start_power_cycle_reason")
                 or "restored post-print / failed-start power-cycle gate"
             )
-        phase = str(data.get("phase") or "")
         if phase in {"completed", "stopped", "stop-requested", "stop-unconfirmed", "stopped-jog-updated", "hard-stop", "preheat-lift-failed", "failed-start"}:
             self._require_power_cycle_before_next_sd_start(f"restored {phase} state", save=False)
         predicted = data.get("predicted_end")
         predicted_has_recovery_pose = predicted_print_end_has_recovery_pose(predicted)
-        restore_active_print_marker = True
         if phase == "completed" and data.get("post_print_recovery_required"):
             pose = data.get("post_print_pose")
             if isinstance(pose, list) and len(pose) == 3:
@@ -769,57 +779,52 @@ class K9ControlCenter:
                 and (time.time() - updated_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC
             )
         ):
-            if not predicted_has_recovery_pose:
-                self._clear_predicted_print_end(save=False)
-                self._save_print_state("idle", force=True)
-                return
-            restore_active_print_marker = False
             self.bed_clear_before_go_start_required = True
             self.home_trust = HOME_TRUST_INVALID
-            self.home_trust_reason = "stale active print marker restored as predicted print-end recovery"
-        if not isinstance(predicted, dict) or not predicted.get("valid"):
-            return
-        file_name = str(predicted.get("file") or "-").strip()
+            self.home_trust_reason = "stale active print marker preserved until explicit operator result"
+        state_file = str(data.get("current_print_file") or "-").strip()
+        state_display = str(data.get("current_print_display") or state_file).strip()
+        predicted_valid = isinstance(predicted, dict) and bool(predicted.get("valid"))
+        file_name = str(predicted.get("file") or state_file).strip() if predicted_valid else state_file
         if not file_name or file_name == "-":
             return
-        self.predicted_print_end_valid = True
-        self.predicted_print_end_file = file_name
-        self.predicted_print_end_display = str(predicted.get("display") or file_name).strip()
-        self.predicted_print_end_contract = str(predicted.get("contract") or PRINT_END_CONTRACT)
-        try:
-            self.predicted_print_end_start_ts = float(predicted.get("start_ts") or 0.0) or None
-            self.predicted_print_end_x = float(predicted.get("end_x") or 95.0)
-            self.predicted_print_end_y = float(predicted.get("end_y") or 95.0)
-        except (TypeError, ValueError):
-            self.predicted_print_end_start_ts = None
-            self.predicted_print_end_x = 95.0
-            self.predicted_print_end_y = 95.0
-        end_z = predicted.get("end_z")
-        try:
-            self.predicted_print_end_z = float(end_z) if end_z is not None else None
-        except (TypeError, ValueError):
-            self.predicted_print_end_z = None
+        if predicted_valid:
+            self.predicted_print_end_valid = True
+            self.predicted_print_end_file = file_name
+            self.predicted_print_end_display = str(predicted.get("display") or file_name).strip()
+            self.predicted_print_end_contract = str(predicted.get("contract") or PRINT_END_CONTRACT)
+            try:
+                self.predicted_print_end_start_ts = float(predicted.get("start_ts") or 0.0) or None
+                self.predicted_print_end_x = float(predicted.get("end_x") or 95.0)
+                self.predicted_print_end_y = float(predicted.get("end_y") or 95.0)
+            except (TypeError, ValueError):
+                self.predicted_print_end_start_ts = None
+                self.predicted_print_end_x = 95.0
+                self.predicted_print_end_y = 95.0
+            end_z = predicted.get("end_z")
+            try:
+                self.predicted_print_end_z = float(end_z) if end_z is not None else None
+            except (TypeError, ValueError):
+                self.predicted_print_end_z = None
         if (
-            restore_active_print_marker
-            and self.current_print_file == "-"
-            and phase in {"prepared", "printing", "paused", "resume-sent", "print_end_expected"}
+            self.current_print_file == "-"
+            and phase in active_phases
         ):
-            restore_start_ts = self.predicted_print_end_start_ts or updated_ts or None
+            restore_start_ts = (
+                self.predicted_print_end_start_ts
+                or float(data.get("current_print_start_ts") or 0.0)
+                or updated_ts
+                or None
+            )
             progress = data.get("progress_pct")
             try:
                 progress_value = float(progress) if progress is not None else None
             except (TypeError, ValueError):
                 progress_value = None
-            if (
-                (progress_value is None or progress_value <= 0.0)
-                and restore_start_ts
-                and (time.time() - restore_start_ts) > PRINT_START_GRACE_SEC
-            ):
-                self._clear_predicted_print_end(save=False)
-                self._save_print_state("idle", force=True)
-                return
             self.current_print_file = file_name
-            self.current_print_display = self.predicted_print_end_display
+            self.current_print_display = (
+                self.predicted_print_end_display if predicted_valid else (state_display or file_name)
+            )
             self.current_print_start_ts = restore_start_ts
             self.current_print_progress_pct = progress_value
             self.print_state_restored_from_log = True
@@ -7843,16 +7848,16 @@ class K9ControlCenter:
                     file_name = self.current_print_file
                     self.print_start_watchdog_alerted = True
                     self._append_ring_log(
-                        f"{time.strftime('%H:%M:%S')} PRINT_START_UNCONFIRMED file={file_name} reason=m105_silent"
+                        f"{time.strftime('%H:%M:%S')} PRINT_TELEMETRY_LOST file={file_name} reason=m105_silent"
                     )
-                    self._clear_print_session_state("Печать: старт не подтверждён", 0.0)
-                    self._post("post-print-recovery", "failed-start")
+                    self._save_print_state("printing", force=True)
+                    self._post("active-sd", f"Печатается автономно: {self.current_print_display or file_name}")
+                    self._post("progress", ("Печать автономно: телеметрия недоступна", 0.0))
                     self._post(
                         "log",
-                        "Старт печати не подтвердился: 5 минут после M24 нет M105/SD-прогресса. "
-                        "Если принтер физически не греется, вентилятор не включился и движения нет, "
-                        "это зависший старт; сделай power cycle перед новой попыткой. "
-                        "Если принтер всё-таки реально печатает, не выключай питание и наблюдай визуально.",
+                        "После M24 телеметрия долго недоступна. Little Hands сохраняет активный SD-маркер, "
+                        "не отправляет M524 и не разрешает сервисные движения: отсутствие M105/M27 не является "
+                        "командой остановки. Наблюдай печать физически; остановка возможна только явной кнопкой оператора.",
                     )
                 return
             if (
@@ -7968,17 +7973,14 @@ class K9ControlCenter:
                 and (target_temp is None or target_temp <= 0.0)
             ):
                 self.print_start_watchdog_alerted = True
-                try:
-                    recovery_out = sdtool.stop_sd_print(self._port(), self._baud())
-                    if recovery_out.strip():
-                        self._post("log", recovery_out.strip())
-                except Exception as exc:
-                    self._post("log", f"Автостоп после неподтверждённого старта не получил уверенный ответ: {exc}")
-                self._clear_print_session_state("Печать: старт не подтверждён", 0.0)
-                self._post("post-print-recovery", "failed-start")
+                self._save_print_state("printing", force=True)
+                self._post("active-sd", f"Печатается автономно: {self.current_print_display or self.current_print_file}")
+                self._post("progress", ("Печать автономно: телеметрия недоступна", 0.0))
                 self._post(
                     "log",
-                    "Старт печати не подтвердился: за 5 минут не было ни SD-прогресса, ни цели нагрева хотенда.",
+                    "После M24 нет SD-прогресса и свежей цели hotend, но Little Hands не останавливает автономную "
+                    "SD-печать из-за отсутствия телеметрии. Активный маркер и блокировка сервисных движений сохранены; "
+                    "M524 не отправлен.",
                 )
             elif "Not SD printing" in sd:
                 in_start_grace = (
@@ -7993,22 +7995,24 @@ class K9ControlCenter:
                     self._post("progress", ("Печать: простой", 0.0))
                 if self.print_state_restored_from_log:
                     if not self.print_was_active:
-                        self.current_print_file = "-"
-                        self.current_print_display = "-"
-                        self.current_print_start_ts = None
-                        self.current_print_progress_pct = None
-                        self.print_state_restored_from_log = False
-                        self.print_start_watchdog_alerted = False
-                        self.print_was_active = False
-                        self.print_completion_armed = False
-                        self.sd_progress_sample_count = 0
-                        self.first_sd_progress_ts = None
-                        self.last_sd_progress_ts = None
-                        self._clear_predicted_print_end(save=False)
-                        self._save_print_state("idle", force=True)
-                        self._post("active-sd", "Печатается: -")
-                        self._post("log", "Сбросил неподтверждённый старт из лога: на текущем принтере активной SD-печати нет.")
-                        self._schedule_sd_refresh_after_port(self._port(), force=True)
+                        self.print_start_watchdog_alerted = True
+                        self.bed_clear_before_go_start_required = True
+                        self._set_home_trust(
+                            HOME_TRUST_UNCERTAIN,
+                            "restored SD start has no telemetry; operator result required",
+                            log_change=not self.restored_not_printing_reported,
+                        )
+                        self._post("active-sd", f"Результат печати неизвестен: {self.current_print_display or self.current_print_file}")
+                        self._post("progress", ("Печать: результат после потери телеметрии неизвестен", 0.0))
+                        if not self.restored_not_printing_reported:
+                            self.restored_not_printing_reported = True
+                            self._post(
+                                "log",
+                                "После перезапуска M27 отвечает Not SD printing, но отсутствие прежней телеметрии "
+                                "не доказывает, что M24 не запустил печать. Активный маркер сохранён; Little Hands "
+                                "не отправляет M524 и ждёт явного решения оператора.",
+                            )
+                        self._save_print_state("printing", force=True)
                     else:
                         self.bed_clear_before_go_start_required = True
                         first_unconfirmed_report = not self.restored_not_printing_reported
@@ -8143,14 +8147,15 @@ class K9ControlCenter:
                     and (now - self.current_print_start_ts) >= PRINT_START_GRACE_SEC
                 ):
                     self.print_start_watchdog_alerted = True
-                    try:
-                        recovery_out = sdtool.stop_sd_print(self._port(), self._baud())
-                        if recovery_out.strip():
-                            self._post("log", recovery_out.strip())
-                    except Exception as exc:
-                        self._post("log", f"Автостоп после неподтверждённого старта не получил уверенный ответ: {exc}")
-                    self._clear_print_session_state("Печать: старт не подтверждён", 0.0)
-                    self._post("post-print-recovery", "failed-start")
+                    self._save_print_state("printing", force=True)
+                    self._post("active-sd", f"Печатается автономно: {self.current_print_display or self.current_print_file}")
+                    self._post("progress", ("Печать автономно: SD-статус не подтверждён", 0.0))
+                    self._post(
+                        "log",
+                        "M27 ответил Not SD printing без ранее подтверждённого SD-прогресса. Little Hands не считает "
+                        "этот одиночный ответ разрешением на M524 или сервисные движения: активный маркер сохранён "
+                        "до явного решения оператора.",
+                    )
             self._post("metrics", ("m27", sd))
             if (
                 self.pending_flash_finalize

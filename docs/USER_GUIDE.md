@@ -18,13 +18,15 @@ X moves the head left/right; Y moves the bed toward/away; Z moves the head up/do
 4. Wait for preheat: bed first if requested by the file, then hotend stages at 60/100/150/200°C and a final heat gate. Before hotend warmup, the app lifts the nozzle 10 mm and returns it before starting.
 5. USB can be silent for the first 180 seconds after start. Watch the printer; USB silence alone does not mean it stopped. Do not refresh the SD list during this window.
 
+After `M24`, missing `M105`/`M27` telemetry never authorizes an automatic stop. Little Hands keeps the SD print marked active, keeps service and return moves locked, and does not send `M524`. Stop only with the explicit operator Stop control. Confirm completion before clearing an uncertain active print.
+
 During preheat, **Stop becomes Cancel**. Cancellation turns heat off and undoes the known nozzle lift. Closing the window requests cancellation and waits for verified heater shutdown; manual axes stay locked until cleanup finishes.
 
 Cancelled or damaged uploads remain blocked until deletion or a clean upload. Do not start an unknown partial SD copy. Port changes are locked during USB operations; use Cancel to stop an upload.
 
 ## 3. Heat and filament
 
-- Public LH v5 firmware uses an external warm mat. The installed controlled bed requires LH v6 Bed10K Max70.
+- Public LH v5 firmware uses an external warm mat. The installed controlled bed currently uses LH v6 Bed10K Max70; the LH v7 BedWatch180 candidate extends the bed heating-watch window from 60 to 180 seconds so normal hotend-fan airflow does not false-trip `Heating failed` during a slow recovery. The 2°C rise check, thermal-runaway protection, 70°C firmware limit, and 60°C application cap remain enabled.
 - New local slices request 60°C through ;LH_EXPERIMENTAL_HOTBED_TARGET:60 and M140 S60. Keep Cura's ordinary bed temperature at 0°C; SD files must not contain M190. Re-slice and upload old files to change their target.
 - Manual bed presets are 35/40/50/55/60°C plus Hotbed off. Maximum target: 60°C. Before printing, the app waits up to 15 minutes and checks both actual temperature and the accepted setpoint. Failed preheat attempts to shut down both heaters and does not start the print.
 - Manual bed heating is blocked during SD printing; Hotbed off is available between USB operations.

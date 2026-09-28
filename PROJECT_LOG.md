@@ -1,5 +1,13 @@
 # littleHands Project Log
 
+## 2026-09-29 Never Stop SD Printing On Missing Telemetry
+
+- `VOLFTOP.GCO` completed the verified 60C bed and staged 226C hotend preheat, then received `M24` at 01:15:42. A fresh post-start report still showed T225.83/226 and B58.58/60, but subsequent `M105`/`M27` replies went silent.
+- The five-minute start watchdog incorrectly cleared the active-print marker; two related watchdog paths could also call `stop_sd_print()` / `M524` solely because progress or temperature telemetry was unavailable. Clearing the marker also exposed service/return controls while the physical printer state was unknown.
+- All post-`M24` telemetry-timeout watchdogs now preserve `current_print_file`, persist phase `printing`, keep service/return controls blocked, and explicitly do not send `M524`. A single `Not SD printing` without previously proven progress also keeps the active marker until the operator decides the result.
+- Unconfirmed post-`M24` markers are no longer discarded merely because five minutes elapsed, including during application restart. Explicit operator Stop remains the only normal path that sends the controlled `M108`/`M524` sequence.
+- Regression checks and all three operator guides now enforce this rule.
+
 ## 2026-09-28 Repeated USB Hub Reset During LORAPBH
 
 - LORAPBH.GCO started at 09:13:30 after acknowledged 60C bed and staged 226C hotend preheat. Fresh SD telemetry advanced to 41,484/1,447,565 bytes (2.9%) at 09:19:05; the last retained raw position sample was X40.78 Y58.01 Z0.20 at 09:18:24.
@@ -3338,3 +3346,22 @@ After each test print, append:
 - Honored the initial 180-second USB quiet window. Polling resumed at 20:24:44. Fresh SD replies then advanced from 27811/1464804 bytes at 20:25:36 to 29640 at 20:25:49 and 30599 at 20:25:57 (about 2.1%). At the latter sample the hotend was 226.19/226C and bed 58.56/60C. These advancing samples confirm the SD print started; the job has not yet completed.
 - The source archive is keyed by SHA-256 `53efb476810b9fb8b84abd43d1b4ea3cead0dbc82b20c59fc9ef72a51f706b4c`. Recovery samples retain separate reply times. Kernel inspection found no new CH340 disconnect/reset during this warmup and start. One successful start does not prove the earlier electrical/link fault is eliminated or establish full-print stability.
 - Later SD status replies were intermittent between 20:26 and 20:28; the app correctly showed unknown state and marked home uncertain. Replies recovered without intervention, advancing to 51904/1464804 bytes (3.5%) at 20:29:28 with T225.94/226C and B58.40/60C. Missing telemetry alone was not treated as a stopped or completed print.
+
+## 2026-09-29 LH v7 BedWatch180 Cold-Airflow Candidate
+
+- Repeated 60C bed starts produced explicit Marlin `Error:Heating failed, system stopped! Heater_ID: bed`. The retained telemetry shows the already-warm bed first cooling under airflow and then rising too slowly to satisfy the stock bed watch: for example `54.0C -> 53.9C -> 54.1C` with target `60C` and full reported bed output `B@:127` before the firmware halt.
+- This error is Marlin's heating-rise watchdog, not an application `M524` and not a stop command in `VOLFTOP.GCO`. The exact uploaded G-code contains no `M0`, `M1`, `M25`, `M524`, `M112`, `G28`, `M18`, `M84`, or `M190`; its 60C body differs from the earlier completed 35C copy only in the explicit hotbed marker and `M140` target.
+- Built `firmware/LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin` from the current LH v6 Bed10K Max70 source. SHA256: `1b5a8f6bc406073d11770736d66fb7ca5fd5cc952d7156d4b412aff3795def88`.
+- The targeted firmware change is `WATCH_BED_TEMP_PERIOD 60s -> 180s`. `WATCH_BED_TEMP_INCREASE` remains `2C`; thermal-runaway protection remains enabled; `BED_MAXTEMP 70`, `BED_OVERSHOOT 10`, and the application/slicer target cap `60C` are unchanged. No extra heater power or higher temperature limit was added.
+- Firmware identity is `LH v7 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedWatch180`; the reproducible delta is recorded in `docs/firmware/LH-v7-exp-bed-watch180.patch`, and Little Hands recognizes both the installed v6 and the v7 candidate in its firmware catalog.
+- The firmware compiled successfully with `pio run -e mks_robin_lite_maple`. It has not been flashed and no heater or axis command was sent in this change. A watched physical validation requires separate operator approval.
+
+## 2026-09-29 LH v7 Watched Cold-Airflow Validation
+
+- The operator confirmed the printer was idle and authorized flashing. `LH v7 ... BedWatch180` uploaded without transfer errors; after `M997`, `M115` confirmed the new identity and `M105` showed plausible cold temperatures with both targets and outputs at zero. EEPROM motion values remained `M92 X606 Y606 Z600 E1040` and conservative acceleration values remained intact.
+- With the bed clear and the physical saved start confirmed, the nozzle was moved to the bed center using acknowledged safe moves: a 10mm Z lift, X50 at F600, Y50 at F240, and the matching 10mm Z return. The operator visually confirmed the nozzle was physically centered. `M114` reported raw `X50 Y50 Z0`.
+- A deliberately harsh simultaneous test held the hotend at 60C so the automatic fan blew directly onto the bed while `M140 S60` heated from about 24.5C. The bed rose continuously to about 47.6C over eight minutes with `B@:127` and no `Heating failed`; this exceeded both the former 60s watch window and the new 180s window. The test was intentionally stopped because direct airflow from the beginning approached a thermal equilibrium below the 59C start gate and did not represent the application's bed-first workflow. Fresh telemetry confirmed both heaters off.
+- The realistic bed-first test began from a warm bed around 47C while the fan was still coasting. The bed initially fell to 46.7C, reproducing the old false-watch condition, then recovered beyond 49.5C inside the new 180s window without a firmware halt. It reached 59.1C before the hotend was set to 60C and the fan restarted.
+- During the airflow hold, the bed moved gradually from about 59.6C to 57.9C with target 60C and full bed output. After about 137 seconds of this hold Linux recorded a real CH341 USB detach/attach (`devnum 4 -> 5`, `/dev/ttyUSB0 -> /dev/ttyUSB1`). The operator saw no physical printer reset. The test harness conservatively sent heater-off commands after reconnect; fresh `M105` confirmed zero targets and outputs.
+- A subsequent `M114` still reported `X50 Y50 Z0` and unchanged step counts after the USB re-enumeration. This proves the Marlin motion session survived this event; the zero heater targets were caused by the explicit cleanup, not evidence of a controller reboot. This supports treating the event as a CH340/UART telemetry loss: an already-running SD print must remain autonomous, and Little Hands must not send `M524` or clear its active marker merely because telemetry disappeared.
+- The watched test physically validates the extended bed-watch behavior under both the initial airflow dip and sustained cold airflow. It does not constitute a completed SD print validation because the host-side heater-only test intentionally shut heat down after the USB event.

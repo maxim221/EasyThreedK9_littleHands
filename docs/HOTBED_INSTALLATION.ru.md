@@ -23,6 +23,15 @@
 - firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
 - source patch: `docs/firmware/LH-v6-exp-bed10k-max70.patch`
 
+Кандидат для холодного обдува:
+
+- `firmware/LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin`
+- SHA256: `1b5a8f6bc406073d11770736d66fb7ca5fd5cc952d7156d4b412aff3795def88`
+- firmware identity: `LH v7 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedWatch180`
+- source patch: `docs/firmware/LH-v7-exp-bed-watch180.patch`
+- единственное изменение теплового поведения: `WATCH_BED_TEMP_PERIOD 60 -> 180s`; требование роста `WATCH_BED_TEMP_INCREASE 2`, thermal-runaway, `BED_MAXTEMP 70` и программный максимум цели `60C` сохранены
+- наблюдаемый тест 2026-09-29 воспроизвёл начальную просадку тёплого стола под ещё работающим вентилятором: `47.2C -> 46.7C`, затем стол восстановился выше `49.5C` за новое окно `180s` и достиг `59.1C` без `Heating failed`. После включения вентилятора над центром стол удерживался примерно в диапазоне `59.6C -> 57.9C` до отдельного USB detach/attach; Marlin сохранил `M114 X50 Y50 Z0`, поэтому контроллер не перезапускался, а cleanup явно выключил оба нагревателя.
+
 Важные настройки:
 
 - `TEMP_SENSOR_BED 4` (`Generic 10K`)

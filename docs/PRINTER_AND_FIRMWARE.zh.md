@@ -188,6 +188,9 @@ G92 X0 Y0 Z0
 - 详细的俄文现场安装和调平记录在 `docs/HOTBED_INSTALLATION.ru.md`
 - `firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin` 是为新安装的受控热床构建的；热床接在主板 hotbed 输出，`~10k` NTC 传感器接在 `-TB+`
 - firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
+- `firmware/LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin` 是面向冷风环境的候选固件。它只把热床升温监视窗口从 `60s` 改为 `180s`；`WATCH_BED_TEMP_INCREASE 2`、热床 thermal-runaway 保护、`BED_MAXTEMP 70` 和应用的 `60C` 目标上限保持不变。
+- 现场依据是 Marlin 明确返回 `Heating failed ... Heater_ID: bed`：已温热的平台先被风扇冷却，随后在旧的 `60s` 窗口内未能上升 `2C`。这是固件 halt，不是应用发送了 `M524`，也不是 G-code 中的停止命令。
+- 2026-09-29 的有人监看测试复现了风冷造成的初始降温；随后热床在新的 `180s` 窗口内恢复超过 `2C`，并在没有 `Heating failed` 的情况下达到 `59C` 启动阈值。之后保温阶段发生 CH341 detach/attach，但 `M114 X50 Y50 Z0` 被保留，说明丢失的是 USB 遥测而不是 Marlin 运动会话；heater-only 测试程序随后明确关闭了两个加热器。
 - Marlin bed sensor: `TEMP_SENSOR_BED 4` (`Generic 10K`), `BED_MAXTEMP 70`, bed preheat presets `50C` / `60C`；由于 `BED_OVERSHOOT 10`，实际可设目标上限约为 `60C`
 - 刷写后的第一次冷态检查显示 `M105` 约为 `T:23.89` 和 `B:22.19`，且 `B@:0`
 - 第一次由操作者看守的 heat sanity check 使用 `M140 S30`；`B:` 从约 `22C` 平稳升到约 `28C`，之后发送 `M140 S0`，热床输出保持 `B@:0`，温度因惯性接近 `30C` 后开始下降
