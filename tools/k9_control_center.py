@@ -4681,8 +4681,8 @@ class K9ControlCenter:
                 "- головка находится в ближнем левом углу\n"
                 "- стол полностью сзади, от оператора\n"
                 "- сопло находится на сохранённой стартовой высоте\n\n"
-                "Ответ M114 = X0 Y0 Z0 показывает только координаты прошивки. Он не доказывает, что заедающая "
-                "X-каретка действительно переместилась. Если головка осталась справа или любая ось не дошла, выбери «Нет»."
+                "Ответ M114 = X0 Y0 Z0 показывает только координаты прошивки. Он не доказывает, что X-мотор "
+                "физически переместил головку. Если головка осталась справа или любая ось не дошла, выбери «Нет»."
             ),
             "en": (
                 "Did the printer PHYSICALLY reach the saved start?\n\n"
@@ -4690,8 +4690,8 @@ class K9ControlCenter:
                 "- the head is at the near-left corner\n"
                 "- the bed is fully back, away from the operator\n"
                 "- the nozzle is at the saved start height\n\n"
-                "M114 = X0 Y0 Z0 reports firmware coordinates only. It does not prove that a sticking X carriage "
-                "actually moved. Choose No if the head stayed right or any axis did not arrive."
+                "M114 = X0 Y0 Z0 reports firmware coordinates only. It does not prove that the X motor physically "
+                "moved the head. Choose No if the head stayed right or any axis did not arrive."
             ),
             "zh": (
                 "打印机是否已实际回到保存的起点？\n\n"
@@ -4699,7 +4699,7 @@ class K9ControlCenter:
                 "- 喷头位于近端左角\n"
                 "- 平台完全退到远离操作者的一侧\n"
                 "- 喷嘴位于保存的起始高度\n\n"
-                "M114 = X0 Y0 Z0 仅表示固件坐标，不能证明可能卡滞的 X 滑架确实移动。"
+                "M114 = X0 Y0 Z0 仅表示固件坐标，不能证明 X 电机确实带动喷头移动。"
                 "如果喷头仍在右侧或任一轴未到位，请选择“否”。"
             ),
         }.get(lang) or "Принтер физически вернулся в сохранённый старт?"
@@ -4727,13 +4727,13 @@ class K9ControlCenter:
         self._save_print_state("return-needs-visual-reset", force=True)
         warning = {
             "ru": (
-                "Старт оставлен недоверенным, следующая печать заблокирована. Не повторяй длинный возврат силой. "
-                "Осмотри X-каретку, освободи её короткими контролируемыми перемещениями, затем вручную выставь ближний "
+                "Старт оставлен недоверенным, следующая печать заблокирована. Не повторяй один длинный возврат. "
+                "Используй короткие контролируемые перемещения X на проверенных F600, затем вручную выставь ближний "
                 "левый старт и нажми «Запомнить старт»."
             ),
             "en": (
-                "Start remains untrusted and the next print is blocked. Do not force another long return. Inspect the "
-                "X carriage, free it with short watched jogs, then restore the near-left start manually and click Save start."
+                "Start remains untrusted and the next print is blocked. Do not repeat one long return. Use short watched "
+                "X moves at the validated F600, then restore the near-left start manually and click Save start."
             ),
             "zh": (
                 "起点仍不可信，下一次打印已被阻止。不要强行再次执行长距离返回。请检查 X 滑架，用短距离受监控点动使其恢复，"

@@ -45,6 +45,8 @@ RESTORE_TRAVEL_ACCEL = SOFT_TRAVEL_ACCEL
 SAFE_BED_FEEDRATE = 240
 SAFE_VERTICAL_FEEDRATE = 600
 SAFE_X_FEEDRATE = 900
+RECOVERY_X_FEEDRATE = 600
+RECOVERY_X_SEGMENT_MM = 50.0
 SAFE_HOME_CLEARANCE_Z = 10.0
 POSITION_RE = re.compile(r"^\s*X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)", re.MULTILINE)
 
@@ -55,6 +57,21 @@ class UploadCancelled(RuntimeError):
 
 def soft_service_travel_commands(commands: list[str]) -> list[str]:
     return ["M204 T%d" % SOFT_TRAVEL_ACCEL, *commands, "M400", "M204 T%d" % RESTORE_TRAVEL_ACCEL]
+
+
+def segmented_linear_targets(start: float, end: float, max_segment: float) -> list[float]:
+    """Return absolute targets whose individual travel never exceeds max_segment."""
+    if max_segment <= 0:
+        raise ValueError("max_segment must be positive")
+    current = float(start)
+    end = float(end)
+    targets: list[float] = []
+    while abs(end - current) > max_segment + 1e-9:
+        current += max_segment if end > current else -max_segment
+        targets.append(current)
+    if not targets or abs(targets[-1] - end) > 1e-9:
+        targets.append(end)
+    return targets
 
 
 def list_serial_ports() -> list[dict[str, str]]:
@@ -822,14 +839,17 @@ def goto_print_home_from_predicted_end(
     ]
     travel_z = min(100.0, max(end_z + 3.0, SAFE_HOME_CLEARANCE_Z))
     if travel_z > end_z:
-        commands.append(f"G1 Z{travel_z:.3f} F600")
-    commands.extend(
-        soft_service_travel_commands([
-            f"G1 X0 F{SAFE_X_FEEDRATE}",
-            f"G1 Y0 F{SAFE_BED_FEEDRATE}",
-            f"G1 Z0 F{SAFE_VERTICAL_FEEDRATE}",
-        ])
-    )
+        commands.extend([f"G1 Z{travel_z:.3f} F600", "M400"])
+    commands.append(f"M204 P{SOFT_TRAVEL_ACCEL} T{SOFT_TRAVEL_ACCEL}")
+    for target_x in segmented_linear_targets(end_x, 0.0, RECOVERY_X_SEGMENT_MM):
+        commands.extend([f"G1 X{target_x:.3f} F{RECOVERY_X_FEEDRATE}", "M400"])
+    commands.extend([
+        f"G1 Y0 F{SAFE_BED_FEEDRATE}",
+        "M400",
+        f"G1 Z0 F{SAFE_VERTICAL_FEEDRATE}",
+        "M400",
+        f"M204 P{RESTORE_TRAVEL_ACCEL} T{RESTORE_TRAVEL_ACCEL}",
+    ])
     commands.extend(["G92 X0 Y0 Z0", "M114"])
     return run_commands_wait_ok(
         port,

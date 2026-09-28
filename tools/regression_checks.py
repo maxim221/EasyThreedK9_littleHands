@@ -211,6 +211,14 @@ def main() -> int:
     )
     require("SAFE_BED_FEEDRATE = 240" in marlin, "Long bed service/recovery feedrate must remain F240.", failures)
     require("SAFE_X_FEEDRATE = 900" in marlin, "Head X service feedrate must remain F900.", failures)
+    require(
+        "RECOVERY_X_FEEDRATE = 600" in marlin
+        and "RECOVERY_X_SEGMENT_MM = 50.0" in marlin
+        and sdtool.segmented_linear_targets(95.0, 0.0, 50.0) == [45.0, 0.0]
+        and sdtool.segmented_linear_targets(-80.0, 0.0, 50.0) == [-30.0, 0.0],
+        "Known-pose X recovery must use validated F600 segments no longer than 50 mm.",
+        failures,
+    )
     require("SAFE_HOME_CLEARANCE_Z = 10.0" in marlin, "Recovery/preheat clearance must keep a 10 mm Z lift.", failures)
     require('"M204 T1000"' not in marlin, "k9_marlin_sd.py must not hard-code M204 T1000.", failures)
     require('"M204 T1000"' not in app, "k9_control_center.py must not hard-code M204 T1000.", failures)
@@ -301,6 +309,12 @@ def main() -> int:
         marlin,
         r"def goto_print_home_from_predicted_end\(.*?return run_commands_wait_ok",
         "Predicted/post-print recovery must wait for service moves to complete.",
+        failures,
+    )
+    require_regex(
+        marlin,
+        r"def goto_print_home_from_predicted_end\(.*?segmented_linear_targets\(end_x, 0\.0, RECOVERY_X_SEGMENT_MM\).*?G1 X\{target_x:\.3f\} F\{RECOVERY_X_FEEDRATE\}.*?M400",
+        "Predicted/post-print X return must use acknowledged segmented F600 moves.",
         failures,
     )
     require("send_line_wait_ok" in marlin, "Start-from-home serial service moves must wait for ok.", failures)
