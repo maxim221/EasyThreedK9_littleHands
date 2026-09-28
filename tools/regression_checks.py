@@ -625,8 +625,10 @@ def main() -> int:
     )
     require(
         "restored print is no longer active; completion is not proven" in app
-        and "это не доказывает штатный финиш" in app,
-        "A restored active-print marker plus Not SD printing must not be treated as proven completion.",
+        and "это не доказывает штатный финиш" in app
+        and 'self._post("post-print-finish-confirmation", None)' in app
+        and 'reason = "completion-unconfirmed"' in app,
+        "A restored active-print marker plus Not SD printing must open explicit finish confirmation without treating it as proven completion.",
         failures,
     )
     require(

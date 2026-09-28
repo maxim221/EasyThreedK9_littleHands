@@ -3797,6 +3797,10 @@ class K9ControlCenter:
                 self._require_power_cycle_before_next_sd_start(reason, save=True)
                 self.log(self._post_print_recovery_text(reason))
                 self._show_post_print_recovery_window(reason)
+            elif kind == "post-print-finish-confirmation":
+                reason = "completion-unconfirmed"
+                self.log(self._post_print_recovery_text(reason))
+                self._show_post_print_recovery_window(reason)
             elif kind == "post-print-recovery-clear":
                 self.post_print_recovery_required = False
                 self._close_post_print_window()
@@ -4541,7 +4545,33 @@ class K9ControlCenter:
 
     def _post_print_recovery_text(self, reason: str = "completion") -> str:
         lang = self.lang_var.get().strip() or "ru"
-        if reason in {"failed-start", "blocked-start"}:
+        if reason == "completion-unconfirmed":
+            z_text = f"{self.predicted_print_end_z:.2f}" if self.predicted_print_end_z is not None else "?"
+            texts = {
+                "ru": (
+                    "После восстановления связи принтер ответил «Not SD printing». Это означает только, что SD-печать "
+                    "сейчас не идёт, но не доказывает штатный финиш.\n\n"
+                    f"В G-code сохранена ожидаемая конечная поза: X95 Y95 Z{z_text}.\n\n"
+                    "Если печать полностью завершилась, модель снята и оси после финиша не двигали, нажми "
+                    "«Подтвердить финиш». После этого станет доступен защищённый возврат «К сохранённому старту».\n\n"
+                    "Если деталь недопечатана, эту конечную позу использовать нельзя: выставь старт вручную."
+                ),
+                "en": (
+                    "After communication was restored, the printer replied 'Not SD printing'. This only means that "
+                    "SD printing is not active now; it does not prove a normal finish.\n\n"
+                    f"The G-code has a saved expected final pose: X95 Y95 Z{z_text}.\n\n"
+                    "If the print fully finished, the part was removed, and the axes were not moved afterwards, click "
+                    "Confirm finish. Guarded Go to saved start recovery will then be available.\n\n"
+                    "If the part is unfinished, do not use this final pose; restore start manually."
+                ),
+                "zh": (
+                    "恢复通信后，打印机回复“Not SD printing”。这只表示当前没有进行 SD 打印，不能证明打印已正常完成。\n\n"
+                    f"G-code 中保存的预计结束位置为：X95 Y95 Z{z_text}。\n\n"
+                    "如果打印已完整结束、模型已取下且结束后各轴未被移动，请点击“确认完成”。之后可使用受保护的“回到保存起点”。\n\n"
+                    "如果模型未打印完成，则不能使用该结束位置；请手动恢复起点。"
+                ),
+            }
+        elif reason in {"failed-start", "blocked-start"}:
             texts = {
                 "ru": (
                     "Старт не подтверждён. Если принтер печатает, греется или двигается, "
@@ -4704,6 +4734,12 @@ class K9ControlCenter:
                 "en": "Print Start Check",
                 "zh": "打印启动检查",
             }.get(self.lang_var.get().strip() or "ru", "Проверка старта печати")
+        elif reason == "completion-unconfirmed":
+            title = {
+                "ru": "Подтвердите результат печати",
+                "en": "Confirm Print Result",
+                "zh": "确认打印结果",
+            }.get(self.lang_var.get().strip() or "ru", "Подтвердите результат печати")
         else:
             title = {
                 "ru": "Перед следующей печатью",
@@ -7917,6 +7953,8 @@ class K9ControlCenter:
                                 "Если файл допечатался полностью, используй 'Подтвердить финиш'. "
                                 "Если деталь недопечатана, конечную predicted-позу использовать нельзя: убери деталь и выставь старт вручную.",
                             )
+                            if self._has_predicted_print_end_recovery_model():
+                                self._post("post-print-finish-confirmation", None)
                         self._save_print_state("printing", force=True)
                     return
                 if self.print_was_active and self.print_completion_armed:
