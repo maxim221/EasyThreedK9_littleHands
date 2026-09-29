@@ -189,6 +189,7 @@ G92 X0 Y0 Z0
 - `firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin` 是为新安装的受控热床构建的；热床接在主板 hotbed 输出，`~10k` NTC 传感器接在 `-TB+`
 - firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
 - `firmware/LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin` 是面向冷风环境的候选固件。它只把热床升温监视窗口从 `60s` 改为 `180s`；`WATCH_BED_TEMP_INCREASE 2`、热床 thermal-runaway 保护、`BED_MAXTEMP 70` 和应用的 `60C` 目标上限保持不变。
+- `firmware/LH-v8-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-mksLite.bin` 保留 v7 的升温监视，并把保持保护从 `2C/20s` 改为 `3C/60s`。之后的中心气流测试表明，即使 `B@:127` 满功率，热床仍降到 `55.65C`，因此 v8 不能证明可维持 60C，也不得继续放宽保护。
 - 现场依据是 Marlin 明确返回 `Heating failed ... Heater_ID: bed`：已温热的平台先被风扇冷却，随后在旧的 `60s` 窗口内未能上升 `2C`。这是固件 halt，不是应用发送了 `M524`，也不是 G-code 中的停止命令。
 - 2026-09-29 的有人监看测试复现了风冷造成的初始降温；随后热床在新的 `180s` 窗口内恢复超过 `2C`，并在没有 `Heating failed` 的情况下达到 `59C` 启动阈值。之后保温阶段发生 CH341 detach/attach，但 `M114 X50 Y50 Z0` 被保留，说明丢失的是 USB 遥测而不是 Marlin 运动会话；heater-only 测试程序随后明确关闭了两个加热器。
 - Marlin bed sensor: `TEMP_SENSOR_BED 4` (`Generic 10K`), `BED_MAXTEMP 70`, bed preheat presets `50C` / `60C`；由于 `BED_OVERSHOOT 10`，实际可设目标上限约为 `60C`
@@ -197,7 +198,7 @@ G92 X0 Y0 Z0
 - 操作者在平台中心附近的独立 surface sensor 显示约 `24C -> 33C -> 31C`，因此在这套首次安装中，真实表面温度可能比 Marlin `B:` 高几度
 - 第二次由操作者看守的 heat sanity check 使用 `M140 S35`；`B:` 从约 `24C` 平稳升到 `34.57C`，之后发送 `M140 S0`，热床输出保持 `B@:0`，Marlin `B:` 因惯性接近 `36C` 后开始下降；操作者的外部 surface sensor 最高约 `40C`，测试结束时约 `36C`
 - 安装 hotbed 后，在 Little Hands 的五个调平点（`前左` / `中` / `前右` / `后左` / `后右`）使用 `0.05 mm` 塞尺在 `Z0` 调平；塞尺应有轻微且一致的阻力。`0.10 mm` 目前只作为上限检查，因为 `G92 X0 Y0 Z0` 后 Cura 首层本身已经约为 `Z0.20`
-- 普通 Cura bed temperature 保持 `0`；根据操作者 2026-09-09 的要求，新本地切片默认使用 `60C`，通过 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 和非阻塞 `M140 S60` 输出。这是软件默认值变更，并非新的物理验证。
+- 普通 Cura bed temperature 保持 `0`；新本地切片标记主机预热 `60C` 和独立的打印目标 `55C`，并使用非阻塞 `M140 S55`。Little Hands 在 `M24` 前确认已切换到 55C。
 - 对这类文件，Little Hands 会在 `M24` 前先把 hotbed 预热到目标，然后执行正常的分段 hotend 预热；不要在 SD 文件中加入 `M190`
 - 手动按钮提供 `35/40/50/55/60C` 和 `Hotbed off`；`60C` 是 Bed10K Max70 的目标上限。打印前热床最多等待 `15 分钟`，确认设定目标和实际 `B:`，失败时关闭热床。
 - 后续 validation heat tests 仍必须由操作者看守：先确认冷态 `B:` 合理，再使用有限目标，确认 `B:` 上升，然后用 `M140 S0` 关闭热床
@@ -211,7 +212,7 @@ G92 X0 Y0 Z0
 - profile: `codex - K9 warm mat cautious`
 - brim width: `14 mm`
 - PLA 温度：第一层 `225C`，之后 `224C`
-- Cura material bed temperature：`0C`；controlled-hotbed 文件只使用明确的 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 标记和非阻塞 `M140 S60`
+- Cura material bed temperature：`0C`；controlled-hotbed 文件使用 `;LH_EXPERIMENTAL_HOTBED_TARGET:60`、`;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` 和非阻塞 `M140 S55`
 - `mainFlasherTop.STL` 的支撑：supports everywhere、normal supports、启用 interface / roof、support angle `35`
 
 重要 G-code 规则：

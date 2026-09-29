@@ -130,7 +130,7 @@ Little Hands — это Linux-приложение для управления �
 - используй термостойкую поверхность печати
 - в проверенном сетапе использовался штатный перфорированный гибкий коврик на тёплой поверхности
 
-Для локальной controlled-hotbed ветки обычная Cura bed temperature остаётся `0C`; файл должен содержать явную метку `;LH_EXPERIMENTAL_HOTBED_TARGET:60` и non-blocking `M140 S60`, а Little Hands сам проверяет `B:` перед `M24`.
+Для controlled-hotbed ветки обычная Cura bed temperature остаётся `0C`; файл содержит отдельные метки предпрогрева `60C` и печати `55C` плюс non-blocking `M140 S55`, а Little Hands проверяет обе цели перед `M24`.
 
 Если свежий G-code с Desktop не содержит этой метки, Cura, скорее всего, слайсит старой машиной `lilHands`. Проверь `~/.config/cura/5.11/cura.cfg`: там должно быть `[cura] active_machine = lilHands_k9_warmmat`, затем сохрани G-code заново.
 
@@ -153,7 +153,7 @@ python3 tools/k9_control_center.py
    - brim: `14 mm`
    - настройка Cura: `Add machine prefix to job name` = `off`
    - поддержки для `mainFlasherTop.STL`: everywhere, interface / roof включены, support angle `35`
-   - start G-code содержит `;LH_EXPERIMENTAL_HOTBED_TARGET:60` и `M140 S60`
+   - start G-code содержит `;LH_EXPERIMENTAL_HOTBED_TARGET:60`, `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` и `M140 S55`
 
 Публичная зафиксированная копия Cura baseline лежит в [docs/cura/](docs/cura/).
 Ручное описание настроек для других версий слайсера: [docs/cura/SETTINGS.ru.md](docs/cura/SETTINGS.ru.md).

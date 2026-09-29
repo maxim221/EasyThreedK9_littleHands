@@ -155,7 +155,7 @@ There is also an experimental controlled-hotbed branch for a newly installed K9-
 - firmware: [`firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin`](firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin)
 - notes: [docs/HOTBED_INSTALLATION.ru.md](docs/HOTBED_INSTALLATION.ru.md)
 
-Keep Cura material bed temperature at `0C`; the local controlled-hotbed path uses an explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:60` marker plus non-blocking `M140 S60`, and Little Hands verifies `B:` before `M24`.
+Keep Cura material bed temperature at `0C`; the controlled-hotbed path marks `60C` host preheat and a separate `55C` print target, uses non-blocking `M140 S55`, and Little Hands verifies both stages before `M24`.
 
 If a fresh Desktop G-code is missing that marker, Cura is probably slicing with the older `lilHands` machine instead of `lilHands K9 warm mat`. Check `~/.config/cura/5.11/cura.cfg` for `[cura] active_machine = lilHands_k9_warmmat`, then save the G-code again.
 
@@ -180,7 +180,7 @@ python3 tools/k9_control_center.py
    - PLA: `225C` first layer, then `224C`
    - walls: `5`, Z seam: `Random`
    - supports for `mainFlasherTop.STL`: everywhere, interface / roof enabled, support angle `35`
-   - start G-code contains `;LH_EXPERIMENTAL_HOTBED_TARGET:60` and `M140 S60`
+   - start G-code contains `;LH_EXPERIMENTAL_HOTBED_TARGET:60`, `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55`, and `M140 S55`
 
 The tracked public Cura baseline is in [docs/cura/](docs/cura/).
 Manual settings for other slicer versions are in [docs/cura/SETTINGS.md](docs/cura/SETTINGS.md).

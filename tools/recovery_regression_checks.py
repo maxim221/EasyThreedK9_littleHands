@@ -210,6 +210,7 @@ class PreheatChecks(unittest.TestCase):
         self.app._hotbed_target_for_print = lambda *args: 60
         self.app._preheat_hotbed_before_sd_start = Mock()
         self.app._preheat_hotend_before_sd_start = Mock()
+        self.app._set_hotbed_print_target_before_sd_start = Mock()
         self.identity = {'device': '/dev/ttyUSB0', 'vid': '1A86', 'pid': '7523',
                          'location': '1-4.4.4', 'serial_number': ''}
         self.off = 'ok T:34 /0 B:47 /0 @:0 B@:0\n'

@@ -197,6 +197,7 @@ G92 X0 Y0 Z0
 - `firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin` собрана для нового стола, подключённого к board hotbed output, с `~10k` NTC-датчиком на входе `-TB+`
 - firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
 - `firmware/LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin` — кандидат для холодного обдува. Он меняет только окно контроля роста температуры стола с `60s` на `180s`; `WATCH_BED_TEMP_INCREASE 2`, thermal-runaway стола, `BED_MAXTEMP 70` и программный предел цели `60C` остаются без изменений.
+- `firmware/LH-v8-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-mksLite.bin` сохраняет watch v7 и меняет защиту удержания с `2C/20s` на `3C/60s`. Более поздний тест с обдувом центра показал падение до `55.65C` даже при полном `B@:127`, поэтому v8 не доказывает возможность удерживать 60C, а расширять защиту дальше нельзя.
 - основание — явные ответы Marlin `Heating failed ... Heater_ID: bed`: уже тёплый стол сначала остывал под обдувом, затем не успевал прибавить `2C` за старое окно `60s`. Это firmware halt, а не отправленный приложением `M524` и не команда остановки в G-code.
 - наблюдаемый тест 2026-09-29 воспроизвёл начальную просадку под обдувом, после чего стол прибавил больше `2C` за новое окно `180s` и достиг стартового порога `59C` без `Heating failed`. Более поздний CH341 detach/attach во время выдержки сохранил `M114 X50 Y50 Z0`: пропала USB-телеметрия, но Marlin motion session не сбросилась; затем heater-only harness явно выключил оба нагревателя.
 - Marlin bed sensor: `TEMP_SENSOR_BED 4` (`Generic 10K`), `BED_MAXTEMP 70`, bed preheat presets `50C` / `60C`; с `BED_OVERSHOOT 10` практический максимум цели получается около `60C`
@@ -205,7 +206,7 @@ G92 X0 Y0 Z0
 - независимый surface sensor оператора рядом с центром стола показал примерно `24C -> 33C -> 31C`, значит реальная поверхность в этой первой сборке может быть на несколько градусов горячее, чем Marlin `B:`
 - второй operator-watched heat sanity check использовал `M140 S35`; `B:` плавно вырос примерно с `24C` до `34.57C`, затем после `M140 S0` выход стола оставался `B@:0`, а Marlin `B:` по инерции дошёл почти до `36C` и начал снижаться; внешний surface sensor оператора показал максимум около `40C` и около `36C` в конце теста
 - после установки hotbed выравнивай стол щупом `0.05 mm` во всех пяти точках Little Hands (`ПЛ` / `Ц` / `ПП` / `ЗЛ` / `ЗП`) при `Z0`: щуп должен идти с лёгким одинаковым цеплянием; `0.10 mm` сейчас только верхняя sanity-проверка, потому что Cura уже печатает первый слой около `Z0.20` после `G92 X0 Y0 Z0`
-- обычный Cura bed temperature остаётся `0`; по запросу оператора от 2026-09-09 новые локальные срезы используют `60C` через `;LH_EXPERIMENTAL_HOTBED_TARGET:60` и non-blocking `M140 S60`. Это изменение настройки, а не новый физический тест.
+- обычный Cura bed temperature остаётся `0`; новые локальные срезы отмечают host preheat `60C` и отдельную print target `55C`, затем используют non-blocking `M140 S55`. Little Hands подтверждает переход на 55C непосредственно перед `M24`.
 - Little Hands для такого файла сам прогревает hotbed до цели перед `M24`, затем выполняет обычный staged hotend preheat; `M190` в SD-файлы не добавлять
 - ручные кнопки `35/40/50/55/60C` и `Hotbed off` задают прогрев и выключение; `60C` — предел цели для Bed10K Max70. Приложение ждёт стол до `15 минут`, проверяет заданную цель и фактический `B:`, выключает стол при ошибке.
 - дальнейшие validation heat tests всё ещё должны идти под наблюдением оператора: сначала убедиться, что холодный `B:` выглядит правдоподобно, затем дать ограниченную цель, проверить рост `B:` и выключить стол через `M140 S0`
@@ -219,7 +220,7 @@ G92 X0 Y0 Z0
 - профиль: `codex - K9 warm mat cautious`
 - brim: `14 mm`
 - температура PLA: `225C` первый слой, затем `224C`
-- Cura material bed temperature: `0C`; controlled-hotbed файлы используют только явную метку `;LH_EXPERIMENTAL_HOTBED_TARGET:60` плюс non-blocking `M140 S60`
+- Cura material bed temperature: `0C`; controlled-hotbed файлы используют `;LH_EXPERIMENTAL_HOTBED_TARGET:60`, `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` и non-blocking `M140 S55`
 - поддержки для `mainFlasherTop.STL`: `support everywhere`, normal supports, interface / roof включены, support angle `35`
 
 Важные правила для G-code:

@@ -1,0 +1,14 @@
+diff --git a/Marlin/Configuration.h b/Marlin/Configuration.h
+--- a/Marlin/Configuration.h
++++ b/Marlin/Configuration.h
+@@
+-#define LH_FIRMWARE_LABEL "LH v7 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedWatch180"
++#define LH_FIRMWARE_LABEL "LH v8 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedGuard3C60s"
+diff --git a/Marlin/Configuration_adv.h b/Marlin/Configuration_adv.h
+--- a/Marlin/Configuration_adv.h
++++ b/Marlin/Configuration_adv.h
+@@
+-  #define THERMAL_PROTECTION_BED_PERIOD        20 // Seconds
+-  #define THERMAL_PROTECTION_BED_HYSTERESIS     2 // Degrees Celsius
++  #define THERMAL_PROTECTION_BED_PERIOD        60 // Seconds. Allow the validated K9 airflow dip without disabling protection.
++  #define THERMAL_PROTECTION_BED_HYSTERESIS     3 // Degrees Celsius. The controlled bed holds about 58C at a 60C target under airflow.

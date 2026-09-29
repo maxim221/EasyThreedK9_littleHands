@@ -21,13 +21,14 @@ G92 X0 Y0 Z0
 G1 Z10.0 F600
 G92 E0
 ;LH_EXPERIMENTAL_HOTBED_TARGET:60
-M140 S60 ;Experimental controlled hotbed target; Little Hands preheats before M24
+;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55
+M140 S55 ;Controlled hotbed print target; Little Hands preheats to 60C before M24
 M82 ;absolute extrusion mode
 M83 ;relative extrusion mode
 G1 F1500 E-6.5
 ;LAYER_COUNT:143
 ;LAYER:0
-M107
+; LH: removed slicer fan command 'M107' because K9 has one firmware-managed hotend fan
 M204 T120
 G0 F1320 X30.321 Y23.093 Z0.2
 M204 P150

@@ -197,6 +197,7 @@ Experimental controlled-hotbed branch:
 - `firmware/LH-v6-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-mksLite.bin` was built for the newly installed bed connected to the board hotbed output with a `~10k` NTC sensor on `-TB+`
 - firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
 - `firmware/LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin` is the cold-airflow candidate. It changes only the bed heating-watch window from `60s` to `180s`; `WATCH_BED_TEMP_INCREASE 2`, bed thermal-runaway protection, `BED_MAXTEMP 70`, and the application `60C` target cap remain unchanged.
+- `firmware/LH-v8-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-mksLite.bin` retains the v7 heating watch and changes the active bed hold guard from `2C/20s` to `3C/60s`. A later center-airflow test showed the bed falling to `55.65C` even at full `B@:127`, so v8 is not evidence that 60C can be maintained and its guard must not be widened further.
 - the field reason is explicit Marlin `Heating failed ... Heater_ID: bed` after an already-warm bed initially cooled under fan airflow and then rose by less than `2C` during the old `60s` watch window. This is firmware halt behavior, not an application `M524` and not a G-code stop command.
 - watched validation on 2026-09-29 reproduced the initial airflow dip and then recovered by more than `2C` inside the new `180s` window, reaching the `59C` start gate without `Heating failed`. A later CH341 detach/attach during the airflow hold preserved `M114 X50 Y50 Z0`, confirming that this event reset USB telemetry rather than the Marlin motion session; the heater-only harness then explicitly shut both heaters down.
 - Marlin bed sensor: `TEMP_SENSOR_BED 4` (`Generic 10K`), `BED_MAXTEMP 70`, bed preheat presets `50C` / `60C`; with `BED_OVERSHOOT 10`, the practical maximum target is about `60C`
@@ -205,7 +206,7 @@ Experimental controlled-hotbed branch:
 - the operator's independent surface sensor near the bed center read about `24C -> 33C -> 31C`, so the real surface can be a few degrees hotter than Marlin `B:` during this first setup
 - second operator-watched heat sanity check used `M140 S35`; `B:` rose smoothly from about `24C` to `34.57C`, then after `M140 S0` the bed output stayed `B@:0` while Marlin `B:` peaked near `36C` and began cooling; the operator's external surface sensor peaked around `40C` and was around `36C` at the end of the test
 - after the hotbed install, level the bed at all five Little Hands points (`FL` / `C` / `FR` / `BL` / `BR`) with a `0.05 mm` feeler at `Z0`; it should have light, even drag. Treat `0.10 mm` only as an upper sanity check for now, because Cura already prints the first layer around `Z0.20` after `G92 X0 Y0 Z0`
-- keep ordinary Cura bed temperature at `0`; at the operator's request on 2026-09-09, new local controlled-hotbed slices default to `60C` using `;LH_EXPERIMENTAL_HOTBED_TARGET:60` and non-blocking `M140 S60`. This is a software-default change, not a new physical validation.
+- keep ordinary Cura bed temperature at `0`; new local slices mark `60C` host preheat and a separate `55C` print target, then use non-blocking `M140 S55`. Little Hands verifies the 55C handoff immediately before `M24`.
 - for such files, Little Hands preheats the hotbed to the target before `M24`, then runs the normal staged hotend preheat; do not add `M190` to SD files
 - manual `35/40/50/55/60C` buttons and `Hotbed off` support watched warmup and shutdown; `60C` is the target cap for Bed10K Max70. Host bed preheat waits up to `15 minutes`, verifies the requested target and actual `B:`, and turns the bed off on failure.
 - further validation heat tests should remain operator-watched: confirm plausible cold `B:` first, use a bounded target, verify `B:` rises, and turn the bed off with `M140 S0`
@@ -219,7 +220,7 @@ For the current validated public baseline:
 - profile: `codex - K9 warm mat cautious`
 - brim width: `14 mm`
 - PLA temperature: `225C` first layer, `224C` after that
-- Cura material bed temperature: `0C`; controlled-hotbed files use only the explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:60` marker plus non-blocking `M140 S60`
+- Cura material bed temperature: `0C`; controlled-hotbed files use `;LH_EXPERIMENTAL_HOTBED_TARGET:60`, `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55`, and non-blocking `M140 S55`
 - support mode for `mainFlasherTop.STL`: supports everywhere, normal supports, interface / roof enabled, support angle `35`
 
 Important G-code rules:

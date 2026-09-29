@@ -32,7 +32,9 @@ K9_MAX_EMITTED_TRAVEL_ACCEL = 200.0
 # Bed10K Max70: BED_MAXTEMP 70 minus BED_OVERSHOOT 10.
 K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 60.0
 K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET = 60.0
+K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET = 55.0
 HOTBED_EXPERIMENTAL_MARKER = ";LH_EXPERIMENTAL_HOTBED_TARGET:"
+HOTBED_EXPERIMENTAL_PRINT_MARKER = ";LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:"
 
 
 def is_unvalidated_modulebot_stl(path: Path) -> bool:
@@ -116,11 +118,13 @@ def cura_engine_prefix(mount_point: Path) -> list[str]:
 
 def k9_profile_settings(brim_width: float, hotbed_target: float = 0.0) -> tuple[dict[str, str], dict[str, str]]:
     hotbed_target = max(0.0, min(float(hotbed_target), K9_MAX_EXPERIMENTAL_HOTBED_TARGET))
+    hotbed_print_target = min(hotbed_target, K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET)
     hotbed_start = ""
     if hotbed_target > 0.0:
         hotbed_start = (
             f"\n{HOTBED_EXPERIMENTAL_MARKER}{hotbed_target:g}"
-            f"\nM140 S{hotbed_target:g} ;Experimental controlled hotbed target; Little Hands preheats before M24"
+            f"\n{HOTBED_EXPERIMENTAL_PRINT_MARKER}{hotbed_print_target:g}"
+            f"\nM140 S{hotbed_print_target:g} ;Controlled hotbed print target; Little Hands preheats to {hotbed_target:g}C before M24"
         )
     start_gcode = """; Little Hands manual-zero workflow for EasyThreed K9 / K9 Plus
 ; Expected fixed start pose on this printer:
@@ -479,11 +483,14 @@ def patch_header_and_footer(
         lines.insert(11, f";LH_M204_CAPPED:{capped_m204}")
     if hotbed_target > 0.0 and not any(line.startswith(HOTBED_EXPERIMENTAL_MARKER) for line in lines[:30]):
         lines.insert(12, f"{HOTBED_EXPERIMENTAL_MARKER}{hotbed_target:g}")
+    if hotbed_target > 0.0 and not any(line.startswith(HOTBED_EXPERIMENTAL_PRINT_MARKER) for line in lines[:30]):
+        lines.insert(13, f"{HOTBED_EXPERIMENTAL_PRINT_MARKER}{min(hotbed_target, K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET):g}")
 
     footer = (
         ';SETTING_3 {"global_quality": "[values]\\n'
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
         f'experimental_hotbed_target = {hotbed_target:g}\\n'
+        f'experimental_hotbed_print_target = {min(hotbed_target, K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET):g}\\n'
         'layer_height = 0.16\\nlayer_height_0 = 0.2\\n'
         'speed_print = 11\\nspeed_wall = 8\\nspeed_topbottom = 8\\n'
         'speed_infill = 11\\nspeed_travel = 25\\nspeed_layer_0 = 6\\n'

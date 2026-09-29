@@ -26,13 +26,13 @@ Cancelled or damaged uploads remain blocked until deletion or a clean upload. Do
 
 ## 3. Heat and filament
 
-- Public LH v5 firmware uses an external warm mat. The installed controlled bed currently uses LH v6 Bed10K Max70; the LH v7 BedWatch180 candidate extends the bed heating-watch window from 60 to 180 seconds so normal hotend-fan airflow does not false-trip `Heating failed` during a slow recovery. The 2°C rise check, thermal-runaway protection, 70°C firmware limit, and 60°C application cap remain enabled.
-- New local slices request 60°C through ;LH_EXPERIMENTAL_HOTBED_TARGET:60 and M140 S60. Keep Cura's ordinary bed temperature at 0°C; SD files must not contain M190. Re-slice and upload old files to change their target.
+- Public LH v5 firmware uses an external warm mat. The installed controlled bed uses experimental LH v8 Bed10K Max70 BedGuard3C60s: the initial bed heating watch is 180 seconds and the active hold guard is 3°C/60s. Thermal-runaway protection, the 2°C initial rise check, the 70°C firmware limit, and the 60°C application cap remain enabled.
+- New local slices use `;LH_EXPERIMENTAL_HOTBED_TARGET:60` for host preheat and `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` plus `M140 S55` for printing. Little Hands reaches 59°C before hotend preheat, then verifies the reduced 55°C target immediately before `M24`. Keep Cura's ordinary bed temperature at 0°C; SD files must not contain M190.
 - Manual bed presets are 35/40/50/55/60°C plus Hotbed off. Maximum target: 60°C. Before printing, the app waits up to 15 minutes and checks both actual temperature and the accepted setpoint. Failed preheat attempts to shut down both heaters and does not start the print.
 - Manual bed heating is blocked during SD printing; Hotbed off is available between USB operations.
 - Hotend 200C warms the nozzle for manual loading. Wait for a confirmed 180°C, choose an E step, then click Feed or Retract. These moves are blocked during printing. Hotend off stops nozzle heating.
 
-The operator selected 60°C; a setting change does not replace physical validation. Before a new test, check plausible cold B: and B@:0, watch warmup, and finish with Hotbed off. Cut power for smell, hot connectors, unstable readings, or heating that will not turn off. Faint clicks during otherwise normal early hotend warmup have been observed; those alone do not call for firmware changes.
+The operator selected 60°C preheat / 55°C print support after a watched center-airflow test showed that the bed falls to about 55.7°C even at full output. This handoff reduces simultaneous bed, hotend, and motor load; it does not claim that the bed can physically hold 60°C under airflow. Cut power for smell, hot connectors, unstable readings, or heating that will not turn off.
 
 ## 4. Finish, Stop and return
 

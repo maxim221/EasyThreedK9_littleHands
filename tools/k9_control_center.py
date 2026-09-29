@@ -160,6 +160,7 @@ HOTBED_MANUAL_TARGETS_C = (35.0, 40.0, 50.0, 55.0, 60.0)
 # Bed10K Max70: BED_MAXTEMP 70 minus BED_OVERSHOOT 10.
 HOTBED_MAX_MANUAL_TARGET_C = 60.0
 HOTBED_EXPERIMENTAL_MARKER = ";LH_EXPERIMENTAL_HOTBED_TARGET:"
+HOTBED_EXPERIMENTAL_PRINT_MARKER = ";LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:"
 MARLIN_VER_RE = re.compile(r"FIRMWARE_NAME:Marlin\s+([0-9.]+)")
 LH_M115_RE = re.compile(r"FIRMWARE_NAME:(LH[^\r\n]*?)(?:\s+\(|\s+SOURCE_CODE_URL:|$)")
 M92_RE = re.compile(r"M92\s+X([-\d.]+)\s+Y([-\d.]+)\s+Z([-\d.]+)\s+E([-\d.]+)")
@@ -287,6 +288,12 @@ LH_FIRMWARE_CATALOG = {
     "LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin": {
         "lh_version": "LH v7 EXP",
         "label": "LH v7 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedWatch180",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 600.0, 1040.0),
+    },
+    "LH-v8-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-mksLite.bin": {
+        "lh_version": "LH v8 EXP",
+        "label": "LH v8 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedGuard3C60s",
         "marlin": "2.1.2.5",
         "m92": (606.0, 606.0, 600.0, 1040.0),
     },
@@ -974,6 +981,7 @@ class K9ControlCenter:
             "bounds": bounds,
             "hotend_target": info.get("hotend_target"),
             "experimental_hotbed_target": info.get("experimental_hotbed_target"),
+            "experimental_hotbed_print_target": info.get("experimental_hotbed_print_target"),
             "has_blocking_m109": bool(info.get("has_blocking_m109")),
             "cura_estimate_s": info.get("cura_estimate_s"),
         }
@@ -1175,6 +1183,56 @@ class K9ControlCenter:
             raise ValueError(f"Hotbed: допустимая цель 0–{HOTBED_MAX_MANUAL_TARGET_C:g}C.")
         return target
 
+    def _hotbed_print_target_for_print(self, sd_path: str, display: str, source: Path | None = None) -> float:
+        profile = self._profile_for_print(sd_path, display, source)
+        if not isinstance(profile, dict):
+            return 0.0
+        preheat_target = self._hotbed_target_for_print(sd_path, display, source)
+        target = profile.get("experimental_hotbed_print_target")
+        # Legacy files use their single marked target for both preheat and printing.
+        if target is None:
+            return preheat_target
+        if not isinstance(target, (int, float)):
+            raise ValueError("Некорректная цель поддержания hotbed. Переслайсь и загрузи G-code заново.")
+        target = float(target)
+        if not math.isfinite(target) or target <= 0.0 or target > preheat_target:
+            raise ValueError("Цель hotbed во время печати должна быть положительной и не выше цели предпрогрева.")
+        return target
+
+    def _set_hotbed_print_target_before_sd_start(
+        self,
+        sd_path: str,
+        display: str,
+        source: Path | None = None,
+    ) -> None:
+        preheat_target = self._hotbed_target_for_print(sd_path, display, source)
+        print_target = self._hotbed_print_target_for_print(sd_path, display, source)
+        if preheat_target <= 0.0 or abs(print_target - preheat_target) <= 0.1:
+            return
+        self._check_preheat_cancelled()
+        self._post(
+            "log",
+            f"Hotbed прогрет до {preheat_target:.0f}C; перед M24 перевожу поддержание на "
+            f"{print_target:.0f}C, чтобы не держать стол на полном B@ одновременно с hotend и моторами.",
+        )
+        with sdtool.open_serial(self._port(), self._baud(), timeout=.25) as ser:
+            sdtool.sync_ascii(ser)
+            sdtool.send_line_wait_ok(ser, f"M140 S{print_target:.0f}", timeout_s=12.0)
+            reply = sdtool.send_line_wait_ok(ser, "M105", timeout_s=12.0)
+        self._post("metrics", ("m105", reply))
+        values = parse_m105_temperatures(reply)
+        self._post("temp", values)
+        _, _, _, bed_current, bed_target, _ = values
+        if bed_current is None or bed_target is None or abs(bed_target - print_target) > 0.5:
+            raise RuntimeError(
+                f"Hotbed не подтвердил цель поддержания {print_target:.0f}C перед M24. "
+                "Печать не запускаю; выполняю выключение обоих нагревателей."
+            )
+        self._post(
+            "log",
+            f"Hotbed print target подтверждён: {bed_current:.1f}/{bed_target:.0f}C. Теперь можно отправлять M24.",
+        )
+
     def _check_preheat_cancelled(self) -> None:
         event = getattr(self, "preheat_cancel_requested", None)
         if event is not None and event.is_set():
@@ -1212,6 +1270,8 @@ class K9ControlCenter:
             self._preheat_hotbed_before_sd_start(path, display, source)
             self._check_preheat_cancelled()
             self._preheat_hotend_before_sd_start(path, display, source)
+            self._check_preheat_cancelled()
+            self._set_hotbed_print_target_before_sd_start(path, display, source)
             # Atomically close the cancellation window before handing off to SD.
             with self.preheat_state_lock:
                 self._check_preheat_cancelled()
@@ -5051,6 +5111,9 @@ class K9ControlCenter:
             "experimental_hotbed_target": None,
             "experimental_hotbed_marker_line": None,
             "experimental_hotbed_markers": [],
+            "experimental_hotbed_print_target": None,
+            "experimental_hotbed_print_marker_line": None,
+            "experimental_hotbed_print_markers": [],
             "has_motor_disable": False,
             "motor_disable_line": None,
             "end_has_y95": False,
@@ -5134,6 +5197,15 @@ class K9ControlCenter:
                     info["experimental_hotbed_target"] = raw_target
                     info["experimental_hotbed_marker_line"] = line_number
                 info["experimental_hotbed_markers"].append(info["experimental_hotbed_target"])
+            if stripped.upper().startswith(HOTBED_EXPERIMENTAL_PRINT_MARKER):
+                raw_target = stripped.split(":", 1)[1].strip()
+                try:
+                    info["experimental_hotbed_print_target"] = float(raw_target)
+                    info["experimental_hotbed_print_marker_line"] = line_number
+                except ValueError:
+                    info["experimental_hotbed_print_target"] = raw_target
+                    info["experimental_hotbed_print_marker_line"] = line_number
+                info["experimental_hotbed_print_markers"].append(info["experimental_hotbed_print_target"])
 
             command = stripped.split(";", 1)[0].strip()
             if not command:
@@ -5338,6 +5410,21 @@ class K9ControlCenter:
             for value in info["experimental_hotbed_markers"]
         ):
             errors.append(f"Метка hotbed должна задавать одну цель 1–{HOTBED_MAX_MANUAL_TARGET_C:g}C.")
+        print_marker_target = info.get("experimental_hotbed_print_target")
+        if info["experimental_hotbed_print_markers"] and not all(
+            isinstance(value, (int, float)) and math.isfinite(value)
+            and 0 < value <= HOTBED_MAX_MANUAL_TARGET_C and value == print_marker_target
+            for value in info["experimental_hotbed_print_markers"]
+        ):
+            errors.append(f"Метка hotbed print target должна задавать одну цель 1–{HOTBED_MAX_MANUAL_TARGET_C:g}C.")
+        if info["experimental_hotbed_print_markers"] and not info["experimental_hotbed_markers"]:
+            errors.append("Метка hotbed print target требует отдельную метку цели предпрогрева.")
+        if (
+            isinstance(marker_target, (int, float))
+            and isinstance(print_marker_target, (int, float))
+            and float(print_marker_target) > float(marker_target)
+        ):
+            errors.append("Цель hotbed во время печати не может быть выше цели предварительного прогрева.")
         if info.get("has_bed_wait"):
             errors.append(
                 "Найден блокирующий нагрев стола `M190`"
@@ -5347,28 +5434,38 @@ class K9ControlCenter:
             )
         elif info.get("has_bed_heat"):
             marker_target = info.get("experimental_hotbed_target")
+            print_marker_target = info.get("experimental_hotbed_print_target")
             bed_target = info.get("bed_target")
+            expected_file_target = print_marker_target if print_marker_target is not None else marker_target
             marked_experimental_hotbed = (
                 isinstance(marker_target, (int, float))
+                and isinstance(expected_file_target, (int, float))
                 and isinstance(bed_target, (int, float))
                 and 0 < float(marker_target) <= HOTBED_MAX_MANUAL_TARGET_C
+                and 0 < float(expected_file_target) <= float(marker_target)
                 and 0 < float(bed_target) <= HOTBED_MAX_MANUAL_TARGET_C
-                and abs(float(bed_target) - float(marker_target)) <= 0.1
-                and all(abs(value - float(marker_target)) <= 0.1 for value in info["bed_heat_targets"])
+                and abs(float(bed_target) - float(expected_file_target)) <= 0.1
+                and all(abs(value - float(expected_file_target)) <= 0.1 for value in info["bed_heat_targets"])
                 and bool(info.get("has_little_hands_start"))
             )
             if marked_experimental_hotbed:
+                print_text = (
+                    f", print target {float(expected_file_target):g}C"
+                    if abs(float(expected_file_target) - float(marker_target)) > 0.1
+                    else ""
+                )
                 warnings.append(
-                    f"Экспериментальный hotbed target {float(marker_target):g}C"
+                    f"Экспериментальный hotbed preheat {float(marker_target):g}C{print_text}"
                     + self._format_gcode_line(info.get("experimental_hotbed_marker_line"))
-                    + ": Little Hands прогреет стол перед M24, файл только повторно задаёт `M140` и выключает стол в конце."
+                    + ": Little Hands прогреет стол и подтвердит print target перед M24; файл повторяет `M140` и выключает стол в конце."
                 )
             else:
                 errors.append(
                     "Найден нагрев стола `M140/M190`"
                     + self._format_gcode_line(info.get("bed_heat_line"))
                     + ". Для текущего K9 положительный bed heat допустим только как явно помеченный "
-                    f"{HOTBED_EXPERIMENTAL_MARKER}<target> с целью не выше {HOTBED_MAX_MANUAL_TARGET_C:g}C."
+                    f"{HOTBED_EXPERIMENTAL_MARKER}<preheat> и, при отдельной цели печати, "
+                    f"{HOTBED_EXPERIMENTAL_PRINT_MARKER}<print>; обе цели не выше {HOTBED_MAX_MANUAL_TARGET_C:g}C."
                 )
         if info.get("has_motor_disable"):
             errors.append(

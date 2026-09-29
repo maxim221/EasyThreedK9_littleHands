@@ -8,7 +8,7 @@ This directory contains the current tracked Cura baseline for the validated Easy
 - Profile: `codex - K9 warm mat cautious`
 - Brim: `14 mm`
 - PLA temperature: `225C` first layer, `224C` after that
-- Cura material bed temperature: `0C`; the current controlled-hotbed slice path uses an explicit `;LH_EXPERIMENTAL_HOTBED_TARGET:60` marker plus non-blocking `M140 S60`
+- Cura material bed temperature: `0C`; controlled-hotbed files mark `60C` host preheat with `;LH_EXPERIMENTAL_HOTBED_TARGET:60`, then use `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` plus non-blocking `M140 S55` for printing
 - Part cooling: `off`; the single K9 fan is the firmware-managed hotend fan, not an independent part-cooling fan
 - Walls: `5`, with randomized Z seam to avoid concentrating the seam in one corner
 - Draft protection: use a physical wind shield around the printer rather than Cura Draft Shield
@@ -20,7 +20,7 @@ This directory contains the current tracked Cura baseline for the validated Easy
 The app button `Export Cura profile` exports the live local Cura containers to `exports/`, which is intentionally ignored by git. This checked-in copy is the current local controlled-hotbed reference; keep public-release notes clear that standard Cura bed temperature remains `0C`.
 The export also writes `CURA_PREFERENCES.txt` with the non-profile Cura preference that keeps the useless `CFFFP_` prefix disabled.
 
-The local hotbed default was raised to `60C` at the operator's request on 2026-09-09. The app and helper cap targets at `60C` for Bed10K Max70 and wait up to `15 minutes` for bed preheat. Existing G-code keeps its original target: re-slice and upload it again to use the new temperature. Change live Cura containers only while Cura is closed, then reopen it; restart Little Hands when the printer is idle to load the new controls.
+The local workflow preheats to `60C` and prints at `55C`. The app waits up to `15 minutes` for preheat, then explicitly verifies the 55C setpoint before `M24`; failure shuts heaters down and prevents printing. Existing G-code keeps its original policy, so re-slice and upload it again. Change live Cura containers only while Cura is closed.
 
 Save sliced G-code from Cura to the project's `gcode/` directory. The loose G-code files formerly in the repository root were moved there without changing their contents. Existing `exports/` helper output and `card_backups/` archives remain in place.
 

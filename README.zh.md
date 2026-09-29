@@ -117,7 +117,7 @@ Little Hands 使用的是 manual-zero 工作流：
 - 打印机仍然应该表现为“无加热床控制”
 - 已验证的工作温度大约为 `40–50C`
 
-对于本地 controlled-hotbed 分支，普通 Cura bed temperature 仍保持 `0C`；文件必须包含明确的 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 标记和非阻塞 `M140 S60`，Little Hands 会在 `M24` 前自行检查 `B:`。
+对于 controlled-hotbed 分支，普通 Cura bed temperature 保持 `0C`；文件包含独立的 `60C` 预热和 `55C` 打印标记以及非阻塞 `M140 S55`，Little Hands 会在 `M24` 前确认两个目标。
 
 如果新的 Desktop G-code 没有这个标记，Cura 很可能仍在使用旧的 `lilHands` 机器切片。请检查 `~/.config/cura/5.11/cura.cfg`：应为 `[cura] active_machine = lilHands_k9_warmmat`，然后重新保存 G-code。
 
@@ -140,7 +140,7 @@ python3 tools/k9_control_center.py
    - brim: `14 mm`
    - Cura 偏好设置：`Add machine prefix to job name` = `off`
    - `mainFlasherTop.STL` 支撑：everywhere，启用 interface / roof，support angle `35`
-   - start G-code 包含 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 和 `M140 S60`
+   - start G-code 包含 `;LH_EXPERIMENTAL_HOTBED_TARGET:60`、`;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` 和 `M140 S55`
 
 公开固定的 Cura 基线副本位于 [docs/cura/](docs/cura/)。
 其他切片器版本的手动设置说明：[docs/cura/SETTINGS.zh.md](docs/cura/SETTINGS.zh.md)。

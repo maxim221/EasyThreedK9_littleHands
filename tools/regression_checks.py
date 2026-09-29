@@ -55,27 +55,55 @@ def check_hotbed_workflow(failures: list[str]) -> None:
             app._profile_for_print = lambda *args: info
             require(app._hotbed_target_for_print("TEST.GCO", source.name, source) == target,
                     f"SD preheat must preserve the {target}C target.", failures)
+            expected_print_target = min(target, 55) if target > 0 else 0
+            require(app._hotbed_print_target_for_print("TEST.GCO", source.name, source) == expected_print_target,
+                    f"SD print target must be {expected_print_target}C after a {target}C preheat.", failures)
             require(settings["material_bed_temperature"] == extruder["material_bed_temperature"] == "0",
                     "Cura's ordinary bed heater must stay disabled.", failures)
             require("M190" not in gcode and "M140 S0" in gcode,
                     "Generated G-code must switch the bed off and never block on M190.", failures)
             if target == 60:
                 for invalid in (
-                    gcode.replace("TARGET:60", "TARGET:61").replace("M140 S60", "M140 S61"),
+                    gcode.replace("HOTBED_TARGET:60", "HOTBED_TARGET:61"),
                     gcode.replace(";LH_EXPERIMENTAL_HOTBED_TARGET:60", ""),
-                    gcode.replace("M140 S60", "M140 S55"),
-                    gcode.replace("M140 S60", "M190 S60"),
-                    gcode.replace("M140 S60", "M140 S70\nM140 S60"),
-                    gcode.replace("M140 S60", "M140 S60\nM140 S55\nM140 S60"),
-                    gcode.replace("M140 S60", "M190 R60\nM140 S60"),
-                    gcode.replace("M140 S60", "M190 S0\nM140 S60"),
-                    gcode.replace("M140 S60", "M190\nM140 S60"),
+                    gcode.replace(";LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55", ""),
+                    gcode.replace("HOTBED_PRINT_TARGET:55", "HOTBED_PRINT_TARGET:61"),
+                    gcode.replace("M140 S55", "M140 S60"),
+                    gcode.replace("M140 S55", "M190 S55"),
+                    gcode.replace("M140 S55", "M140 S70\nM140 S55"),
+                    gcode.replace("M140 S55", "M140 S55\nM140 S50"),
+                    gcode.replace("M140 S55", "M190 R55\nM140 S55"),
+                    gcode.replace("M140 S55", "M190 S0\nM140 S55"),
+                    gcode.replace("M140 S55", "M190\nM140 S55"),
                     gcode.replace("M109 S226", "M109 S226\nM104 S300"),
-                    gcode.replace("TARGET:60", "TARGET:nan\n;LH_EXPERIMENTAL_HOTBED_TARGET:60"),
+                    gcode.replace("HOTBED_TARGET:60", "HOTBED_TARGET:nan\n;LH_EXPERIMENTAL_HOTBED_TARGET:60"),
                 ):
                     source.write_text(invalid, encoding="utf-8")
                     errors, _, _ = app._gcode_validation_report(source)
                     require(bool(errors), "Unsafe or mismatched hotbed G-code must be rejected.", failures)
+
+    adaptive_profile = {
+        "experimental_hotbed_target": 60.0,
+        "experimental_hotbed_print_target": 55.0,
+    }
+    app._profile_for_print = lambda *args: adaptive_profile
+    app._check_preheat_cancelled = lambda: None
+    serial_context = Mock()
+    serial_context.__enter__ = Mock(return_value=Mock())
+    serial_context.__exit__ = Mock(return_value=False)
+    with patch.object(sdtool, "open_serial", return_value=serial_context), \
+            patch.object(sdtool, "sync_ascii"), \
+            patch.object(
+                sdtool,
+                "send_line_wait_ok",
+                side_effect=("ok", "ok T:226 /226 B:58 /55 @:20 B@:127"),
+            ) as serial:
+        app._set_hotbed_print_target_before_sd_start("TEST.GCO", "Test")
+        require(
+            [call.args[1] for call in serial.call_args_list] == ["M140 S55", "M105"],
+            "Adaptive hotbed handoff must set and verify 55C immediately before M24.",
+            failures,
+        )
 
     for target in appmod.HOTBED_MANUAL_TARGETS_C:
         reply = f"ok T:24 /0 B:24 /{target:g} @:0 B@:127"
@@ -148,7 +176,7 @@ def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
         require(appmod.parse_m105_temperatures(reply) == expected,
                 f"Temperature parsing must keep the newest sample and separate heater outputs: {reply!r}", failures)
 
-    for fail_stage in ("bed", "hotend", None):
+    for fail_stage in ("bed", "hotend", "print-target", None):
         app = object.__new__(appmod.K9ControlCenter)
         app._port = lambda: "test-port"
         app._baud = lambda: 115200
@@ -170,6 +198,7 @@ def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
 
         app._preheat_hotbed_before_sd_start = lambda *args: heat("bed")
         app._preheat_hotend_before_sd_start = lambda *args: heat("hotend")
+        app._set_hotbed_print_target_before_sd_start = lambda *args: heat("print-target")
         with patch.object(appmod.heater_shutdown, "port_identity", return_value=None), \
                 patch.object(appmod.heater_shutdown, "shutdown_heaters", return_value={"confirmed": True, "reply": ""}) as shutdown:
             try:
@@ -178,8 +207,14 @@ def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
                 require(fail_stage is not None, "Successful preheat must not fail.", failures)
             else:
                 require(fail_stage is None, "Preheat failure must reach the caller before M24.", failures)
-            require(order == (["bed"] if fail_stage == "bed" else ["bed", "hotend"]),
-                    "Every SD start must heat the bed before the hotend.", failures)
+            expected_order = {
+                "bed": ["bed"],
+                "hotend": ["bed", "hotend"],
+                "print-target": ["bed", "hotend", "print-target"],
+                None: ["bed", "hotend", "print-target"],
+            }[fail_stage]
+            require(order == expected_order,
+                    "Every SD start must heat bed then hotend and confirm the reduced bed print target.", failures)
             require(shutdown.call_count == (1 if fail_stage else 0),
                     "Failed preheat must verify shutdown before releasing the worker.", failures)
             if fail_stage:
@@ -203,6 +238,7 @@ def main() -> int:
     cura_settings = read("docs/cura/SETTINGS.md")
     firmware_watch_patch = read("docs/firmware/LH-v5-watch180.patch")
     firmware_bed_watch_patch = read("docs/firmware/LH-v7-exp-bed-watch180.patch")
+    firmware_bed_guard_patch = read("docs/firmware/LH-v8-exp-bed-guard3c60s.patch")
 
     require("SOFT_TRAVEL_ACCEL = 80" in marlin, "K9 service travel acceleration must remain M204 T80.", failures)
     require(
@@ -252,6 +288,20 @@ def main() -> int:
         "LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin" in app
         and "Bed10K Max70 BedWatch180" in app,
         "Little Hands firmware catalog must recognize the LH v7 BedWatch180 candidate.",
+        failures,
+    )
+    require(
+        "THERMAL_PROTECTION_BED_PERIOD        60" in firmware_bed_guard_patch
+        and "THERMAL_PROTECTION_BED_HYSTERESIS     3" in firmware_bed_guard_patch
+        and "WATCH_BED_TEMP_PERIOD" not in firmware_bed_guard_patch
+        and "Bed10K Max70 BedGuard3C60s" in firmware_bed_guard_patch,
+        "LH v8 must soften only the active bed hold guard to 3C/60s without changing the heating watch.",
+        failures,
+    )
+    require(
+        "LH-v8-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-mksLite.bin" in app
+        and "Bed10K Max70 BedGuard3C60s" in app,
+        "Little Hands firmware catalog must recognize the LH v8 BedGuard3C60s candidate.",
         failures,
     )
     require(
@@ -498,10 +548,12 @@ def main() -> int:
     )
     require(
         "HOTBED_EXPERIMENTAL_MARKER" in app
+        and "HOTBED_EXPERIMENTAL_PRINT_MARKER" in app
         and "experimental_hotbed_target" in app
+        and "experimental_hotbed_print_target" in app
         and "Найден блокирующий нагрев стола `M190`" in app
-        and "Little Hands прогреет стол перед M24" in app,
-        "Experimental controlled-hotbed G-code must be explicitly marked, non-blocking, and host-preheated before M24.",
+        and "Hotbed print target подтверждён" in app,
+        "Controlled-hotbed G-code must mark separate preheat/print targets and verify the print target before M24.",
         failures,
     )
     require(
@@ -559,11 +611,13 @@ def main() -> int:
         "--experimental-hotbed-target" in slicer
         and "K9_MAX_EXPERIMENTAL_HOTBED_TARGET = 60.0" in slicer
         and "K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET = 60.0" in slicer
+        and "K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET = 55.0" in slicer
         and "default=K9_DEFAULT_EXPERIMENTAL_HOTBED_TARGET" in slicer
         and "HOTBED_EXPERIMENTAL_MARKER" in slicer
-        and "M140 S{hotbed_target:g}" in slicer
+        and "HOTBED_EXPERIMENTAL_PRINT_MARKER" in slicer
+        and "M140 S{hotbed_print_target:g}" in slicer
         and '"material_bed_temperature": "0"' in slicer,
-        "Cura helper must default to marked 60C controlled-hotbed files while keeping Cura bed temperature at 0.",
+        "Cura helper must preheat to 60C, print at 55C, and keep Cura bed temperature at 0.",
         failures,
     )
 
@@ -786,10 +840,11 @@ def main() -> int:
     require("G1 Y95 F240" in cura_machine, "Tracked Cura machine end G-code must present bed toward operator at F240.", failures)
     require(
         "LH_EXPERIMENTAL_HOTBED_TARGET:60" in cura_machine
-        and "M140 S60" in cura_machine
+        and "LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55" in cura_machine
+        and "M140 S55" in cura_machine
         and "material_bed_temperature = 0" in cura_quality
         and "material_bed_temperature = 0" in cura_extruder,
-        "Tracked Cura machine start must mark the 60C controlled-hotbed target while keeping Cura bed temperature at 0.",
+        "Tracked Cura machine start must mark 60C preheat / 55C print targets while keeping Cura bed temperature at 0.",
         failures,
     )
     require(

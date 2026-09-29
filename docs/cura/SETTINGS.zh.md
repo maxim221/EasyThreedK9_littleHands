@@ -15,7 +15,7 @@
 - 耗材直径：`1.75 mm`
 - 喷嘴直径：使用实际安装的喷嘴；已验证配置没有覆盖 Cura 的 nozzle diameter
 - Cura 偏好设置：关闭 `Preferences -> General -> Add machine prefix to job name`。在 `cura.cfg` 中对应 `[cura] jobname_prefix = False`。这样 Cura 不会在导出的 G-code 文件名前添加无用的 `CFFFP_`。
-- Cura active-machine 设置：`~/.config/cura/5.11/cura.cfg` 中的 `[cura] active_machine` 必须是 `lilHands_k9_warmmat`。如果还是旧的 `lilHands`，Cura 可能保存一个看起来正常、但没有 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 标记的文件，受控热床就不会加热。
+- Cura active-machine 设置：`~/.config/cura/5.11/cura.cfg` 中的 `[cura] active_machine` 必须是 `lilHands_k9_warmmat`。如果还是旧的 `lilHands`，Cura 可能保存带有过时 `G1 Z10.0 F1800` 起始段、且没有 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 标记的文件，因此受控热床不会加热。
 
 ## Start G-code
 
@@ -30,7 +30,8 @@ G92 X0 Y0 Z0
 G1 Z10.0 F600
 G92 E0
 ;LH_EXPERIMENTAL_HOTBED_TARGET:60
-M140 S60 ;Experimental controlled hotbed target; Little Hands preheats before M24
+;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55
+M140 S55 ;Controlled hotbed print target; Little Hands preheats to 60C before M24
 ```
 
 ## End G-code
@@ -57,7 +58,7 @@ G1 Y95 F240 ;Move bed toward the operator
 - 第一层热端：`225C`
 - 后续热端：`224C`
 - Cura material bed temperature：`0C`
-- 受控 hotbed start 目标：`60C`，只通过 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 和非阻塞 `M140 S60` 输出
+- 受控 hotbed 策略：通过 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 让主机预热到 `60C`；通过 `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` 和非阻塞 `M140 S55` 在打印时保持 `55C`
 - 此本地默认值根据操作者 2026-09-09 的要求调整。应用/helper 的目标上限为 `60C`，热床预热最多等待 `15 分钟`。旧 G-code 需要重新切片并上传。修改本地 Cura 配置前请关闭 Cura；打印机空闲时重启 Little Hands。
 - 外部 warm mat 备用方案：手动预热到约 `40-50C`
 - Cura part cooling：`off`
@@ -187,13 +188,13 @@ G1 Y95 F240 ;Move bed toward the operator
 - 包含热端目标温度命令，例如 `M104` / `M109`
 - 早期阻塞 `M109` 应保留在 SD 文件中；Little Hands 仍会在 `M24` 前用分段 host-side 预热和最终 `M109` 确认 hotend 已加热，文件中的 `M109` 作为额外安全等待保留
 - 旧的已准备 `M104`-only 文件也由同一个 `M24` 前分段 host preheat 支持
-- Cura material bed target 保持 `0C`；受控 hotbed 文件必须明确带有 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 标记，并且只使用非阻塞 `M140 S60`
+- Cura material bed target 保持 `0C`；受控 hotbed 文件必须包含 `60C` 预热与 `55C` 打印两个标记，并且只使用非阻塞 `M140 S55`
 - slicer bounds 正常，并位于 `100 x 100 mm` 平台内
 - 高度位于 `100 mm` 内
 - 不出现 `Filament used: 0m`
 - 没有 `M18/M84`、没有阻塞式 `M190`、没有未标记的热床加热 `M140/M190 S>0`，body `M204` 不超过安全的 K9 baseline
 - preview 中在模型需要的位置显示支撑
 - 导出的文件名不应以 `CFFFP_` 开头；如果出现该前缀，请关闭 Cura 的 `Add machine prefix to job name` 后重新保存
-- 新的 Cura export 开头应包含 `; Little Hands manual-zero workflow for EasyThreed K9 / K9 Plus`，使用 `G1 Z10.0 F600`，并包含 `;LH_EXPERIMENTAL_HOTBED_TARGET:60`；如果开头还是旧的短版 `; Little Hands manual-zero workflow` 和 `G1 Z10.0 F1800`，请把 Cura 切回 `lilHands K9 warm mat` 后重新保存
+- 新的 Cura export 开头应包含 `; Little Hands manual-zero workflow for EasyThreed K9 / K9 Plus`、`G1 Z10.0 F600` 以及两个 hotbed 标记（`60` 预热 / `55` 打印）；否则请切回 `lilHands K9 warm mat` 后重新保存
 
 如果有任何一项不满足，请重新切片。不要手工修改 G-code，除非你有意创建一个新文件，并明确标记为 modified。
