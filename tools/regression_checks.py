@@ -251,9 +251,12 @@ def main() -> int:
     require(
         "RECOVERY_X_FEEDRATE = 600" in marlin
         and "RECOVERY_X_SEGMENT_MM = 50.0" in marlin
+        and "LOCAL_NEUTRAL_X_MM = 50.0" in marlin
         and sdtool.segmented_linear_targets(95.0, 0.0, 50.0) == [45.0, 0.0]
-        and sdtool.segmented_linear_targets(-80.0, 0.0, 50.0) == [-30.0, 0.0],
-        "Known-pose X recovery must use validated F600 segments no longer than 50 mm.",
+        and sdtool.segmented_linear_targets(-80.0, 0.0, 50.0) == [-30.0, 0.0]
+        and sdtool.local_neutral_x_move_commands(-50.0) == ["G92 X50", "G1 X0.000 F600", "M400"]
+        and sdtool.local_neutral_x_move_commands(-45.0) == ["G92 X50", "G1 X5.000 F600", "M400"],
+        "Known-pose X recovery must use validated local-neutral F600 segments no longer than 50 mm.",
         failures,
     )
     require("SAFE_HOME_CLEARANCE_Z = 10.0" in marlin, "Recovery/preheat clearance must keep a 10 mm Z lift.", failures)
@@ -338,10 +341,9 @@ def main() -> int:
         failures,
     )
     require(
-        "JOG_HEAD_LOCAL_ZERO_MM = 50.0" in app
-        and "G92 X{JOG_HEAD_LOCAL_ZERO_MM:g}" in app
-        and "local_target = JOG_HEAD_LOCAL_ZERO_MM + distance" in app,
-        "Manual X jog must use a local neutral X coordinate so stale/negative Marlin X does not accumulate after skipped moves.",
+        "JOG_HEAD_LOCAL_ZERO_MM = sdtool.LOCAL_NEUTRAL_X_MM" in app
+        and "sdtool.local_neutral_x_move_commands(distance, feedrate=feedrate)" in app,
+        "Manual X jog must share the local-neutral move helper with known-pose recovery.",
         failures,
     )
     require("JOG_BED_FEEDRATE = 600" in app, "App manual bed jog must match the validated manual F600 test.", failures)
@@ -378,8 +380,8 @@ def main() -> int:
     )
     require_regex(
         marlin,
-        r"def goto_print_home_from_predicted_end\(.*?segmented_linear_targets\(end_x, 0\.0, RECOVERY_X_SEGMENT_MM\).*?G1 X\{target_x:\.3f\} F\{RECOVERY_X_FEEDRATE\}.*?M400",
-        "Predicted/post-print X return must use acknowledged segmented F600 moves.",
+        r"def goto_print_home_from_predicted_end\(.*?segmented_linear_targets\(end_x, 0\.0, RECOVERY_X_SEGMENT_MM\).*?local_neutral_x_move_commands\(target_x - current_x\)",
+        "Predicted/post-print X return must use the same local-neutral acknowledged segments as manual X jog.",
         failures,
     )
     require("send_line_wait_ok" in marlin, "Start-from-home serial service moves must wait for ok.", failures)

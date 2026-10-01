@@ -114,7 +114,7 @@ SERVICE_X_FEEDRATE = 900
 JOG_HEAD_FEEDRATE = 600
 JOG_HEAD_PRINT_ACCEL = 80
 JOG_HEAD_TRAVEL_ACCEL = 80
-JOG_HEAD_LOCAL_ZERO_MM = 50.0
+JOG_HEAD_LOCAL_ZERO_MM = sdtool.LOCAL_NEUTRAL_X_MM
 SERVICE_BED_FEEDRATE = 240
 JOG_BED_FEEDRATE = 600
 JOG_BED_ACCEL = 80
@@ -7599,12 +7599,7 @@ class K9ControlCenter:
             if print_accel is not None and travel_accel is not None:
                 commands.append(f"M204 P{print_accel:g} T{travel_accel:g}")
             if axis == "X":
-                local_target = JOG_HEAD_LOCAL_ZERO_MM + distance
-                commands.extend([
-                    f"G92 X{JOG_HEAD_LOCAL_ZERO_MM:g}",
-                    f"G1 X{local_target:.3f} F{feedrate}",
-                    "M400",
-                ])
+                commands.extend(sdtool.local_neutral_x_move_commands(distance, feedrate=feedrate))
             else:
                 commands.append("G91")
                 commands.extend([f"G1 {axis}{distance:.3f} F{feedrate}", "M400"])

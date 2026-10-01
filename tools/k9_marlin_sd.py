@@ -47,6 +47,7 @@ SAFE_VERTICAL_FEEDRATE = 600
 SAFE_X_FEEDRATE = 900
 RECOVERY_X_FEEDRATE = 600
 RECOVERY_X_SEGMENT_MM = 50.0
+LOCAL_NEUTRAL_X_MM = 50.0
 SAFE_HOME_CLEARANCE_Z = 10.0
 POSITION_RE = re.compile(r"^\s*X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)", re.MULTILINE)
 
@@ -72,6 +73,18 @@ def segmented_linear_targets(start: float, end: float, max_segment: float) -> li
     if not targets or abs(targets[-1] - end) > 1e-9:
         targets.append(end)
     return targets
+
+
+def local_neutral_x_move_commands(distance: float, *, feedrate: float = RECOVERY_X_FEEDRATE) -> list[str]:
+    """Build the validated one-move X context without trusting stale Marlin X."""
+    if abs(distance) > RECOVERY_X_SEGMENT_MM + 1e-9:
+        raise ValueError("local-neutral X move exceeds the validated recovery segment")
+    local_target = LOCAL_NEUTRAL_X_MM + float(distance)
+    return [
+        f"G92 X{LOCAL_NEUTRAL_X_MM:g}",
+        f"G1 X{local_target:.3f} F{feedrate:g}",
+        "M400",
+    ]
 
 
 def list_serial_ports() -> list[dict[str, str]]:
@@ -841,8 +854,10 @@ def goto_print_home_from_predicted_end(
     if travel_z > end_z:
         commands.extend([f"G1 Z{travel_z:.3f} F600", "M400"])
     commands.append(f"M204 P{SOFT_TRAVEL_ACCEL} T{SOFT_TRAVEL_ACCEL}")
+    current_x = end_x
     for target_x in segmented_linear_targets(end_x, 0.0, RECOVERY_X_SEGMENT_MM):
-        commands.extend([f"G1 X{target_x:.3f} F{RECOVERY_X_FEEDRATE}", "M400"])
+        commands.extend(local_neutral_x_move_commands(target_x - current_x))
+        current_x = target_x
     commands.extend([
         f"G1 Y0 F{SAFE_BED_FEEDRATE}",
         "M400",

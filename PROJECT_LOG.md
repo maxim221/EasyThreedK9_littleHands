@@ -1,5 +1,12 @@
 # littleHands Project Log
 
+## 2026-10-01 Recovery X Must Match Manual Local-Neutral Moves
+
+- After `bobBase.gcode`, normal Stop captured the physical final model `X95 Y95 Z38.04` and raised Z to `41.04`. Guarded return then reported acknowledged completion and logical `M114 X0 Y0 Z0`, but the operator observed that the X carriage did not physically move. The operator restored X manually through the app with watched `-50`, `-50`, `-20`, and `-5 mm` jogs, adjusted Y by `-5 mm`, and saved the verified physical start.
+- The recovery had already adopted `F600`, `M204 P80 T80`, `M400`, and segments no longer than 50 mm, but it still differed from the working manual path: it declared the saved absolute `G92 X95` once and moved to absolute `X45` then `X0`. Manual X jog re-declares a local neutral `G92 X50` before every single move. The acknowledged firmware counts therefore did not prove equivalent physical drive behavior.
+- Added one shared local-neutral X command helper. Manual X jog and every known-pose recovery segment now both use `G92 X50`, one local move no longer than 50 mm at `F600`, and `M400`. Saved/predicted absolute X is used only to calculate segment distances, never as the Marlin target context for the physical X return.
+- No printer command was sent while making this software change. The operator had already returned the printer manually and saved the physical start.
+
 ## 2026-09-29 Never Stop SD Printing On Missing Telemetry
 
 - `VOLFTOP.GCO` completed the verified 60C bed and staged 226C hotend preheat, then received `M24` at 01:15:42. A fresh post-start report still showed T225.83/226 and B58.58/60, but subsequent `M105`/`M27` replies went silent.
