@@ -583,9 +583,9 @@ def main() -> int:
     require('"M204 T1000"' not in app, "k9_control_center.py must not hard-code M204 T1000.", failures)
     require("JOG_RESTORE_TRAVEL_ACCEL = 80" in app, "Manual jog must leave service travel acceleration at T80.", failures)
     require(
-        appmod.JOG_STEPS_MM == (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
+        appmod.JOG_STEPS_MM == (0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
         and 'text=f"{value:g}"' in app,
-        "Manual jog step choices must include 50 mm and display labels without redundant .0 suffixes.",
+        "Manual jog step choices must include precise 0.05 mm and long 50 mm moves with compact labels.",
         failures,
     )
     require(
@@ -849,8 +849,22 @@ def main() -> int:
         app,
         r"preheat_lift_recovery_before_jog = self\.preheat_lift_recovery_available.*?"
         r"except Exception:.*?preheat_lift_recovery_before_jog.*?"
-        r"raise\s+.*?self\._clear_preheat_lift_recovery\(save=False\)",
-        "Failed manual jog must preserve the failed-preheat-lift marker until a move is acknowledged.",
+        r"raise\s+.*?if axis == \"Z\":\s+self\._clear_preheat_lift_recovery\(save=False\)",
+        "Failed jog and acknowledged X/Y jogs must preserve the failed-preheat-lift marker; only Z recovery may clear it.",
+        failures,
+    )
+    require(
+        'save_start_state = "normal" if not self.user_task_pending and not self.preheat_lift_recovery_available else "disabled"' in app
+        and 'raise RuntimeError("save-start is blocked until the retained preheat lift is recovered")' in app
+        and 'messagebox.showwarning("Little Hands", self._t("save_raised_start_blocked"))' in app,
+        "GUI and agent Save start must refuse a retained preheat lift instead of accepting a raised zero.",
+        failures,
+    )
+    require(
+        "def _send_complete_m105_with_retry" in app
+        and app.count("self._send_complete_m105_with_retry(ser)") >= 3
+        and "не меняя нагрев и не прерывая предпрогрев" in app,
+        "SD preheat must retry fragmented M105 telemetry in-session without changing heater targets.",
         failures,
     )
     require("FILAMENT_EXTRUDE_MIN_C = 180.0" in app, "Manual filament feed must require a hot hotend, not cold extrusion.", failures)

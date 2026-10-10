@@ -120,7 +120,7 @@ PRINTABLE_SD_EXTS = {".gco", ".gcode", ".g"}
 HOME_TRUST_TRUSTED = "trusted"
 HOME_TRUST_UNCERTAIN = "uncertain"
 HOME_TRUST_INVALID = "invalid"
-JOG_STEPS_MM = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
+JOG_STEPS_MM = (0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0)
 JOG_DEFAULT_STEP_MM = 5.0
 SERVICE_X_FEEDRATE = 900
 JOG_HEAD_FEEDRATE = 600
@@ -1460,7 +1460,7 @@ class K9ControlCenter:
         with sdtool.open_serial(self._port(), self._baud(), timeout=.25) as ser:
             sdtool.sync_ascii(ser)
             sdtool.send_line_wait_ok(ser, f"M140 S{print_target:.0f}", timeout_s=12.0)
-            reply = sdtool.send_line_wait_ok(ser, "M105", timeout_s=12.0)
+            reply = self._send_complete_m105_with_retry(ser)
         self._post("metrics", ("m105", reply))
         values = parse_m105_temperatures(reply)
         self._post("temp", values)
@@ -1486,6 +1486,31 @@ class K9ControlCenter:
             self._check_preheat_cancelled()
             time.sleep(min(.1, max(0.0, end - time.monotonic())))
         self._check_preheat_cancelled()
+
+    def _send_complete_m105_with_retry(self, ser: object, *, attempts: int = 3) -> str:
+        """Return one acknowledged and complete temperature sample."""
+        last_problem = ""
+        for attempt in range(1, attempts + 1):
+            self._check_preheat_cancelled()
+            try:
+                reply = sdtool.send_line_wait_ok(ser, "M105", timeout_s=12.0)
+            except RuntimeError as exc:
+                if "did not finish `M105` cleanly" not in str(exc):
+                    raise
+                last_problem = str(exc)
+            else:
+                values = parse_m105_temperatures(reply)
+                if all(value is not None for value in values):
+                    return reply
+                last_problem = f"incomplete M105 sample: {reply.strip() or '<empty>'}"
+            if attempt < attempts:
+                self._post(
+                    "log",
+                    f"Неполный ответ M105 ({attempt}/{attempts}); повторяю чтение в той же USB-сессии, "
+                    "не меняя нагрев и не прерывая предпрогрев.",
+                )
+                self._wait_preheat(0.4)
+        raise RuntimeError(f"Printer did not return a complete M105 sample after {attempts} attempts: {last_problem}")
 
     def cancel_preheat(self) -> bool:
         with self.preheat_state_lock:
@@ -1630,7 +1655,7 @@ class K9ControlCenter:
                 sdtool.sync_ascii(ser)
                 self._check_preheat_cancelled()
                 sdtool.send_line_wait_ok(ser, f"M140 S{target:.0f}", timeout_s=12.0)
-                out = sdtool.send_line_wait_ok(ser, "M105", timeout_s=12.0)
+                out = self._send_complete_m105_with_retry(ser)
                 self._post("metrics", ("m105", out))
                 while time.monotonic() < deadline:
                     self._check_preheat_cancelled()
@@ -1706,7 +1731,7 @@ class K9ControlCenter:
                                     "Стол выключен командой M140 S0; печать не запускаю."
                                 )
                     self._wait_preheat(HOTBED_PREHEAT_POLL_SEC)
-                    out = sdtool.send_line_wait_ok(ser, "M105", timeout_s=12.0)
+                    out = self._send_complete_m105_with_retry(ser)
                     self._post("metrics", ("m105", out))
             raise RuntimeError(
                 f"Hotbed не дошёл до {target:.0f}C перед SD-стартом за {HOTBED_PREHEAT_TIMEOUT_SEC:.0f} секунд. "
@@ -2280,6 +2305,7 @@ class K9ControlCenter:
         )
         go_state = "normal" if (trusted or recovery_ready) and not self.user_task_pending else "disabled"
         start_state = "normal" if trusted and not self.user_task_pending else "disabled"
+        save_start_state = "normal" if not self.user_task_pending and not self.preheat_lift_recovery_available else "disabled"
         filament_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
         hotbed_heat_state = "normal" if self.current_print_file == "-" and not self.user_task_pending else "disabled"
         hotbed_off_state = "normal" if not self.user_task_pending else "disabled"
@@ -2293,6 +2319,7 @@ class K9ControlCenter:
             ("pause_button", "normal" if not self.user_task_pending and self._port()
              and self.current_print_file != "-" else "disabled"),
             ("go_start_button", go_state),
+            ("save_start_button", save_start_state),
             ("start_print_button", start_state),
             ("upload_and_start_button", start_state),
             ("filament_feed_button", filament_state),
@@ -2427,7 +2454,7 @@ class K9ControlCenter:
             "preheat_cancelled": {"ru": "Прогрев отменён. Печать не запускалась.", "en": "Preheat cancelled. Printing did not start.", "zh": "预热已取消，打印未启动。"},
             "heaters_off_confirmed": {"ru": "Нагрев выключен: свежий ответ подтверждает нулевые цели и выходы обоих нагревателей.", "en": "Heat is off: a fresh report confirms zero heater targets and outputs.", "zh": "加热已关闭：新回复确认目标温度和输出均为零。"},
             "heaters_off_unknown": {"ru": "Выключение нагрева не подтверждено. Выключите питание принтера; оси не двигайте.", "en": "Heater shutdown is unconfirmed. Switch printer power off; do not move axes.", "zh": "无法确认加热已关闭。请关闭打印机电源，不要移动各轴。"},
-            "save_raised_start_confirm": {"ru": "После сбоя сопло осталось поднятым. «Запомнить старт» не опускает его.\n\nВы уже вручную вернули сопло к правильному физическому старту у стола?\nЕсли нет, выберите «Нет» и используйте «К сохранённому старту».", "en": "The nozzle was left raised after a failure. Save start does not lower it.\n\nHave you already manually restored the correct physical start near the bed?\nIf not, choose No and use Go to saved start.", "zh": "故障后喷嘴停在抬高位置，“保存起点”不会降低喷嘴。\n\n是否已手动恢复平台附近的正确实际起点？\n如果没有，请选择“否”，然后使用“回到保存起点”。"},
+            "save_raised_start_blocked": {"ru": "После сбоя сохранён незавершённый подъём сопла. Нельзя объявлять поднятую позу новым стартом. Сначала используйте «К сохранённому старту» либо подтверждённый ручной шаг Z вниз; затем физически проверьте зазор у стола.", "en": "An unfinished nozzle lift is retained after a failure. The raised pose cannot be declared as the new start. First use Go to saved start or an acknowledged manual Z move downward, then physically verify the bed gap.", "zh": "故障后仍保留未完成的喷嘴抬升记录，不能把抬高位置声明为新起点。请先使用“回到保存起点”或已确认的手动 Z 轴向下移动，然后实际检查平台间隙。"},
             "close_wait": {
                 "ru": "Дождись завершения операции. Загрузку можно отменить кнопкой «Отменить». При опасности отключи питание принтера.",
                 "en": "Wait for the operation to finish. Use Cancel to stop an upload. In an emergency, cut printer power.",
@@ -4377,6 +4404,8 @@ class K9ControlCenter:
             elif command == "save-start":
                 if arguments.get("confirm") != "physical-start-verified":
                     raise RuntimeError("save-start requires physical-start-verified confirmation")
+                if self.preheat_lift_recovery_available:
+                    raise RuntimeError("save-start is blocked until the retained preheat lift is recovered")
                 power_value = arguments.get("power_cycled")
                 if self.next_sd_start_requires_power_cycle and power_value not in {"yes", "no"}:
                     raise RuntimeError("save-start requires power_cycled=yes or no while the gate is active")
@@ -7580,12 +7609,8 @@ class K9ControlCenter:
         if self.user_task_pending:
             return
         if self.preheat_lift_recovery_available:
-            if confirmed_physical_start:
-                pass
-            elif not messagebox.askyesno(
-                "Little Hands", self._t("save_raised_start_confirm"), default=messagebox.NO,
-            ):
-                return
+            messagebox.showwarning("Little Hands", self._t("save_raised_start_blocked"))
+            return
         power_cycle_confirmed_with_save = False
         if self.next_sd_start_requires_power_cycle:
             if confirmed_physical_start and power_cycle_confirmation is not None:
@@ -8661,7 +8686,8 @@ class K9ControlCenter:
                 if pos_line:
                     self._post("pos", pos_line)
                     self._post("metrics", ("m114", pos_line))
-            self._clear_preheat_lift_recovery(save=False)
+            if axis == "Z":
+                self._clear_preheat_lift_recovery(save=False)
             # A manual move breaks the exact same-session pose chain used by the
             # SafeAbort return. Keep the adjusted pose only as diagnostic help.
             self.stopped_print_live_return_available = False

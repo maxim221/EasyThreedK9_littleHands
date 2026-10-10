@@ -3517,3 +3517,9 @@ After each test print, append:
 - Continued LH v9 integration in observation-only mode: after the firmware capability is known, polling binds a fresh RAM token and records strict atomic M930 snapshots while retaining the legacy polling path. Malformed data, token mismatch, impossible cursor, or backwards sequence/uptime is rejected. LH1 does not authorize unattended motion.
 - The socket and token are mode 0600. The socket uses a short per-user runtime path because Linux Unix-domain socket paths cannot hold this repository's long absolute path; the token stays under `monitor_logs/` and is never printed by the CLI.
 - No heater, axis, SD start, Stop, M524, or homing command was sent while implementing this control plane.
+## 2026-10-10 — Prevent saving a raised preheat pose
+
+- Root cause of the air-print restart was confirmed: after a controller/firmware restart the physically raised preheat-clearance pose was saved as `Z0`; the next start correctly returned to that incorrect zero and extruded above the bed.
+- `Save start` is now disabled/refused while an unfinished preheat-lift marker exists, including through the owner-only agent API. X/Y jogs no longer clear that Z-specific guard.
+- Added a 0.05 mm manual jog step for the documented feeler-gauge target; the operator still verifies physical height before saving zero.
+- During the first corrected restart, a fragmented `M105` tail (`@:0 B@:127`) incorrectly aborted an otherwise healthy bed preheat at 55C. Preheat now retries up to three complete acknowledged `M105` samples in the same serial session without altering targets; regression coverage reproduces the exact fragment.

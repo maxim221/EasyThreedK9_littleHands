@@ -64,6 +64,12 @@ Before any jog or print start, the assisting agent must still ask the operator
 to watch the printer. Never infer physical motion from `ok`, `M114`, or LH1
 logical/step-counter coordinates.
 
+If a failed-preheat lift marker is retained, `save-start` is refused even with
+the normal confirmation. Recover the known lift or complete an acknowledged,
+operator-watched Z jog, physically verify the nozzle gap, and only then save the
+start. X/Y jogs deliberately leave this guard active. The available precise
+manual Z step includes 0.05 mm for the K9 feeler-gauge target.
+
 `confirm-finish` is valid only when the operator has explicitly confirmed a
 normal complete print, removed part, and untouched final axes. `go-start` uses
 the retained `LH_END_GCODE_V1` pose through the normal segmented guarded return.

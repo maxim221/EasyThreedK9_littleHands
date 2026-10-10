@@ -34,6 +34,8 @@ If a restored print is definitely no longer running and you manually return the 
 
 During preheat, **Stop becomes Cancel**. Cancellation turns heat off and undoes the known nozzle lift. Closing the window requests cancellation and waits for verified heater shutdown; manual axes stay locked until cleanup finishes.
 
+A brief incomplete `M105` temperature fragment is retried in the same USB session without changing heater targets. Only repeated failure to obtain a complete acknowledged sample aborts preheat.
+
 Cancelled or damaged uploads remain blocked until deletion or a clean upload. Do not start an unknown partial SD copy. Port changes are locked during USB operations; use Cancel to stop an upload.
 
 ## 3. Heat and filament
@@ -74,7 +76,7 @@ Open **Recovery** beside USB metrics to inspect or save the last replies. Each s
 
 If preheat fails after lifting the nozzle, do not save the raised position as start. The app first tries to undo the known lift. If that fails, restore USB, use Go to saved start, and confirm printing never started and the axes were not moved. Heating failed requires a power cycle first. Inspect a sticking axis before retrying; do not force it with faster moves.
 
-If the app remembers a failed lift, Save start requires confirmation that the nozzle was physically returned near the bed. Saving a raised pose does not lower the nozzle.
+If the app remembers a failed lift, Save start stays disabled. First use guarded Go to saved start or a watched Z jog, then physically verify the nozzle gap; only then may Save start declare zero. X/Y jogs do not clear this lift guard.
 
 If USB disappears while heating and heater shutdown is unconfirmed, switch the printer power off. Restore communication and check both heater targets and outputs are zero before recovery.
 

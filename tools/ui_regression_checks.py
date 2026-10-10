@@ -85,16 +85,30 @@ class OfflineUiChecks(unittest.TestCase):
     def test_save_start_cannot_silently_discard_a_failed_lift(self):
         self.app.preheat_lift_recovery_available = True
         self.app._run_task = Mock()
-        with patch.object(appmod.messagebox, 'askyesno', return_value=False) as question:
+        self.app._sync_home_controls()
+        self.assertEqual(str(self.app.save_start_button.cget("state")), "disabled")
+        with patch.object(appmod.messagebox, 'showwarning') as warning:
             self.app.set_current_home_zero()
         self.app._run_task.assert_not_called()
         self.assertTrue(self.app.preheat_lift_recovery_available)
-        self.assertEqual(question.call_args.kwargs['default'], appmod.messagebox.NO)
-        with patch.object(appmod.messagebox, 'askyesno', return_value=True):
-            self.app.set_current_home_zero()
-        self.app._run_task.assert_called_once()
-        # The worker must finish successfully before discarding the marker.
+        warning.assert_called_once()
+        with patch.object(appmod.messagebox, 'showwarning'):
+            self.app.set_current_home_zero(confirmed_physical_start=True)
+        self.app._run_task.assert_not_called()
         self.assertTrue(self.app.preheat_lift_recovery_available)
+
+    def test_preheat_retries_a_fragmented_m105_without_changing_targets(self):
+        complete = "ok T:37.0 /0.0 @:0 B:55.0 /60.0 B@:127\n"
+        self.app._wait_preheat = Mock()
+        with patch.object(
+            appmod.sdtool,
+            "send_line_wait_ok",
+            side_effect=[RuntimeError("Printer did not finish `M105` cleanly: @:0 B@:127"), complete],
+        ) as query:
+            reply = self.app._send_complete_m105_with_retry(object())
+        self.assertEqual(reply, complete)
+        self.assertEqual(query.call_count, 2)
+        self.app._wait_preheat.assert_called_once_with(0.4)
 
     def test_stopped_print_go_start_becomes_manual_recovery_without_motion(self):
         self.app.current_print_file = "-"
