@@ -46,6 +46,9 @@ python3 tools/k9_agent_cli.py hotbed 35 --confirm operator-watching
 python3 tools/k9_agent_cli.py upload-gcode gcode/model.gcode --confirm write-printer-sd
 python3 tools/k9_agent_cli.py heaters-off --confirm safety-shutdown
 python3 tools/k9_agent_cli.py save-start --confirm physical-start-verified
+python3 tools/k9_agent_cli.py confirm-finish --confirm normal-print-complete-part-removed-axes-untouched
+python3 tools/k9_agent_cli.py go-start --confirm finished-part-removed-axes-untouched-and-watching
+python3 tools/k9_agent_cli.py confirm-return --confirm physical-start-verified
 python3 tools/k9_agent_cli.py start MODEL.GCO --confirm physical-start-and-watch
 ```
 
@@ -60,6 +63,13 @@ Upload and start are deliberately separate commands. A successful
 Before any jog or print start, the assisting agent must still ask the operator
 to watch the printer. Never infer physical motion from `ok`, `M114`, or LH1
 logical/step-counter coordinates.
+
+`confirm-finish` is valid only when the operator has explicitly confirmed a
+normal complete print, removed part, and untouched final axes. `go-start` uses
+the retained `LH_END_GCODE_V1` pose through the normal segmented guarded return.
+After that asynchronous move, `confirm-return` is allowed only after the
+operator visually verifies the near-left head, fully-back bed, and saved nozzle
+height.
 
 ## Local security
 

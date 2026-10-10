@@ -95,6 +95,20 @@ def parser() -> argparse.ArgumentParser:
     save = sub.add_parser("save-start")
     save.add_argument("--confirm", required=True, choices=["physical-start-verified"])
     save.add_argument("--power-cycled", choices=["yes", "no"])
+    finish = sub.add_parser("confirm-finish")
+    finish.add_argument(
+        "--confirm",
+        required=True,
+        choices=["normal-print-complete-part-removed-axes-untouched"],
+    )
+    go_start = sub.add_parser("go-start")
+    go_start.add_argument(
+        "--confirm",
+        required=True,
+        choices=["finished-part-removed-axes-untouched-and-watching"],
+    )
+    confirm_return = sub.add_parser("confirm-return")
+    confirm_return.add_argument("--confirm", required=True, choices=["physical-start-verified"])
     start = sub.add_parser("start")
     start.add_argument("file", nargs="?")
     start.add_argument("--confirm", required=True, choices=["physical-start-and-watch"])

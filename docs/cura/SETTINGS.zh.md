@@ -155,7 +155,7 @@ G1 Y95 F240 ;Move bed toward the operator
 - Support top distance：`0.48 mm`
 - Support XY distance：`0.5 mm`
 
-实际 backpack 结果表明，2026-10-09 的 45 deg / 50% / 0.32 mm / 0.4 mm 试验仍然产生几乎实心且无法正常拆除的支撑。当前参数是 2026-10-10 的后续试验。更大的间隔和更小的接触面积可能会让受支撑的底面稍粗；在再次增大间隔前请先检查新 backpack 的打印结果。
+以上普通参数仍是默认值。2026-10-10 首次 backpack `max-easy-release` 试验采用 55 deg / 5% / 无 interface / 0.64 mm Z / 0.8 mm XY，去除了不需要的支撑柱，但仍然太难拆除。下一次一次性试验采用 60 deg、3%、无 interface/roof、0.80 mm Z/top 和 1.2 mm XY，并接受明显更粗糙的受支撑底面。仅此 backpack 配置还使用 225C、102% 总流量、103% wall/skin 流量和 10s 最小层时间，以加强曾发生分层的细小顶部层。
 
 如果 preview 没有在问题底面下方显示支撑，不要打印。调整 support placement / threshold，直到 preview 中确实出现所需支撑。
 

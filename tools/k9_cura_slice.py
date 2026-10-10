@@ -240,17 +240,17 @@ G1 Y95 F240 ;Move bed toward the operator"""
     }
     if support_preset == "max-easy-release":
         global_settings.update({
-            "support_angle": "55",
-            "support_infill_rate": "5",
+            "support_angle": "60",
+            "support_infill_rate": "3",
             "support_interface_enable": "False",
             "support_interface_density": "0",
             "support_interface_height": "0",
             "support_roof_enable": "False",
             "support_roof_density": "0",
             "support_roof_height": "0",
-            "support_top_distance": "0.64",
-            "support_z_distance": "0.64",
-            "support_xy_distance": "0.8",
+            "support_top_distance": "0.80",
+            "support_z_distance": "0.80",
+            "support_xy_distance": "1.2",
         })
     elif support_preset != "validated":
         raise ValueError(f"unknown support preset: {support_preset}")
@@ -307,6 +307,19 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "ironing_pattern": "concentric",
         **speed_settings,
     }
+    if support_preset == "max-easy-release":
+        # This one-off backpack profile has very small upper layers. The first
+        # physical trial separated there even though temperatures were stable,
+        # so keep those short layers hotter and add a little wall/skin flow.
+        extruder_settings.update({
+            "material_print_temperature": "225",
+            "material_flow": "102",
+            "wall_material_flow": "103",
+            "wall_0_material_flow": "103",
+            "wall_x_material_flow": "103",
+            "skin_material_flow": "103",
+            "cool_min_layer_time": "10",
+        })
     return global_settings, extruder_settings
 
 
@@ -512,7 +525,7 @@ def patch_header_and_footer(
     if hotbed_target > 0.0 and not any(line.startswith(HOTBED_EXPERIMENTAL_PRINT_MARKER) for line in lines[:30]):
         lines.insert(13, f"{HOTBED_EXPERIMENTAL_PRINT_MARKER}{min(hotbed_target, K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET):g}")
 
-    settings, _extruder_settings = k9_profile_settings(
+    settings, extruder_settings = k9_profile_settings(
         brim_width,
         hotbed_target=hotbed_target,
         support_preset=support_preset,
@@ -536,12 +549,13 @@ def patch_header_and_footer(
         f'support_interface_height = {settings["support_interface_height"]}\\nsupport_roof_enable = {settings["support_roof_enable"]}\\n'
         f'support_roof_density = {settings["support_roof_density"]}\\nsupport_roof_height = {settings["support_roof_height"]}\\n'
         'z_seam_type = sharpest_corner\\n", '
-        '"extruder_quality": ["[values]\\nmaterial_print_temperature = 220\\n'
-        'material_print_temperature_layer_0 = 226\\nretraction_enable = True\\n'
-        'retraction_amount = 6.5\\nmaterial_flow = 101\\nwall_material_flow = 101\\n'
-        'skin_material_flow = 101\\nmaterial_flow_layer_0 = 103\\n'
+        f'"extruder_quality": ["[values]\\nmaterial_print_temperature = {extruder_settings["material_print_temperature"]}\\n'
+        f'material_print_temperature_layer_0 = {extruder_settings["material_print_temperature_layer_0"]}\\nretraction_enable = True\\n'
+        f'retraction_amount = 6.5\\nmaterial_flow = {extruder_settings["material_flow"]}\\n'
+        f'wall_material_flow = {extruder_settings["wall_material_flow"]}\\n'
+        f'skin_material_flow = {extruder_settings["skin_material_flow"]}\\nmaterial_flow_layer_0 = 103\\n'
         'cool_fan_enabled = False\\n'
-        'cool_fan_speed = 0\\ncool_min_layer_time = 15\\nbridge_fan_speed = 0\\n'
+        f'cool_fan_speed = 0\\ncool_min_layer_time = {extruder_settings["cool_min_layer_time"]}\\nbridge_fan_speed = 0\\n'
         'bridge_skin_material_flow = 100\\nbridge_wall_material_flow = 100\\n'
         'initial_layer_line_width_factor = 155\\n"]}'
     )

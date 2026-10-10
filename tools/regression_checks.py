@@ -210,6 +210,45 @@ def check_agent_control_socket(failures: list[str]) -> None:
         finally:
             server.stop()
 
+    reconnect_app = object.__new__(appmod.K9ControlCenter)
+    reconnect_app._port = lambda: ""
+    reconnect_app.current_print_file = "ACTIVE.GCO"
+    reconnect_app.user_task_pending = False
+    reconnect_app.last_active_print_reconnect_attempt_ts = 0.0
+    reconnect_app.next_poll_ts = 99.0
+    reconnect_app._select_single_safe_printer_port_for_recovery = Mock(return_value=True)
+    reconnect_app.log = Mock()
+    with patch.object(appmod.time, "time", return_value=1000.0):
+        reconnected = reconnect_app._try_reconnect_active_print_port()
+    require(
+        reconnected
+        and reconnect_app.next_poll_ts == 0.0
+        and reconnect_app._select_single_safe_printer_port_for_recovery.call_count == 1,
+        "A retained active print must automatically reselect the sole safe port before plain M930 monitoring.",
+        failures,
+    )
+
+    identity_app = object.__new__(appmod.K9ControlCenter)
+    identity_app._port = lambda: ""
+    identity_app.current_print_usb_generation = "1a86:7523:1-1:devnum=2"
+    identity_app._is_safe_printer_port_meta = lambda meta: True
+    identity_app.port_var = Mock()
+    identity_app.port_display_var = Mock()
+    identity_app._port_label = lambda meta: str(meta["device"])
+    identity_app.log = Mock()
+    candidates = [
+        {"device": "/dev/ttyUSB0", "vid": "1A86", "pid": "7523"},
+        {"device": "/dev/ttyACM0", "vid": "2E8A", "pid": "00C0"},
+        {"device": "/dev/ttyACM1", "vid": "303A", "pid": "1001"},
+    ]
+    with patch.object(sdtool, "list_serial_ports", return_value=candidates):
+        selected = identity_app._select_single_safe_printer_port_for_recovery()
+    require(
+        selected and identity_app.port_var.set.call_args.args[0] == "/dev/ttyUSB0",
+        "Active-print reconnect must prefer the retained USB VID/PID over unrelated Pico/ESP ACM ports.",
+        failures,
+    )
+
 
 def check_hotbed_workflow(failures: list[str]) -> None:
     """Exercise slicing, validation and heat gates without Tk or printer access."""
@@ -233,19 +272,24 @@ def check_hotbed_workflow(failures: list[str]) -> None:
         "K9 support profile must keep the follow-up easy-release backpack trial values.",
         failures,
     )
-    easy_support, _ = slicermod.k9_profile_settings(
+    easy_support, easy_extruder = slicermod.k9_profile_settings(
         14,
         hotbed_target=60,
         support_preset="max-easy-release",
     )
     require(
-        easy_support["support_angle"] == "55"
-        and easy_support["support_infill_rate"] == "5"
+        easy_support["support_angle"] == "60"
+        and easy_support["support_infill_rate"] == "3"
         and easy_support["support_interface_enable"] == "False"
         and easy_support["support_roof_enable"] == "False"
-        and easy_support["support_top_distance"] == "0.64"
-        and easy_support["support_z_distance"] == "0.64"
-        and easy_support["support_xy_distance"] == "0.8",
+        and easy_support["support_top_distance"] == "0.80"
+        and easy_support["support_z_distance"] == "0.80"
+        and easy_support["support_xy_distance"] == "1.2"
+        and easy_extruder["material_print_temperature"] == "225"
+        and easy_extruder["material_flow"] == "102"
+        and easy_extruder["wall_material_flow"] == "103"
+        and easy_extruder["skin_material_flow"] == "103"
+        and easy_extruder["cool_min_layer_time"] == "10",
         "The explicit maximum easy-release preset must remain sparse, interface-free, and widely separated.",
         failures,
     )
@@ -992,6 +1036,14 @@ def main() -> int:
         and "PRINT_END_CONFIRMED_BY_OPERATOR" in app
         and "operator confirmed SD print finished; use saved predicted print-end recovery" in app,
         "The UI must let the operator confirm normal completion after USB loss and keep the predicted print-end recovery pose.",
+        failures,
+    )
+    finish_handler = app.split("    def confirm_print_finished_by_operator", 1)[1].split("\n    def ", 1)[0]
+    require(
+        '_show_post_print_recovery_window("completion")' in finish_handler
+        and finish_handler.index('_show_post_print_recovery_window("completion")')
+        < finish_handler.rindex("return True"),
+        "Confirmed completion must update the UI and open recovery before returning success.",
         failures,
     )
     require(

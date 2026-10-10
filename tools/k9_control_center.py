@@ -66,6 +66,7 @@ PRINT_ACTIVE_CONFIRM_MIN_SEC = 45
 ACTIVE_PRINT_RECENT_PROGRESS_BLOCK_SEC = 90.0
 ACTIVE_PRINT_POSITION_SAMPLE_INTERVAL_SEC = 30.0
 ACTIVE_PRINT_POLL_INTERVAL_SEC = 8.0
+ACTIVE_PRINT_AUTO_RECONNECT_INTERVAL_SEC = 5.0
 USB_SILENCE_POLL_INTERVAL_SEC = 30.0
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
 LH1_REPLY_TIMEOUT_SEC = 4.0
@@ -418,6 +419,7 @@ class K9ControlCenter:
         self.recovery_window: tk.Toplevel | None = None
         self.monitor_enabled = True
         self.next_poll_ts = 0.0
+        self.last_active_print_reconnect_attempt_ts = 0.0
         self.user_task_pending = False
         self.preheat_active = False
         self.preheat_cancel_requested = threading.Event()
@@ -4143,6 +4145,31 @@ class K9ControlCenter:
             return {"ok": True, "accepted": True}
         if self.user_task_pending:
             raise RuntimeError("another USB operation is already running")
+        if command in {"confirm-finish", "confirm-return"}:
+            self.agent_dispatching = True
+            try:
+                if command == "confirm-finish":
+                    if arguments.get("confirm") != "normal-print-complete-part-removed-axes-untouched":
+                        raise RuntimeError(
+                            "confirm-finish requires normal-print-complete-part-removed-axes-untouched confirmation"
+                        )
+                    self.confirm_print_finished_by_operator(confirmed=True)
+                else:
+                    if arguments.get("confirm") != "physical-start-verified":
+                        raise RuntimeError("confirm-return requires physical-start-verified confirmation")
+                    if (
+                        self.current_print_file != "-"
+                        or self.home_trust != HOME_TRUST_UNCERTAIN
+                        or not self.bed_clear_before_go_start_required
+                    ):
+                        raise RuntimeError("there is no completed return awaiting physical verification")
+                    self._confirm_physical_saved_start_after_return("agent-control", confirmed=True)
+            finally:
+                self.agent_dispatching = False
+            return {"ok": True, "accepted": True, "operation": dict(self.agent_operation)}
+        if command == "go-start" and not self._port():
+            if not self._select_single_safe_printer_port_for_recovery():
+                raise RuntimeError("cannot select a single safe printer port for guarded return")
         if not self._port():
             raise RuntimeError("printer port is not connected")
 
@@ -4220,6 +4247,15 @@ class K9ControlCenter:
                 self.set_current_home_zero(
                     confirmed_physical_start=True,
                     power_cycle_confirmation=power_confirmed,
+                )
+            elif command == "go-start":
+                if arguments.get("confirm") != "finished-part-removed-axes-untouched-and-watching":
+                    raise RuntimeError(
+                        "go-start requires finished-part-removed-axes-untouched-and-watching confirmation"
+                    )
+                self.go_print_home(
+                    confirm_model_removed=True,
+                    confirm_predicted_finish=True,
                 )
             elif command == "start":
                 if arguments.get("confirm") != "physical-start-and-watch":
@@ -4759,6 +4795,29 @@ class K9ControlCenter:
             self.log(f"Recovery не может проверить порты: {exc}")
             return False
         safe_ports = [meta for meta in ports if meta.get("device") and self._is_safe_printer_port_meta(meta)]
+        # An active print retains the exact USB VID/PID generation. Prefer that
+        # identity over generic ttyACM candidates such as a Pico or ESP debug
+        # port; no probing command is needed to distinguish the known CH340.
+        generation_parts = self.current_print_usb_generation.split(":", 2)
+        if len(generation_parts) >= 2 and generation_parts[0] and generation_parts[1]:
+            expected_vid = generation_parts[0].upper()
+            expected_pid = generation_parts[1].upper()
+            identity_matches = [
+                meta
+                for meta in safe_ports
+                if (meta.get("vid") or "").upper() == expected_vid
+                and (meta.get("pid") or "").upper() == expected_pid
+            ]
+            if len(identity_matches) == 1:
+                safe_ports = identity_matches
+        if len(safe_ports) != 1:
+            ch340_ports = [
+                meta
+                for meta in safe_ports
+                if ((meta.get("vid") or "").upper(), (meta.get("pid") or "").upper()) == ("1A86", "7523")
+            ]
+            if len(ch340_ports) == 1:
+                safe_ports = ch340_ports
         if len(safe_ports) != 1:
             if safe_ports:
                 choices = ", ".join(str(meta.get("device")) for meta in safe_ports)
@@ -4779,6 +4838,31 @@ class K9ControlCenter:
             "Это безопасная замена после USB re-enumeration CH340."
         )
         return True
+
+    def _try_reconnect_active_print_port(self) -> bool:
+        """Reattach monitoring after a transient USB detach/attach.
+
+        This only selects the sole safe CH340/ACM printer-like port while an
+        active print marker is retained. It sends no G-code; the normal poller
+        then performs the plain M930 session comparison before accepting state.
+        """
+        if self._port() or self.current_print_file == "-" or self.user_task_pending:
+            return bool(self._port())
+        now = time.time()
+        if (
+            self.last_active_print_reconnect_attempt_ts
+            and (now - self.last_active_print_reconnect_attempt_ts) < ACTIVE_PRINT_AUTO_RECONNECT_INTERVAL_SEC
+        ):
+            return False
+        self.last_active_print_reconnect_attempt_ts = now
+        reconnected = self._select_single_safe_printer_port_for_recovery()
+        if reconnected:
+            self.next_poll_ts = 0.0
+            self.log(
+                "Мониторинг активной SD-печати автоматически переподключён к единственному безопасному порту; "
+                "проверяю сохранённую LH1-сессию обычным M930 без перепривязки token."
+            )
+        return reconnected
 
     def _is_port_gone_error(self, exc: BaseException | str) -> bool:
         text = str(exc).lower()
@@ -5011,22 +5095,26 @@ class K9ControlCenter:
         }.get(lang) or "Подтвердить штатное завершение печати?"
         return bool(messagebox.askyesno("Little Hands", prompt))
 
-    def confirm_print_finished_by_operator(self) -> None:
+    def confirm_print_finished_by_operator(self, *, confirmed: bool = False) -> bool:
         if not self._has_predicted_print_end_recovery_model():
             msg = (
                 "Нет сохранённой финальной точки для этой печати. "
                 "Без неё автоматический возврат небезопасен: выставь старт вручную и нажми 'Запомнить старт'."
             )
             self.log(msg)
+            if self.agent_dispatching:
+                raise RuntimeError(msg)
             messagebox.showerror("Little Hands", msg)
-            return
+            return False
         if self.current_print_file == "-":
             msg = "Активной печати нет. Если нужно вернуться к старту после печати, нажми 'К сохранённому старту' и подтверди recovery."
             self.log(msg)
+            if self.agent_dispatching:
+                raise RuntimeError(msg)
             messagebox.showinfo("Little Hands", msg)
-            return
-        if not self._confirm_operator_finished_prompt():
-            return
+            return False
+        if not confirmed and not self._confirm_operator_finished_prompt():
+            return False
 
         finished_file = self.current_print_display if self.current_print_display != "-" else self.current_print_file
         finish_ts = time.time()
@@ -5070,6 +5158,7 @@ class K9ControlCenter:
         )
         self._show_post_print_recovery_window("completion")
         self._sync_home_controls()
+        return True
 
     def _refresh_ports_on_startup(self) -> None:
         try:
@@ -5338,7 +5427,7 @@ class K9ControlCenter:
             return
         self.go_print_home(confirm_model_removed=True)
 
-    def _confirm_physical_saved_start_after_return(self, source: str) -> None:
+    def _confirm_physical_saved_start_after_return(self, source: str, *, confirmed: bool = False) -> bool:
         lang = self.lang_var.get().strip() or "ru"
         prompt = {
             "ru": (
@@ -5369,7 +5458,7 @@ class K9ControlCenter:
                 "如果喷头仍在右侧或任一轴未到位，请选择“否”。"
             ),
         }.get(lang) or "Принтер физически вернулся в сохранённый старт?"
-        physically_at_start = bool(
+        physically_at_start = confirmed or bool(
             messagebox.askyesno("Little Hands", prompt, parent=self.root, default=messagebox.NO)
         )
         if physically_at_start:
@@ -5384,7 +5473,7 @@ class K9ControlCenter:
             self._save_print_state("recovered-to-start-confirmed", force=True)
             self._close_post_print_window()
             self.log("Оператор глазами подтвердил физический старт после возврата; SD-старт можно разблокировать после остальных обязательных проверок.")
-            return
+            return True
 
         self._apply_home_trust(HOME_TRUST_UNCERTAIN, "physical return was not confirmed by operator", log_change=True)
         self.at_saved_start_pose = False
@@ -5408,6 +5497,7 @@ class K9ControlCenter:
         }.get(lang) or "Старт не подтверждён; следующая печать заблокирована."
         self.log(f"Физический возврат не подтверждён ({source}). {warning}")
         messagebox.showwarning("Little Hands", warning, parent=self.root)
+        return False
 
     def return_to_start_after_print(self) -> None:
         if self.current_print_file != "-":
@@ -7757,7 +7847,12 @@ class K9ControlCenter:
         )
         return bool(messagebox.askyesno("Little Hands", prompt))
 
-    def go_print_home(self, *, confirm_model_removed: bool = False) -> None:
+    def go_print_home(
+        self,
+        *,
+        confirm_model_removed: bool = False,
+        confirm_predicted_finish: bool = False,
+    ) -> None:
         if not self._home_is_trusted():
             self._rehydrate_known_post_print_pose_from_state()
         if (
@@ -7846,7 +7941,7 @@ class K9ControlCenter:
                 "Возврат к старту допустим только после снятия модели со стола."
             )
         elif not self._home_is_trusted() and self._can_return_from_predicted_print_end_pose():
-            choice = self._confirm_predicted_print_return()
+            choice = "recover" if confirm_predicted_finish else self._confirm_predicted_print_return()
             if choice is None:
                 return
             if choice == "manual":
@@ -8389,9 +8484,10 @@ class K9ControlCenter:
 
     def _poll_status(self) -> None:
         if not self._port():
-            self.busy_var.set(self._t("usb_disconnected"))
-            self.root.after(1000, self._poll_status)
-            return
+            if not self._try_reconnect_active_print_port():
+                self.busy_var.set(self._t("usb_disconnected"))
+                self.root.after(1000, self._poll_status)
+                return
         safety_error = self._selected_port_safety_error()
         if safety_error:
             self.log(f"Автоопрос остановлен: {safety_error}")

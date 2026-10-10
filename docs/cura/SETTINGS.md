@@ -155,7 +155,7 @@ For `mainFlasherTop.STL` and similar overhang-heavy parts:
 - Support top distance: `0.48 mm`
 - Support XY distance: `0.5 mm`
 
-The physical backpack result showed that the 2026-10-09 45 deg / 50% / 0.32 mm / 0.4 mm trial was still effectively solid and could not be removed cleanly. These are the 2026-10-10 follow-up values. The larger separation and lighter contact trade some supported-underside finish for removability; inspect the new backpack before widening the gaps again.
+The normal values above remain the default. The first 2026-10-10 backpack `max-easy-release` trial at 55 deg / 5% / no interface / 0.64 mm Z / 0.8 mm XY removed the unwanted support column but was still too hard to separate. Its one-off follow-up uses 60 deg, 3%, no interface/roof, 0.80 mm Z/top, and 1.2 mm XY, accepting a much rougher underside. That backpack-only profile also uses 225C, 102% general flow, 103% wall/skin flow, and 10s minimum layer time for the small upper layers that delaminated.
 
 If the slicer preview does not show supports under the problematic underside, do not print yet. Change support placement / threshold until the preview actually shows support where needed.
 

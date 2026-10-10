@@ -1,5 +1,20 @@
 # littleHands Project Log
 
+## 2026-10-10 Backpack max-easy-release first-layer retry
+
+- The first print of the new `60°` / `3%` / no-interface `max-easy-release` file started normally on installed `LH v9`. Host preheat reached the `60C` bed gate and staged `226C` hotend gate, the known clearance lift returned, and atomic LH1 telemetry showed the SD cursor advancing.
+- Near `4.9%` progress and raw `Z0.36`, the operator reported that the first layer had detached and was winding around the nozzle. Normal Stop preserved the interrupted pose, completed the controlled `10 mm` Z lift, stopped the still-active SD file, and confirmed both heater targets and outputs at zero. No power cycle was required.
+- After the operator removed the loose plastic, guarded stopped-print recovery returned to the saved start. The operator-requested first-layer correction lowered the nozzle by exactly `0.2 mm` as two acknowledged `-0.1 mm` application jogs, then saved that physical pose as the new zero. The same verified SD file was started again so the Z-gap correction is tested independently from the support and small-layer profile changes.
+- The retry completed the same `60C` bed and staged `226C` hotend gates, restored the known lift, confirmed the `55C` print-bed target, and sent `M24`. The operator again reported no adhesion and filament winding around the nozzle before the 180-second quiet window ended. Normal Stop completed, lifted Z by `10 mm`, left SD idle, and confirmed both heater targets/outputs off. Because a verified `-0.2 mm` start correction did not produce any adhesion, further blind Z lowering is unsafe; the next attempt requires physical gap/level and surface-condition evidence first.
+- Code review during the retry found that operator-confirmed completion returned before posting the completion progress/log and opening the guarded recovery window. The return now occurs after those UI updates, with a regression assertion that preserves the ordering.
+
+## 2026-10-10 Backpack second breakaway and completion recovery
+
+- The first `max-easy-release` backpack removed the unwanted bed-to-curve support column and its supports separated, but still required excessive force. The final few model layers delaminated.
+- The follow-up one-off preset moves to `60°`, `3%` support, no interface/roof, `0.80 mm` top/Z gap, and `1.2 mm` XY gap. It also uses `225C` body temperature, `102%` general flow, `103%` wall/skin flow, and a `10s` minimum layer time to strengthen the small upper layers without changing the normal profile.
+- Runtime evidence showed a CH340 detach at 13:04 while the printer continued autonomously. The port later returned, but the GUI stayed disconnected and therefore retained the safe active-print marker at the last known 79.4%. Active-print monitoring now periodically reselects only the sole safe printer-like port, then uses plain `M930` to compare the retained LH1 session. It still cannot infer a successful finish from stale telemetry; restored `sd=idle` requires explicit operator result confirmation.
+- Owner-only control gained explicit guarded commands for operator-confirmed normal completion, predicted-end return, and post-move physical-start verification. These use the same GUI state machine and single USB worker; they do not expose raw G-code or treat acknowledgements as physical proof.
+
 ## 2026-10-10 Preheat lift order and evidence-based power cycles
 
 - During the watched `ESPBACKP.GCO` start, the operator observed that bed preheat occurred while the nozzle was still close to the bed. Conducted heat brought the nozzle to the shared-fan threshold, so the fan opposed the slow hotbed warmup.
