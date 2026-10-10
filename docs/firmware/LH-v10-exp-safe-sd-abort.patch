@@ -1,0 +1,21 @@
+diff --git a/Marlin/Configuration.h b/Marlin/Configuration.h
+--- a/Marlin/Configuration.h
++++ b/Marlin/Configuration.h
+@@
+-#define LH_FIRMWARE_LABEL "LH v9 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedGuard3C60s LH1"
++#define LH_FIRMWARE_LABEL "LH v10 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedGuard3C60s LH1 SafeAbort"
+diff --git a/Marlin/Configuration_adv.h b/Marlin/Configuration_adv.h
+--- a/Marlin/Configuration_adv.h
++++ b/Marlin/Configuration_adv.h
+@@
+-  #define EVENT_GCODE_SD_ABORT "G28XY"
++  //#define EVENT_GCODE_SD_ABORT "G28XY"
+@@
+ #define LITTLE_HANDS_PROTOCOL
++#define LITTLE_HANDS_SAFE_SD_ABORT
+diff --git a/Marlin/src/gcode/host/M115.cpp b/Marlin/src/gcode/host/M115.cpp
+--- a/Marlin/src/gcode/host/M115.cpp
++++ b/Marlin/src/gcode/host/M115.cpp
+@@
+     cap_line(F("LITTLE_HANDS_PROTOCOL"), ENABLED(LITTLE_HANDS_PROTOCOL));
++    cap_line(F("LITTLE_HANDS_SAFE_SD_ABORT"), ENABLED(LITTLE_HANDS_SAFE_SD_ABORT));

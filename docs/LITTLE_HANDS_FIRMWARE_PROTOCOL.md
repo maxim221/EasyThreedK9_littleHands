@@ -1,6 +1,6 @@
 # Little Hands firmware protocol
 
-Status: experimental `LH1`; installed and serial-validated in the `LH v9 EXP ... LH1` candidate. It is not yet the validated printing baseline.
+Status: experimental `LH1`; installed and serial-validated in `LH v10 EXP ... LH1 SafeAbort`. v10 adds a separately advertised motion-safety capability for guarded stopped-print return. It is not yet the validated printing baseline until the watched Stop-and-return path passes.
 
 ## Why this is a Marlin fork
 
@@ -15,6 +15,14 @@ Cap:LITTLE_HANDS_PROTOCOL:1
 ```
 
 Hosts must keep the existing Marlin polling path when this capability is absent.
+
+v10 additionally advertises:
+
+```text
+Cap:LITTLE_HANDS_SAFE_SD_ABORT:1
+```
+
+This means `M524` does not inject `EVENT_GCODE_SD_ABORT G28XY`. It does not by itself authorize a return move: Little Hands must have a trusted start before Stop and must receive a complete post-`M524` `M114` whose X/Y match the captured paused position in the same live session. Any restart, USB/session change, incomplete acknowledgement, changed X/Y, or manual jog revokes the permission.
 
 ## `M930` snapshot
 
@@ -44,7 +52,7 @@ The host accepts only a complete line and never combines fields from different r
 
 Neither `lp*` nor `sp*` proves physical motion. The K9 has no trustworthy homing endstops or axis encoders; skipped steps and a moved unpowered axis remain invisible to firmware. `LH1` therefore improves telemetry and reset detection but does not authorize unattended return-to-start after reset, USB re-enumeration, motor-off, or uncertain motion.
 
-The next protocol stage may add a session-bound guarded return transaction, but it must retain visual operator confirmation and the validated segmented K9 motion profile. It must never treat a protocol acknowledgement as proof that the carriage or bed physically moved.
+The v10 SafeAbort workflow adds a session-bound guarded return gate while retaining visual operator confirmation and the validated segmented K9 motion profile. It never treats a capability or protocol acknowledgement alone as proof that the carriage or bed physically moved.
 
 ## Candidate artifact
 
@@ -56,3 +64,12 @@ sha256 3a9d190720678773c587ba5fbf3a2c08c897a636749df8e1f76ccae79fdbf6d2
 ```
 
 The build and a non-motion serial test passed. `M115`, `M105`, `M27`, three sequential `M930` snapshots, and `M503` were verified after flashing; no heater or axis command was sent. Do not promote it as the normal printing baseline until Little Hands consumes `LH1` and an operator explicitly approves a watched print-path test.
+
+The SafeAbort candidate artifact is:
+
+```text
+firmware/LH-v10-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-lh1-safeabort-mksLite.bin
+sha256 32470ead999c363c4849f172fae315c1f2ae8f756a28651f2318857f7840c460
+```
+
+The reproducible PlatformIO build passed with flash usage `136932/262144` bytes and RAM usage `15200/49152` bytes. The 2026-10-10 flash and non-motion validation confirmed the v10 identity, both protocol capabilities, idle SD, fresh LH1, and zero heater targets/outputs. The first Stop-and-return movement still requires separate operator approval and direct observation.

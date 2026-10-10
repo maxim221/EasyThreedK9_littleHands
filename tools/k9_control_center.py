@@ -379,6 +379,18 @@ LH_FIRMWARE_CATALOG = {
         "marlin": "2.1.2.5",
         "m92": (606.0, 606.0, 600.0, 1040.0),
     },
+    "LH-v9-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-lh1-mksLite.bin": {
+        "lh_version": "LH v9 EXP",
+        "label": "LH v9 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedGuard3C60s LH1",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 600.0, 1040.0),
+    },
+    "LH-v10-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-lh1-safeabort-mksLite.bin": {
+        "lh_version": "LH v10 EXP",
+        "label": "LH v10 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedGuard3C60s LH1 SafeAbort",
+        "marlin": "2.1.2.5",
+        "m92": (606.0, 606.0, 600.0, 1040.0),
+    },
     "ecf-k9-et4000plus-mksLite.bin": {
         "lh_version": "LH ECF",
         "label": "LH ECF Baseline",
@@ -569,6 +581,7 @@ class K9ControlCenter:
         self.last_fw_line = ""
         self.last_fw_identity = ""
         self.last_m115_raw = ""
+        self.last_m115_usb_generation = ""
         self.lh1_protocol_known = False
         self.last_m503_raw = ""
         self.last_position_line = "X:? Y:? Z:?"
@@ -2206,6 +2219,14 @@ class K9ControlCenter:
     def _home_is_trusted(self) -> bool:
         return bool(self.home_trust == HOME_TRUST_TRUSTED and self.session_zero_defined)
 
+    def _safe_sd_abort_supported(self) -> bool:
+        current_generation = sdtool.serial_port_usb_generation(self._port()) if self._port() else ""
+        return bool(
+            current_generation
+            and current_generation == self.last_m115_usb_generation
+            and "Cap:LITTLE_HANDS_SAFE_SD_ABORT:1" in self.last_m115_raw
+        )
+
     def _has_predicted_print_end_recovery_model(self) -> bool:
         return bool(
             self.predicted_print_end_valid
@@ -2241,6 +2262,7 @@ class K9ControlCenter:
             and not self.preheat_lift_recovery_available
             and self.bed_clear_before_go_start_required
             and (self.stopped_print_pose is not None or self.stopped_print_live_return_available)
+            and not (self.stopped_print_live_return_available and self._safe_sd_abort_supported())
         )
 
     def _sync_home_controls(self) -> None:
@@ -4150,6 +4172,10 @@ class K9ControlCenter:
                 "next_sd_start_requires_power_cycle": self.next_sd_start_requires_power_cycle,
                 "next_sd_start_power_cycle_reason": self.next_sd_start_power_cycle_reason,
                 "printer_halted": self.printer_halted,
+                "safe_sd_abort_supported": self._safe_sd_abort_supported(),
+                "safe_stop_return_available": bool(
+                    self.stopped_print_live_return_available and self._safe_sd_abort_supported()
+                ),
             },
             "usb": {
                 "generation": sdtool.serial_port_usb_generation(self._port()) if self._port() else "",
@@ -4278,6 +4304,33 @@ class K9ControlCenter:
                 if reason:
                     self.log(reason)
                 self.upload_gcode()
+            elif command == "flash-firmware":
+                if arguments.get("confirm") != "flash-known-firmware-and-reboot":
+                    raise RuntimeError(
+                        "flash-firmware requires flash-known-firmware-and-reboot confirmation"
+                    )
+                if self.current_print_file != "-" or self.preheat_active:
+                    raise RuntimeError("firmware flash is blocked while SD start/print is active")
+                source = Path(str(arguments.get("path") or "")).expanduser().resolve()
+                firmware_dir = DEFAULT_FIRMWARE.parent.resolve()
+                try:
+                    source.relative_to(firmware_dir)
+                except ValueError as exc:
+                    raise RuntimeError("firmware must be a known artifact from the project firmware directory") from exc
+                if not source.is_file() or source.name not in LH_FIRMWARE_CATALOG:
+                    raise RuntimeError("firmware artifact is missing or is not in the Little Hands catalog")
+                heater_values = (
+                    self.last_temp_target,
+                    self.last_heater_power,
+                    self.last_bed_temp_target,
+                    self.last_bed_heater_power,
+                )
+                if any(value is None for value in heater_values):
+                    raise RuntimeError("fresh complete heater telemetry is required before firmware flash")
+                if any(float(value or 0) > 0 for value in heater_values):
+                    raise RuntimeError("firmware flash requires both heater targets and outputs to be zero")
+                self.firmware_var.set(str(source))
+                self.flash_firmware(source_override=source, confirmed=True)
             elif command == "heaters-off":
                 if arguments.get("confirm") != "safety-shutdown":
                     raise RuntimeError("heaters-off requires confirm=safety-shutdown")
@@ -4587,6 +4640,9 @@ class K9ControlCenter:
         self.metrics_sections[key_str] = value_str
         if key_str == "m115":
             self.last_m115_raw = value_str
+            self.last_m115_usb_generation = (
+                sdtool.serial_port_usb_generation(self._port()) if self._port() else ""
+            )
             if "Cap:LITTLE_HANDS_PROTOCOL:1" in value_str:
                 self.lh1_protocol_known = True
             self._refresh_fw_identity()
@@ -6776,12 +6832,12 @@ class K9ControlCenter:
 
         self._run_task("Заливка и запуск G-code", task)
 
-    def flash_firmware(self) -> None:
-        source = Path(self.firmware_var.get().strip()).expanduser()
+    def flash_firmware(self, *, source_override: Path | None = None, confirmed: bool = False) -> None:
+        source = source_override or Path(self.firmware_var.get().strip()).expanduser()
         if not source.is_file():
             messagebox.showerror("K9 Control Center", "Выбери существующий .bin файл прошивки.")
             return
-        if not messagebox.askyesno(
+        if not confirmed and not messagebox.askyesno(
             "K9 Control Center",
             "Залить прошивку на SD принтера и выполнить M997?\nПосле этого принтер перезагрузится.",
         ):
@@ -7332,8 +7388,13 @@ class K9ControlCenter:
             stop_pose: tuple[float, float, float] | None = None
             stopped_display = self.current_print_display if self.current_print_display != "-" else self.current_print_file
             trusted_zero_before_stop = self._home_is_trusted()
+            safe_sd_abort = self._safe_sd_abort_supported()
             try:
-                out, stop_pose = sdtool.stop_sd_print_with_position(self._port(), self._baud())
+                out, stop_pose = sdtool.stop_sd_print_with_position(
+                    self._port(),
+                    self._baud(),
+                    expect_safe_sd_abort=safe_sd_abort,
+                )
                 if ";LH_STOP_CONFIRMED:1" not in out:
                     error_text = self._recovery_text("stop_unknown")
                     stop_pose = None
@@ -7359,8 +7420,13 @@ class K9ControlCenter:
                     self._clear_preheat_lift_recovery(save=False)
                 self.stopped_print_pose = stop_pose
                 self.stopped_print_display = stopped_display or "-"
+                safe_abort_position_verified = ";LH_SAFE_ABORT_POSITION_VERIFIED:1" in out
                 self.stopped_print_live_return_available = bool(
-                    stop_pose is None and error_text is None and trusted_zero_before_stop and self._port()
+                    safe_sd_abort
+                    and safe_abort_position_verified
+                    and error_text is None
+                    and trusted_zero_before_stop
+                    and self._port()
                 )
                 if stop_pose is not None:
                     stop_pose_log = f"X{stop_pose[0]:.2f} Y{stop_pose[1]:.2f} Z{stop_pose[2]:.2f}"
@@ -7381,13 +7447,22 @@ class K9ControlCenter:
                 self._post("log", f"Стоп отправлен локально, но принтер ответил неуверенно: {error_text}")
             else:
                 self._post("log", "Стоп отправлен")
-            self._post(
-                "log",
-                "После остановки печати сохранённый старт сброшен: эта K9 может сообщать X0/Y0 после Stop, "
-                "даже если физически сопло осталось не в стартовой X/Y-позе. После удаления пластика со стола "
-                "'К сохранённому старту' будет доступна только через recovery-подтверждение: по снятой stop-позе или через "
-                "live-сессию, если позицию снять не удалось, но питание/порт ещё не перезапускались.",
-            )
+            if self.stopped_print_live_return_available:
+                self._post(
+                    "log",
+                    "SafeAbort подтверждён: M524 не вводил скрытое движение X/Y, post-stop M114 совпал "
+                    "с позицией остановки, а сохранённый ноль остался в текущей Marlin-сессии. Старт временно "
+                    "помечен недоверенным до защищённого возврата. Убери деталь и мусор "
+                    "со стола, затем нажми 'К сохранённому старту'; приложение использует проверенную live-сессию "
+                    "SafeAbort и после движения попросит визуально подтвердить физический старт.",
+                )
+            else:
+                self._post(
+                    "log",
+                    "После остановки печати сохранённый старт сброшен: без подтверждённой SafeAbort-capability эта K9 "
+                    "может сообщать X0/Y0 после Stop, даже если физически сопло осталось не в стартовой X/Y-позе. "
+                    "Восстанови старт короткими наблюдаемыми ручными шагами и нажми 'Запомнить старт'.",
+                )
             if stop_pose is not None:
                 self._post(
                     "log",
@@ -7938,6 +8013,32 @@ class K9ControlCenter:
 
     def _confirm_live_stopped_session_return(self) -> bool:
         lang = self.lang_var.get().strip() or "ru"
+        if self.stopped_print_live_return_available and self._safe_sd_abort_supported():
+            prompt = {
+                "en": (
+                    "Return to the saved start after Stop?\n\n"
+                    "The firmware advertises safe SD abort, and Little Hands verified that X/Y did not change "
+                    "across M524. The same live Marlin session still holds the saved zero.\n\n"
+                    "Continue only after removing the part, brim, and debris from the bed. Watch the whole move "
+                    "and keep a hand near printer power. A visual confirmation is still required afterwards."
+                ),
+                "zh": (
+                    "Stop 后返回保存的起点吗？\n\n"
+                    "固件声明了安全 SD 中止，Little Hands 已验证 M524 前后 X/Y 没有变化。"
+                    "同一实时 Marlin 会话仍保留保存的零点。\n\n"
+                    "只有在取下模型、brim 和碎屑后才能继续。请全程观察移动并把手放在电源附近；"
+                    "移动后仍需目视确认。"
+                ),
+                "ru": (
+                    "Вернуться к сохранённому старту после Stop?\n\n"
+                    "Прошивка объявила безопасный SD-abort, а Little Hands проверил, что M524 не изменил X/Y. "
+                    "Текущая Marlin-сессия всё ещё хранит сохранённый ноль.\n\n"
+                    "Продолжай только после удаления детали, brim и мусора со стола. Наблюдай за всем движением "
+                    "и держи руку рядом с питанием; после возврата всё равно потребуется визуальное подтверждение."
+                ),
+            }.get(lang) or "Return to the saved start using the verified safe-abort session?"
+            return bool(messagebox.askyesno("Little Hands", prompt, parent=self.root, default=messagebox.NO))
+
         prompt = {
             "en": (
                 "Try 'Go to saved start' after a stopped print?\n\n"
@@ -7967,7 +8068,7 @@ class K9ControlCenter:
             "Попробовать 'К сохранённому старту' по текущей live-сессии после Stop?\n\n"
             "Продолжай только если стол свободен; после движения нажми 'Запомнить старт' только при правильной физической позе."
         )
-        return bool(messagebox.askyesno("Little Hands", prompt))
+        return bool(messagebox.askyesno("Little Hands", prompt, parent=self.root, default=messagebox.NO))
 
     def go_print_home(
         self,
@@ -8008,6 +8109,7 @@ class K9ControlCenter:
             use_preheat_lift_recovery = True
         use_stopped_print_pose = False
         stopped_pose = self.stopped_print_pose
+        use_live_stopped_session_return = False
         if not use_preheat_lift_recovery and self._stopped_print_manual_recovery_required():
             self._show_stopped_print_manual_recovery()
             return
@@ -8015,14 +8117,25 @@ class K9ControlCenter:
             not use_preheat_lift_recovery
             and not self._home_is_trusted()
             and self.bed_clear_before_go_start_required
+            and self.stopped_print_live_return_available
+            and self._safe_sd_abort_supported()
+        ):
+            if not self._confirm_live_stopped_session_return():
+                return
+            use_live_stopped_session_return = True
+        if (
+            not use_live_stopped_session_return
+            and not use_preheat_lift_recovery
+            and not self._home_is_trusted()
+            and self.bed_clear_before_go_start_required
             and stopped_pose is not None
         ):
             if not self._confirm_aborted_print_recovery(stopped_pose):
                 return
             use_stopped_print_pose = True
-        use_live_stopped_session_return = False
         if (
             not use_stopped_print_pose
+            and not use_live_stopped_session_return
             and not use_preheat_lift_recovery
             and not self._home_is_trusted()
             and self.bed_clear_before_go_start_required
@@ -8055,8 +8168,8 @@ class K9ControlCenter:
             )
         elif use_live_stopped_session_return:
             self.log(
-                "Выполняю live-возврат после Stop без M114: пробую текущий Marlin-ноль этой USB-сессии. "
-                "После движения оператор должен подтвердить физический старт кнопкой 'Запомнить старт'."
+                "Выполняю guarded live-возврат после Stop: SafeAbort и неизменность X/Y через M524 подтверждены, "
+                "возвращаюсь к X0 Y0 Z0 в той же Marlin-сессии. После движения требуется визуальное подтверждение."
             )
         elif self._can_return_from_known_post_print_pose() and not self._home_is_trusted():
             post_print_pose = self.post_print_pose
@@ -8120,7 +8233,13 @@ class K9ControlCenter:
                         end_z=stopped_pose[2],
                     )
                 elif use_live_stopped_session_return:
-                    out = sdtool.goto_print_home(self._port(), self._baud())
+                    assert stopped_pose is not None
+                    out = sdtool.goto_print_home_from_live_stop(
+                        self._port(),
+                        self._baud(),
+                        stop_x=stopped_pose[0],
+                        stop_z=stopped_pose[2],
+                    )
                 elif use_predicted_print_end_pose:
                     assert self.predicted_print_end_z is not None
                     out = sdtool.goto_print_home_from_predicted_end(
@@ -8146,6 +8265,7 @@ class K9ControlCenter:
                 raise
             physical_xy_return_needs_confirmation = bool(
                 use_stopped_print_pose
+                or use_live_stopped_session_return
                 or use_post_print_pose
                 or use_predicted_print_end_pose
                 or (not use_preheat_lift_recovery and not use_live_stopped_session_return)
@@ -8188,14 +8308,10 @@ class K9ControlCenter:
                 self._post("physical-return-confirmation", "stopped-print")
             elif use_live_stopped_session_return:
                 self._clear_predicted_print_end(save=False)
-                self._save_print_state("live-stop-return-attempted", force=True)
+                self._save_print_state("return-awaiting-physical-confirmation", force=True)
                 self._post("progress", ("Live recovery после стопа: проверь старт", 0.0))
-                self._post("log", out.strip() or "Live-возврат после Stop выполнен по текущему Marlin-нолю")
-                self._post(
-                    "log",
-                    "Если сопло физически стоит в правильной стартовой позе, нажми 'Запомнить старт'. "
-                    "Если нет - выставь старт ручными кнопками и только потом нажми 'Запомнить старт'.",
-                )
+                self._post("log", out.strip() or "SafeAbort-возврат после Stop выполнен по текущему Marlin-нолю")
+                self._post("physical-return-confirmation", "safe-abort-stop")
             elif use_post_print_pose:
                 self._clear_predicted_print_end(save=False)
                 self._save_print_state("return-awaiting-physical-confirmation", force=True)
@@ -8546,6 +8662,9 @@ class K9ControlCenter:
                     self._post("pos", pos_line)
                     self._post("metrics", ("m114", pos_line))
             self._clear_preheat_lift_recovery(save=False)
+            # A manual move breaks the exact same-session pose chain used by the
+            # SafeAbort return. Keep the adjusted pose only as diagnostic help.
+            self.stopped_print_live_return_available = False
             updated_stopped_pose = self._update_stopped_print_pose_after_jog(stopped_pose_before_jog, axis, distance)
             if updated_stopped_pose is not None and self.bed_clear_before_go_start_required:
                 self.stopped_print_pose = updated_stopped_pose
@@ -8554,7 +8673,8 @@ class K9ControlCenter:
                     "log",
                     "Recovery-поза после ручного сдвига обновлена: "
                     f"X{updated_stopped_pose[0]:.2f} Y{updated_stopped_pose[1]:.2f} Z{updated_stopped_pose[2]:.2f}. "
-                    "'К сохранённому старту' по-прежнему сможет вернуть принтер к сохранённому 0 после подтверждения.",
+                    "Она сохранена только для диагностики; продолжи короткими контролируемыми jog-командами, "
+                    "вручную выставь старт и нажми 'Запомнить старт'.",
                 )
             useful_lines = [
                 line.strip()

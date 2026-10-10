@@ -192,7 +192,8 @@ G92 X0 Y0 Z0
 - firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
 - `firmware/LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin` 是面向冷风环境的候选固件。它只把热床升温监视窗口从 `60s` 改为 `180s`；`WATCH_BED_TEMP_INCREASE 2`、热床 thermal-runaway 保护、`BED_MAXTEMP 70` 和应用的 `60C` 目标上限保持不变。
 - `firmware/LH-v8-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-mksLite.bin` 保留 v7 的升温监视，并把保持保护从 `2C/20s` 改为 `3C/60s`。之后的中心气流测试表明，即使 `B@:127` 满功率，热床仍降到 `55.65C`，因此 v8 不能证明可维持 60C，也不得继续放宽保护。
-- `firmware/LH-v9-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-lh1-mksLite.bin` 是已安装的协议实验版，保留 v8 的运动与热保护配置。无运动串口测试已确认 `Cap:LITTLE_HANDS_PROTOCOL:1`、原子 `M930`/`LH1` 快照、SD 空闲、加热器目标和输出为零，以及运动配置未变。它尚不是已验证的打印基线；逻辑坐标和步进计数不能证明物理运动。
+- `firmware/LH-v9-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-lh1-mksLite.bin` 是第一个安装的协议实验版，保留 v8 的运动与热保护配置。
+- `firmware/LH-v10-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-lh1-safeabort-mksLite.bin` 是当前安装的 SafeAbort 候选版。它与 v9 的唯一区别是移除危险的 `EVENT_GCODE_SD_ABORT G28XY` 移动，并声明 `Cap:LITTLE_HANDS_SAFE_SD_ABORT:1`。无运动验证已确认固件身份、SD 空闲、最新 LH1，以及加热器目标和输出均为零。只有完整的 post-`M524` `M114` 在同一会话中证明 X/Y 未变化后，Little Hands 才允许 Stop 后返回；仅有 capability 字符串绝不授权移动。
 - 现场依据是 Marlin 明确返回 `Heating failed ... Heater_ID: bed`：已温热的平台先被风扇冷却，随后在旧的 `60s` 窗口内未能上升 `2C`。这是固件 halt，不是应用发送了 `M524`，也不是 G-code 中的停止命令。
 - 2026-09-29 的有人监看测试复现了风冷造成的初始降温；随后热床在新的 `180s` 窗口内恢复超过 `2C`，并在没有 `Heating failed` 的情况下达到 `59C` 启动阈值。之后保温阶段发生 CH341 detach/attach，但 `M114 X50 Y50 Z0` 被保留，说明丢失的是 USB 遥测而不是 Marlin 运动会话；heater-only 测试程序随后明确关闭了两个加热器。
 - Marlin bed sensor: `TEMP_SENSOR_BED 4` (`Generic 10K`), `BED_MAXTEMP 70`, bed preheat presets `50C` / `60C`；由于 `BED_OVERSHOOT 10`，实际可设目标上限约为 `60C`

@@ -1,5 +1,15 @@
 # littleHands Project Log
 
+## 2026-10-10 SafeAbort stopped-print return candidate
+
+- The operator required `Go to saved start` to remain usable after a normal Stop. The root blocker was firmware v9 injecting `EVENT_GCODE_SD_ABORT G28XY` after `M524`, not the return button itself.
+- Added firmware v10 SafeAbort: it removes that injected axis motion, retains the v9 LH1, motion, heater, and bed-safety settings, and advertises `Cap:LITTLE_HANDS_SAFE_SD_ABORT:1` through `M115`.
+- Stop now requests the safe behavior only when that capability was freshly observed, captures the interrupted position, performs the controlled Z lift, sends `M524`, and requires a complete post-abort `M114` whose X/Y match the captured position. Only then does the same live session expose guarded `Go to saved start`; the operator must clear the bed first and visually confirm the physical result afterwards.
+- Missing capability, changed X/Y, incomplete replies, app restart, USB/session change, or manual movement keep the established manual-recovery fallback. The safe live return uses local-neutral X segments no longer than 50 mm at F600, Y at F240, and never lowers Z before lateral clearance.
+- Built `firmware/LH-v10-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-lh1-safeabort-mksLite.bin` successfully. SHA256: `32470ead999c363c4849f172fae315c1f2ae8f756a28651f2318857f7840c460`. Flash usage is 136,932/262,144 bytes and RAM usage is 15,200/49,152 bytes.
+- The operator cancelled the next print during bed preheat and explicitly required no nozzle movement. SD was still idle, so Little Hands terminated the pending host start before `M24`, sent heater-off only after reconnect, and left the known 10 mm preheat lift physically untouched. Fresh telemetry then confirmed hotend `0/@0` and bed `0/B@0`.
+- Flashed v10 through the owner-only API. `M115` confirms `LH v10 EXP ... LH1 SafeAbort`, `Cap:LITTLE_HANDS_SAFE_SD_ABORT:1`, and the retained LH1 capability. Automatic `M502/M500` completed, fresh LH1 reports `sd=idle` with both heater targets/outputs zero, and no axis command was sent during cancellation, flashing, or validation. The physical nozzle remains at the retained preheat lift; the firmware reboot reset logical coordinates, so home stays uncertain until guarded lift recovery or a physically verified new saved start.
+
 ## 2026-10-10 Bed-level lock is explicit after Stop
 
 - The operator reported that bed calibration appeared not to work after Stop. The five point buttons were correctly disabled because the physical start was no longer trusted, but the GUI showed no reason next to them.

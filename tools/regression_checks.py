@@ -543,6 +543,7 @@ def main() -> int:
     failures: list[str] = []
     marlin = read("tools/k9_marlin_sd.py")
     app = read("tools/k9_control_center.py")
+    cli = read("tools/k9_agent_cli.py")
     slicer = read("tools/k9_cura_slice.py")
     cura_quality = read("docs/cura/quality_changes/codex_k9_warmmat_quality.inst.cfg")
     cura_extruder = read("docs/cura/quality_changes/codex_k9_warmmat_extruder_quality.inst.cfg")
@@ -553,6 +554,10 @@ def main() -> int:
     firmware_watch_patch = read("docs/firmware/LH-v5-watch180.patch")
     firmware_bed_watch_patch = read("docs/firmware/LH-v7-exp-bed-watch180.patch")
     firmware_bed_guard_patch = read("docs/firmware/LH-v8-exp-bed-guard3c60s.patch")
+    firmware_safe_abort_patch = read("docs/firmware/LH-v10-exp-safe-sd-abort.patch")
+    firmware_config = read("firmware_src/ECF-Marlin-upstream/Marlin/Configuration.h")
+    firmware_adv_config = read("firmware_src/ECF-Marlin-upstream/Marlin/Configuration_adv.h")
+    firmware_m115 = read("firmware_src/ECF-Marlin-upstream/Marlin/src/gcode/host/M115.cpp")
 
     require("SOFT_TRAVEL_ACCEL = 80" in marlin, "K9 service travel acceleration must remain M204 T80.", failures)
     require(
@@ -619,6 +624,16 @@ def main() -> int:
         "LH-v8-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-mksLite.bin" in app
         and "Bed10K Max70 BedGuard3C60s" in app,
         "Little Hands firmware catalog must recognize the LH v8 BedGuard3C60s candidate.",
+        failures,
+    )
+    require(
+        "LH v10 EXP" in firmware_config
+        and "SafeAbort" in firmware_config
+        and re.search(r'^\s*#define EVENT_GCODE_SD_ABORT\s+"G28XY"', firmware_adv_config, re.MULTILINE) is None
+        and "#define LITTLE_HANDS_SAFE_SD_ABORT" in firmware_adv_config
+        and 'cap_line(F("LITTLE_HANDS_SAFE_SD_ABORT"), ENABLED(LITTLE_HANDS_SAFE_SD_ABORT));' in firmware_m115
+        and "LITTLE_HANDS_SAFE_SD_ABORT" in firmware_safe_abort_patch,
+        "LH v10 must remove abort-time G28XY and advertise the SafeAbort capability through M115.",
         failures,
     )
     require(
@@ -977,6 +992,26 @@ def main() -> int:
         failures,
     )
     require(
+        "def _safe_sd_abort_supported" in app
+        and "current_generation == self.last_m115_usb_generation" in app
+        and 'expect_safe_sd_abort=safe_sd_abort' in app
+        and ";LH_SAFE_ABORT_POSITION_VERIFIED:1" in app
+        and "goto_print_home_from_live_stop" in app
+        and "Cap:LITTLE_HANDS_SAFE_SD_ABORT:1" in app
+        and "LH_SAFE_ABORT_POSITION_VERIFIED" in marlin,
+        "Guarded stopped-print return must require firmware capability plus verified unchanged post-M524 X/Y.",
+        failures,
+    )
+    require(
+        'command == "flash-firmware"' in app
+        and "flash-known-firmware-and-reboot" in app
+        and "source.name not in LH_FIRMWARE_CATALOG" in app
+        and "firmware flash requires both heater targets and outputs to be zero" in app
+        and 'sub.add_parser("flash-firmware")' in cli,
+        "Owner-only firmware flashing must be explicit, catalog-bound, idle-only, and heater-off guarded.",
+        failures,
+    )
+    require(
         'if data.get("bed_clear_before_go_start_required"):' in app
         and 'if phase.startswith("stopped") and data.get("bed_clear_before_go_start_required"):' not in app
         and "They must not discard the separate\n        # stopped-print recovery marker" in app,
@@ -1197,6 +1232,11 @@ def main() -> int:
     require(
         "_update_stopped_print_pose_after_jog" in app and "stopped-jog-updated" in app,
         "Manual jog after Stop must update, not erase, the stopped-print recovery pose.",
+        failures,
+    )
+    require(
+        "A manual move breaks the exact same-session pose chain" in app,
+        "A successful manual jog must revoke the SafeAbort automatic-return permission.",
         failures,
     )
     require(

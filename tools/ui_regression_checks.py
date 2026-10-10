@@ -124,6 +124,36 @@ class OfflineUiChecks(unittest.TestCase):
 
         self.app._run_task.assert_not_called()
 
+    def test_verified_safe_abort_exposes_guarded_return(self):
+        self.app.current_print_file = "-"
+        self.app.home_trust = appmod.HOME_TRUST_UNCERTAIN
+        self.app.session_zero_defined = False
+        self.app.bed_clear_before_go_start_required = True
+        self.app.stopped_print_pose = (12.0, 34.0, 10.0)
+        self.app.stopped_print_live_return_available = True
+        self.app.preheat_lift_recovery_available = False
+        self.app.port_var.set("/dev/ttyUSB-test")
+
+        with patch.object(appmod.sdtool, "serial_port_usb_generation", return_value="usb-generation-1"):
+            self.app.last_m115_usb_generation = "usb-generation-1"
+            self.app.last_m115_raw = "Cap:LITTLE_HANDS_SAFE_SD_ABORT:0"
+            self.assertTrue(self.app._stopped_print_manual_recovery_required())
+            self.app.last_m115_raw = "Cap:LITTLE_HANDS_SAFE_SD_ABORT:1"
+            self.assertFalse(self.app._stopped_print_manual_recovery_required())
+            self.app._sync_home_controls()
+            self.assertEqual(self.app.go_start_button.cget("text"), self.app._t("go_start"))
+
+            self.app._run_task = Mock()
+            self.app._rehydrate_known_post_print_pose_from_state = Mock()
+            self.app._select_single_safe_printer_port_for_recovery = Mock(return_value=False)
+            with patch.object(appmod.messagebox, "askyesno", return_value=False) as question:
+                self.app.go_print_home()
+            question.assert_called_once()
+            self.app._run_task.assert_not_called()
+
+            self.app.last_m115_usb_generation = "older-generation"
+            self.assertTrue(self.app._stopped_print_manual_recovery_required())
+
     def test_level_points_explain_start_lock_and_unlock_after_save(self):
         self.app.current_print_file = "-"
         self.app.home_trust = appmod.HOME_TRUST_UNCERTAIN

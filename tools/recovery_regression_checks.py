@@ -204,6 +204,56 @@ class RecoveryChecks(unittest.TestCase):
         self.assertIn("M524", commands)
         self.assertTrue(any(command.startswith("G1 Z") for command in commands))
 
+    def test_safe_abort_requires_matching_post_stop_xy(self):
+        commands = []
+
+        def send(ser, command):
+            commands.append(command)
+
+        def matching_reply(ser, command, **kwargs):
+            commands.append(command)
+            if command == "M27":
+                return "SD printing byte 120/1000\nok\n"
+            if command == "M114":
+                return "X:41.30 Y:59.39 Z:10.00 E:507.95\nok\n"
+            return "ok\n"
+
+        with patch.object(recovery.sdtool, "open_serial"), \
+             patch.object(recovery.sdtool, "sync_ascii"), \
+             patch.object(recovery.sdtool, "send_line", side_effect=send), \
+             patch.object(recovery.sdtool, "read_for", return_value="X:41.30 Y:59.39 Z:0.36 E:507.95\nok\n"), \
+             patch.object(recovery.sdtool.time, "sleep"), \
+             patch.object(recovery.sdtool, "send_line_wait_ok", side_effect=matching_reply):
+            result, pose = recovery.sdtool.stop_sd_print_with_position(
+                "fake", 115200, expect_safe_sd_abort=True,
+            )
+        self.assertEqual(pose, (41.3, 59.39, 10.0))
+        self.assertIn(";LH_SAFE_ABORT_POSITION_VERIFIED:1", result)
+
+        m114_count = 0
+
+        def shifted_reply(ser, command, **kwargs):
+            nonlocal m114_count
+            if command == "M27":
+                return "SD printing byte 120/1000\nok\n"
+            if command == "M114":
+                m114_count += 1
+                if m114_count >= 2:
+                    return "X:0.00 Y:0.00 Z:10.00 E:507.95\nok\n"
+                return "X:41.30 Y:59.39 Z:10.00 E:507.95\nok\n"
+            return "ok\n"
+
+        with patch.object(recovery.sdtool, "open_serial"), \
+             patch.object(recovery.sdtool, "sync_ascii"), \
+             patch.object(recovery.sdtool, "send_line"), \
+             patch.object(recovery.sdtool, "read_for", return_value="X:41.30 Y:59.39 Z:0.36 E:507.95\nok\n"), \
+             patch.object(recovery.sdtool.time, "sleep"), \
+             patch.object(recovery.sdtool, "send_line_wait_ok", side_effect=shifted_reply):
+            result, _pose = recovery.sdtool.stop_sd_print_with_position(
+                "fake", 115200, expect_safe_sd_abort=True,
+            )
+        self.assertIn(";LH_SAFE_ABORT_POSITION_VERIFIED:0", result)
+
     def test_rejected_or_corrupt_reply_is_not_acknowledged_by_trailing_ok(self):
         bad = [b'echo:Unknown command: "M104 S0"\nok\n',
                b'echo:Unknown command: "\xffM108"\nok\n',

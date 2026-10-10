@@ -915,6 +915,45 @@ def goto_print_home(port: str, baud: int, *, per_command_timeout: float = 45.0) 
     )
 
 
+def goto_print_home_from_live_stop(
+    port: str,
+    baud: int,
+    *,
+    stop_x: float,
+    stop_z: float,
+) -> str:
+    """Return through the still-live saved-zero model after verified safe M524.
+
+    The caller must have verified that M524 introduced no X/Y motion and that
+    the same Marlin session still owns the saved zero. X uses the validated
+    local-neutral <=50 mm segments; Z is never lowered before X/Y clear the
+    stopped part.
+    """
+    travel_z = min(100.0, max(stop_z, SAFE_HOME_CLEARANCE_Z))
+    commands = [
+        "M17",
+        "G90",
+        "M211 S0",
+        f"M204 P{SOFT_TRAVEL_ACCEL} T{SOFT_TRAVEL_ACCEL}",
+    ]
+    if travel_z > stop_z:
+        commands.extend([f"G1 Z{travel_z:.3f} F{SAFE_VERTICAL_FEEDRATE}", "M400"])
+    current_x = stop_x
+    for target_x in segmented_linear_targets(stop_x, 0.0, RECOVERY_X_SEGMENT_MM):
+        commands.extend(local_neutral_x_move_commands(target_x - current_x))
+        current_x = target_x
+    commands.extend([
+        f"G1 Y0 F{SAFE_BED_FEEDRATE}",
+        "M400",
+        f"G1 Z0 F{SAFE_VERTICAL_FEEDRATE}",
+        "M400",
+        f"M204 P{RESTORE_TRAVEL_ACCEL} T{RESTORE_TRAVEL_ACCEL}",
+        "G92 X0 Y0 Z0",
+        "M114",
+    ])
+    return run_commands_wait_ok(port, baud, commands, per_command_timeout=60.0)
+
+
 def lift_from_saved_start_for_preheat(port: str, baud: int) -> str:
     return run_commands_wait_ok(
         port,
@@ -1062,7 +1101,12 @@ def stop_sd_print(port: str, baud: int) -> str:
     )
 
 
-def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float, float, float] | None]:
+def stop_sd_print_with_position(
+    port: str,
+    baud: int,
+    *,
+    expect_safe_sd_abort: bool = False,
+) -> tuple[str, tuple[float, float, float] | None]:
     def read_m114_probe(ser: serial.Serial, label: str, *, read_seconds: float = 1.4) -> str:
         send_line(ser, "M114")
         time.sleep(0.25)
@@ -1125,13 +1169,26 @@ def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float,
                 shutdown_confirmed = False
                 stop_out += f";LH stop unconfirmed {command}: {exc}\n"
                 # Even after one failure, attempt each heater-off command.
+        post_stop_position: tuple[float, float, float] | None = None
         if shutdown_confirmed:
             try:
-                stop_out += send_line_wait_ok(ser, "M114", timeout_s=5.0)
+                post_stop_reply = send_line_wait_ok(ser, "M114", timeout_s=5.0)
+                stop_out += post_stop_reply
+                post_stop_position = parse_position(post_stop_reply)
             except Exception as exc:
                 stop_out += f";LH post-stop position unavailable: {exc}\n"
+        safe_abort_position_verified = bool(
+            expect_safe_sd_abort
+            and shutdown_confirmed
+            and not sd_already_idle
+            and interrupted_pose is not None
+            and post_stop_position is not None
+            and abs(post_stop_position[0] - interrupted_pose[0]) <= 0.05
+            and abs(post_stop_position[1] - interrupted_pose[1]) <= 0.05
+        )
         stop_out += f";LH_STOP_SD_ALREADY_IDLE:{int(sd_already_idle)}\n"
         stop_out += f";LH_STOP_CONFIRMED:{int(shutdown_confirmed)}\n"
+        stop_out += f";LH_SAFE_ABORT_POSITION_VERIFIED:{int(safe_abort_position_verified)}\n"
     out = pose_out + controlled_stop_out + stop_out
     return out, parse_stopped_print_position(out)
 
