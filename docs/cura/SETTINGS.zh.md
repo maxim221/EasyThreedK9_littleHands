@@ -179,6 +179,8 @@ G1 Y95 F240 ;Move bed toward the operator
 - Bridge wall flow：`100%`
 - Initial layer line width：约 `155%`
 
+透明 PETG backpack 的单独重试使用 `petg-attached-brim`：`18 mm` brim、`0 mm` brim 间隙、外轮廓和内轮廓均生成 brim、首层线宽 `170%`、模型首层流量 `105%`、brim 流量 `108%`。Cura 会把 brim 路径标记为 `TYPE:SKIRT`；该名称本身并不表示存在间隙。在确认零件仍可安全取下之前，不要把这一加强设置提升为常规配置。
+
 ## 写入 SD 前检查
 
 生成的 G-code 必须满足：

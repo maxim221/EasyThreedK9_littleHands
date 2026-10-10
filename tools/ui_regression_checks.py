@@ -96,6 +96,58 @@ class OfflineUiChecks(unittest.TestCase):
         # The worker must finish successfully before discarding the marker.
         self.assertTrue(self.app.preheat_lift_recovery_available)
 
+    def test_stopped_print_go_start_becomes_manual_recovery_without_motion(self):
+        self.app.current_print_file = "-"
+        self.app.home_trust = appmod.HOME_TRUST_UNCERTAIN
+        self.app.session_zero_defined = False
+        self.app.bed_clear_before_go_start_required = True
+        self.app.stopped_print_pose = (12.0, 34.0, 10.0)
+        self.app.stopped_print_live_return_available = False
+        self.app.preheat_lift_recovery_available = False
+        self.app._run_task = Mock()
+        self.app._rehydrate_known_post_print_pose_from_state = Mock()
+        self.app._select_single_safe_printer_port_for_recovery = Mock(return_value=False)
+
+        expected = {
+            "ru": "Восстановить старт вручную",
+            "en": "Restore start manually",
+            "zh": "手动恢复起点",
+        }
+        for language, label in expected.items():
+            self.app.lang_var.set(language)
+            self.app._apply_language()
+            self.assertEqual(self.app.go_start_button.cget("text"), label)
+            self.assertEqual(str(self.app.go_start_button.cget("state")), "normal")
+            with patch.object(appmod.messagebox, "showwarning") as warning:
+                self.app.go_print_home()
+            warning.assert_called_once()
+
+        self.app._run_task.assert_not_called()
+
+    def test_level_points_explain_start_lock_and_unlock_after_save(self):
+        self.app.current_print_file = "-"
+        self.app.home_trust = appmod.HOME_TRUST_UNCERTAIN
+        self.app.session_zero_defined = False
+
+        locked_labels = {
+            "ru": "Калибр. — сначала сохрани старт:",
+            "en": "Level — save start first:",
+            "zh": "调平 — 请先保存起点:",
+        }
+        for language, label in locked_labels.items():
+            self.app.lang_var.set(language)
+            self.app._apply_language()
+            self.assertEqual(self.app.level_points_label.cget("text"), label)
+            for name in self.app._level_point_button_names():
+                self.assertEqual(str(getattr(self.app, name).cget("state")), "disabled")
+
+        self.app.home_trust = appmod.HOME_TRUST_TRUSTED
+        self.app.session_zero_defined = True
+        self.app._sync_home_controls()
+        self.assertEqual(self.app.level_points_label.cget("text"), "调平:")
+        for name in self.app._level_point_button_names():
+            self.assertEqual(str(getattr(self.app, name).cget("state")), "normal")
+
     def test_manual_switches_language_in_place(self):
         self.app.show_manual()
         for language in ("ru", "en", "zh"):

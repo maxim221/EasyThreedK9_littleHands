@@ -299,6 +299,25 @@ def check_hotbed_workflow(failures: list[str]) -> None:
         "The explicit maximum easy-release preset must remain sparse, interface-free, and widely separated.",
         failures,
     )
+    petg_adhesion, petg_extruder = slicermod.k9_profile_settings(
+        18,
+        hotbed_target=60,
+        support_preset="max-easy-release",
+        adhesion_preset="petg-attached-brim",
+    )
+    require(
+        petg_adhesion["adhesion_type"] == "brim"
+        and petg_adhesion["brim_width"] == "18"
+        and petg_adhesion["brim_gap"] == "0"
+        and petg_adhesion["brim_outside_only"] == "False"
+        and petg_extruder["initial_layer_line_width_factor"] == "170"
+        and petg_extruder["material_flow_layer_0"] == "105"
+        and petg_extruder["wall_0_material_flow_layer_0"] == "105"
+        and petg_extruder["skin_material_flow_layer_0"] == "105"
+        and petg_extruder["skirt_brim_material_flow"] == "108",
+        "The PETG attached-brim one-off must explicitly close the gap and strengthen first-layer overlap.",
+        failures,
+    )
     _, detail_extruder = slicermod.k9_profile_settings(14, hotbed_target=60)
     require(
         detail_extruder["material_print_temperature"] == "220"
@@ -949,11 +968,26 @@ def main() -> int:
     require("if self.print_state_restored_from_log:" in app, "Restored print state must block automatic completion moves.", failures)
     require("completion_sequence_allowed" in app and "_run_printer_completion_sequence().strip()" in app, "Completion moves must be explicitly guarded.", failures)
     require(
-        "Автоматический возврат после Stop отключён" in app
-        and "M524 этой прошивки выполняет" in app
+        "Точный автоматический возврат после Stop невозможен" in app
+        and "Эта прошивка при M524 выполняет" in app
         and "EVENT_GCODE_SD_ABORT" in app
-        and "Recovery после Stop: выставь старт вручную" in app,
+        and "restore_start_manually" in app
+        and "После Stop: короткие ручные шаги" in app,
         "Stopped-print recovery must not infer a physical return path after M524 can displace X/Y.",
+        failures,
+    )
+    require(
+        'if data.get("bed_clear_before_go_start_required"):' in app
+        and 'if phase.startswith("stopped") and data.get("bed_clear_before_go_start_required"):' not in app
+        and "They must not discard the separate\n        # stopped-print recovery marker" in app,
+        "Stopped-print manual recovery must survive idle-phase saves, uploads, and app restarts.",
+        failures,
+    )
+    require(
+        "bed_level_locked_start" in app
+        and "Калибр. — сначала сохрани старт" in app
+        and 'level_state = "normal" if trusted' in app,
+        "Bed-level controls must explain the saved-start prerequisite and remain locked until home is trusted.",
         failures,
     )
     require(

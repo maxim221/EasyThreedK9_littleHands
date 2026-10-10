@@ -937,7 +937,11 @@ class K9ControlCenter:
                 self.bed_clear_before_go_start_required = True
                 self.home_trust = HOME_TRUST_INVALID
                 self.home_trust_reason = "operator-confirmed completion restored as predicted print-end recovery"
-        if phase.startswith("stopped") and data.get("bed_clear_before_go_start_required"):
+        # Uploads, profile bookkeeping, and normal app closure may persist an
+        # otherwise terminal "idle" phase. They must not discard the separate
+        # stopped-print recovery marker: only Save start or an explicitly
+        # confirmed recovery is allowed to clear that physical-position guard.
+        if data.get("bed_clear_before_go_start_required"):
             pose = data.get("stopped_print_pose")
             if isinstance(pose, list) and len(pose) == 3:
                 try:
@@ -2231,6 +2235,14 @@ class K9ControlCenter:
             "level_back_right_button",
         )
 
+    def _stopped_print_manual_recovery_required(self) -> bool:
+        return bool(
+            not self._home_is_trusted()
+            and not self.preheat_lift_recovery_available
+            and self.bed_clear_before_go_start_required
+            and (self.stopped_print_pose is not None or self.stopped_print_live_return_available)
+        )
+
     def _sync_home_controls(self) -> None:
         trusted = self._home_is_trusted()
         recovery_ready = bool(
@@ -2286,6 +2298,19 @@ class K9ControlCenter:
                     widget.configure(state=level_state)
                 except Exception:
                     pass
+
+        if hasattr(self, "go_start_button"):
+            key = "restore_start_manually" if self._stopped_print_manual_recovery_required() else "go_start"
+            self.go_start_button.configure(text=self._t(key))
+
+        if hasattr(self, "level_points_label"):
+            if self.current_print_file != "-":
+                level_key = "bed_level_locked_print"
+            elif not trusted:
+                level_key = "bed_level_locked_start"
+            else:
+                level_key = "bed_level_short"
+            self.level_points_label.configure(text=f"{self._t(level_key)}:")
 
         if hasattr(self, "stop_button"):
             self.stop_button.configure(text=self._t("cancel_uploading" if self.preheat_cancel_requested.is_set()
@@ -2388,6 +2413,7 @@ class K9ControlCenter:
             },
             "save_start": {"ru": "Запомнить старт", "en": "Save start", "zh": "保存起点"},
             "go_start": {"ru": "К сохранённому старту", "en": "Go to saved start", "zh": "回到保存起点"},
+            "restore_start_manually": {"ru": "Восстановить старт вручную", "en": "Restore start manually", "zh": "手动恢复起点"},
             "motors_off": {"ru": "Моторы выкл", "en": "Motors off", "zh": "关闭电机"},
             "step": {"ru": "Шаг", "en": "Step", "zh": "步长"},
             "filament": {"ru": "Филамент", "en": "Filament", "zh": "耗材"},
@@ -2409,6 +2435,8 @@ class K9ControlCenter:
             "hard_stop": {"ru": "Жёсткий стоп", "en": "Hard stop", "zh": "强制停止"},
             "bed_level": {"ru": "Калибровка стола", "en": "Bed leveling", "zh": "平台调平"},
             "bed_level_short": {"ru": "Калибр.", "en": "Level", "zh": "调平"},
+            "bed_level_locked_start": {"ru": "Калибр. — сначала сохрани старт", "en": "Level — save start first", "zh": "调平 — 请先保存起点"},
+            "bed_level_locked_print": {"ru": "Калибр. — идёт печать", "en": "Level — printing", "zh": "调平 — 正在打印"},
             "level_points": {"ru": "Точки X/Y", "en": "X/Y points", "zh": "X/Y 点位"},
             "level_front_left": {"ru": "ПЛ", "en": "FL", "zh": "前左"},
             "level_center": {"ru": "Ц", "en": "C", "zh": "中"},
@@ -3640,6 +3668,7 @@ class K9ControlCenter:
             self.show_recovery()
         self._refresh_translated_strings()
         self._render_live_status()
+        self._sync_home_controls()
         if hasattr(self, "colors"):
             self._draw_temp_graph()
 
@@ -7825,6 +7854,44 @@ class K9ControlCenter:
         )
         return bool(messagebox.askyesno("Little Hands", prompt))
 
+    def _show_stopped_print_manual_recovery(self) -> None:
+        lang = self.lang_var.get().strip() or "ru"
+        msg = {
+            "ru": (
+                "Точный автоматический возврат после Stop невозможен.\n\n"
+                "Эта прошивка при M524 выполняет EVENT_GCODE_SD_ABORT и непредсказуемо сдвигает X/Y уже "
+                "после сохранения позиции. Поэтому команды и ответ X0 Y0 Z0 не докажут, что принтер "
+                "физически вернулся к старту.\n\n"
+                "Стол должен быть свободен. Выберите небольшой шаг и, наблюдая за принтером, верните голову "
+                "к левому краю, стол полностью назад и сопло к правильной стартовой высоте. Затем нажмите "
+                "«Запомнить старт». Цикл питания не нужен."
+            ),
+            "en": (
+                "An exact automatic return after Stop is not possible.\n\n"
+                "For M524 this firmware runs EVENT_GCODE_SD_ABORT and can unpredictably move X/Y after the "
+                "position was captured. Commands and an X0 Y0 Z0 reply therefore cannot prove that the printer "
+                "physically returned to the start.\n\n"
+                "Keep the bed clear. Select a short step and, while watching the printer, restore the head near "
+                "the left edge, the bed fully back, and the nozzle to the correct start height. Then press "
+                "Save start. No power cycle is required."
+            ),
+            "zh": (
+                "Stop 后无法精确自动返回。\n\n"
+                "此固件在 M524 时执行 EVENT_GCODE_SD_ABORT，并可能在记录位置之后不可预测地移动 X/Y。"
+                "因此，命令和 X0 Y0 Z0 回复都不能证明打印机已实际回到起点。\n\n"
+                "请保持平台清空。选择较短步长，在监看打印机的情况下，将喷头恢复到左侧附近、平台完全后退，"
+                "并将喷嘴恢复到正确的起始高度，然后按“保存起点”。无需断电重启。"
+            ),
+        }.get(lang) or "Restore the physical start with short watched manual jogs, then press Save start."
+        self.log(msg.replace("\n", " "))
+        progress = {
+            "ru": "После Stop: короткие ручные шаги, затем «Запомнить старт»",
+            "en": "After Stop: short manual jogs, then Save start",
+            "zh": "Stop 后：短距离手动点动，然后保存起点",
+        }.get(lang) or "After Stop: restore and save start manually"
+        self.progress_var.set(progress)
+        messagebox.showwarning("Little Hands", msg, parent=self.root)
+
     def _confirm_aborted_print_recovery(self, pose: tuple[float, float, float]) -> bool:
         lang = self.lang_var.get().strip() or "ru"
         pose_text = f"X{pose[0]:.2f} Y{pose[1]:.2f} Z{pose[2]:.2f}"
@@ -7941,38 +8008,8 @@ class K9ControlCenter:
             use_preheat_lift_recovery = True
         use_stopped_print_pose = False
         stopped_pose = self.stopped_print_pose
-        if (
-            not use_preheat_lift_recovery
-            and not self._home_is_trusted()
-            and self.bed_clear_before_go_start_required
-            and (stopped_pose is not None or self.stopped_print_live_return_available)
-        ):
-            lang = self.lang_var.get().strip() or "ru"
-            msg = {
-                "ru": (
-                    "Автоматический возврат после Stop отключён: M524 этой прошивки выполняет "
-                    "EVENT_GCODE_SD_ABORT и может физически сместить X/Y, поэтому снятая до Stop позиция "
-                    "больше не задаёт надёжный путь к нулю. Выставь старт короткими наблюдаемыми ручными "
-                    "шагами и нажми 'Запомнить старт'."
-                ),
-                "en": (
-                    "Automatic return after Stop is disabled: this firmware runs EVENT_GCODE_SD_ABORT for M524 "
-                    "and may physically displace X/Y, so the pre-Stop pose no longer defines a reliable path to "
-                    "zero. Restore the start with short watched manual jogs, then press Save start."
-                ),
-                "zh": (
-                    "Stop 后自动返回已禁用：此固件的 M524 会执行 EVENT_GCODE_SD_ABORT，并可能实际移动 "
-                    "X/Y，因此 Stop 前的位置不再能定义可靠的回零路径。请在监看下用短距离手动点动恢复起点，"
-                    "然后按“保存起点”。"
-                ),
-            }.get(lang) or "Automatic stopped-print return is unsafe; restore and save the physical start manually."
-            self.log(msg)
-            progress = {
-                "ru": "Recovery после Stop: выставь старт вручную",
-                "en": "Recovery after Stop: restore start manually",
-                "zh": "Stop 后恢复：请手动恢复起点",
-            }.get(lang) or "Recovery after Stop: restore start manually"
-            self.progress_var.set(progress)
+        if not use_preheat_lift_recovery and self._stopped_print_manual_recovery_required():
+            self._show_stopped_print_manual_recovery()
             return
         if (
             not use_preheat_lift_recovery
@@ -8531,14 +8568,24 @@ class K9ControlCenter:
 
     def move_level_point(self, x: float, y: float) -> None:
         if not self._home_is_trusted():
-            msg = "Калибровка стола доступна только после 'Запомнить старт': текущий старт не доверенный."
+            lang = self.lang_var.get().strip() or "ru"
+            msg = {
+                "ru": "Калибровка стола доступна только после «Запомнить старт»: текущий физический старт не подтверждён.",
+                "en": "Bed leveling is available only after Save start: the current physical start is not confirmed.",
+                "zh": "只有保存起点后才能进行平台调平：当前实际起点尚未确认。",
+            }.get(lang) or "Bed leveling requires a confirmed saved start."
             self.log(msg)
-            messagebox.showwarning("Little Hands", msg)
+            messagebox.showwarning("Little Hands", msg, parent=self.root)
             return
         if self.current_print_file != "-":
-            msg = "Калибровка стола недоступна во время активной SD-печати."
+            lang = self.lang_var.get().strip() or "ru"
+            msg = {
+                "ru": "Калибровка стола недоступна во время активной SD-печати.",
+                "en": "Bed leveling is unavailable during an active SD print.",
+                "zh": "SD 打印期间无法进行平台调平。",
+            }.get(lang) or "Bed leveling is unavailable during an active SD print."
             self.log(msg)
-            messagebox.showwarning("Little Hands", msg)
+            messagebox.showwarning("Little Hands", msg, parent=self.root)
             return
 
         def task() -> None:

@@ -1,5 +1,25 @@
 # littleHands Project Log
 
+## 2026-10-10 Bed-level lock is explicit after Stop
+
+- The operator reported that bed calibration appeared not to work after Stop. The five point buttons were correctly disabled because the physical start was no longer trusted, but the GUI showed no reason next to them.
+- The level row now says `Level — save start first` (localized in RU/EN/ZH) while the start is untrusted and `Level — printing` during an active job. After a successful `Save start`, the ordinary short label returns and all five points enable immediately.
+- The underlying safety rule is unchanged: no bed-level motion is allowed until `Save start` establishes the current physical zero. The guarded handler warning is now localized as a second line of defense.
+
+## 2026-10-10 Stopped-print return control now explains manual recovery
+
+- Runtime evidence showed that clicks on `Go to saved start` after the stopped ESP backpack print reached the safety guard, but the explanation was written only to the journal. To the operator the button therefore appeared not to work.
+- In this unsafe stopped-print state the control now changes to `Restore start manually` and opens localized RU/EN/ZH recovery instructions. The handler sends no motion or USB task: the operator uses short watched jogs and then `Save start`, because `M524` may already have displaced X/Y after the last trustworthy position capture.
+- Fixed persistence as well: an SD upload, profile update, or clean app close may write phase `idle`, but it no longer hides a retained stopped-print pose and bed-clear guard on the next application start. Only a newly saved or explicitly confirmed physical start clears that marker.
+- Added an offline UI regression that verifies the localized label, visible warning, enabled control, and absence of a motion worker in this state.
+
+## 2026-10-10 Transparent-PETG attached-brim retry
+
+- During an operator-started transparent-PETG run of `ESPBPK2.GCO`, the model detached from the bed at about `14.4%`. Normal Stop completed, left SD idle, and freshly confirmed both heater targets and outputs at zero; no power cycle was requested.
+- Inspection showed that the old file already contained a `14 mm` Cura brim despite Cura's `TYPE:SKIRT` G-code label. Its innermost brim centerline was about `0.47 mm` from the first outer-wall centerline, so the label was not evidence of a configured skirt gap.
+- Added a separate one-off `petg-attached-brim` adhesion preset: explicit `brim_gap=0`, inside and outside brim, `170%` first-layer line width, `105%` first-layer model flow, and `108%` brim flow. The retry uses an `18 mm` brim while preserving the backpack's `max-easy-release` support and `60C` preheat / `55C` print-bed policy.
+
+
 ## 2026-10-10 Stopped-print Y recovery correction
 
 - A guarded stopped-print return replayed the pre-`M524` pose and reported logical `X0 Y0 Z0`, but the bed physically remained about 20 mm from the saved start. The operator restored it with two watched manual `Y -10 mm` jogs and saved the correct physical start.

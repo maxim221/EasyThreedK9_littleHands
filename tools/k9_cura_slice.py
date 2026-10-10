@@ -120,6 +120,7 @@ def k9_profile_settings(
     brim_width: float,
     hotbed_target: float = 0.0,
     support_preset: str = "validated",
+    adhesion_preset: str = "validated",
 ) -> tuple[dict[str, str], dict[str, str]]:
     hotbed_target = max(0.0, min(float(hotbed_target), K9_MAX_EXPERIMENTAL_HOTBED_TARGET))
     hotbed_print_target = min(hotbed_target, K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET)
@@ -179,6 +180,8 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "machine_end_gcode": end_gcode,
         "extruders_enabled_count": "1",
         "adhesion_type": "brim",
+        "brim_gap": "0",
+        "brim_outside_only": "True",
         "brim_width": f"{brim_width:g}",
         "bottom_layers": "7",
         "infill_pattern": "lines",
@@ -320,6 +323,24 @@ G1 Y95 F240 ;Move bed toward the operator"""
             "skin_material_flow": "103",
             "cool_min_layer_time": "10",
         })
+    if adhesion_preset == "petg-attached-brim":
+        # Cura labels brim paths as TYPE:SKIRT in G-code. A zero gap already
+        # makes the innermost path touch the part; this PETG one-off widens
+        # and slightly over-extrudes the complete first-layer interface so the
+        # brim and model overlap instead of separating along that boundary.
+        global_settings.update({
+            "brim_gap": "0",
+            "brim_outside_only": "False",
+        })
+        extruder_settings.update({
+            "initial_layer_line_width_factor": "170",
+            "material_flow_layer_0": "105",
+            "wall_0_material_flow_layer_0": "105",
+            "skin_material_flow_layer_0": "105",
+            "skirt_brim_material_flow": "108",
+        })
+    elif adhesion_preset != "validated":
+        raise ValueError(f"unknown adhesion preset: {adhesion_preset}")
     return global_settings, extruder_settings
 
 
@@ -332,6 +353,7 @@ def build_cura_command(
     mesh_position_y: float,
     hotbed_target: float = 0.0,
     support_preset: str = "validated",
+    adhesion_preset: str = "validated",
 ) -> list[str]:
     definitions = mount_point / "share/cura/resources/definitions"
     extruders = mount_point / "share/cura/resources/extruders"
@@ -339,6 +361,7 @@ def build_cura_command(
         brim_width,
         hotbed_target=hotbed_target,
         support_preset=support_preset,
+        adhesion_preset=adhesion_preset,
     )
 
     cmd = cura_engine_prefix(mount_point) + [
@@ -496,6 +519,7 @@ def patch_header_and_footer(
     brim_width: float,
     hotbed_target: float = 0.0,
     support_preset: str = "validated",
+    adhesion_preset: str = "validated",
 ) -> None:
     min_x, max_x, min_y, max_y, max_z = bounds
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -529,10 +553,13 @@ def patch_header_and_footer(
         brim_width,
         hotbed_target=hotbed_target,
         support_preset=support_preset,
+        adhesion_preset=adhesion_preset,
     )
     footer = (
         ';SETTING_3 {"global_quality": "[values]\\n'
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
+        f'brim_gap = {settings["brim_gap"]}\\nbrim_outside_only = {settings["brim_outside_only"]}\\n'
+        f'adhesion_preset = {adhesion_preset}\\n'
         f'experimental_hotbed_target = {hotbed_target:g}\\n'
         f'experimental_hotbed_print_target = {min(hotbed_target, K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET):g}\\n'
         'layer_height = 0.16\\nlayer_height_0 = 0.2\\n'
@@ -553,11 +580,14 @@ def patch_header_and_footer(
         f'material_print_temperature_layer_0 = {extruder_settings["material_print_temperature_layer_0"]}\\nretraction_enable = True\\n'
         f'retraction_amount = 6.5\\nmaterial_flow = {extruder_settings["material_flow"]}\\n'
         f'wall_material_flow = {extruder_settings["wall_material_flow"]}\\n'
-        f'skin_material_flow = {extruder_settings["skin_material_flow"]}\\nmaterial_flow_layer_0 = 103\\n'
+        f'skin_material_flow = {extruder_settings["skin_material_flow"]}\\n'
+        f'material_flow_layer_0 = {extruder_settings["material_flow_layer_0"]}\\n'
+        f'skirt_brim_material_flow = {extruder_settings.get("skirt_brim_material_flow", "100")}\\n'
+        f'initial_layer_line_width_factor = {extruder_settings["initial_layer_line_width_factor"]}\\n'
         'cool_fan_enabled = False\\n'
         f'cool_fan_speed = 0\\ncool_min_layer_time = {extruder_settings["cool_min_layer_time"]}\\nbridge_fan_speed = 0\\n'
         'bridge_skin_material_flow = 100\\nbridge_wall_material_flow = 100\\n'
-        'initial_layer_line_width_factor = 155\\n"]}'
+        '"]}'
     )
     if not any(line.startswith(";SETTING_3") for line in lines[-80:]):
         lines.append(footer)
@@ -607,6 +637,12 @@ def main() -> int:
         choices=("validated", "max-easy-release"),
         default="validated",
         help="Use the validated supports or a sparse/no-interface maximum easy-release trial.",
+    )
+    parser.add_argument(
+        "--adhesion-preset",
+        choices=("validated", "petg-attached-brim"),
+        default="validated",
+        help="Use the validated first layer or a one-off wider-flow PETG brim fused to the model.",
     )
     parser.add_argument(
         "--allow-unvalidated-modulebot-orientation",
@@ -669,6 +705,7 @@ def main() -> int:
             mesh_position_y,
             hotbed_target=hotbed_target,
             support_preset=args.support_preset,
+            adhesion_preset=args.adhesion_preset,
         )
         started = time.monotonic()
         proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -683,6 +720,7 @@ def main() -> int:
             args.brim_width,
             hotbed_target=hotbed_target,
             support_preset=args.support_preset,
+            adhesion_preset=args.adhesion_preset,
         )
         print(f"Sliced {stl.name} -> {output}")
         print(
@@ -694,6 +732,7 @@ def main() -> int:
         if hotbed_target > 0.0:
             print(f"Experimental hotbed target: {hotbed_target:g}C")
         print(f"Support preset: {args.support_preset}")
+        print(f"Adhesion preset: {args.adhesion_preset}")
         print(f"Elapsed: {time.monotonic() - started:.1f}s")
 
         if args.sd_mount:

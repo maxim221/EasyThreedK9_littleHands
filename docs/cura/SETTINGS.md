@@ -179,6 +179,8 @@ A practical sanity check for this model: the validated orientation is usually ar
 - Bridge wall flow: `100%`
 - Initial layer line width: about `155%`
 
+For the separate transparent-PETG backpack retry, use `petg-attached-brim`: `18 mm` brim, `0 mm` brim gap, brim on outside and inside contours, `170%` initial-layer line width, `105%` model first-layer flow, and `108%` brim flow. Cura labels brim paths as `TYPE:SKIRT`; that name does not mean a gap exists. Do not promote this stronger one-off to the normal profile until part removal is checked.
+
 ## Before Saving To SD
 
 The generated G-code must satisfy all of these:
