@@ -71,6 +71,13 @@ After that asynchronous move, `confirm-return` is allowed only after the
 operator visually verifies the near-left head, fully-back bed, and saved nozzle
 height.
 
+`go-start` must not return X/Y after an active print was stopped. On this
+firmware, `M524` runs `EVENT_GCODE_SD_ABORT G28XY` and can physically displace
+the axes after the pre-Stop pose was captured. The Control Center therefore
+keeps that pose as diagnostic evidence but refuses an automatic stopped-print
+return through both GUI and API. Use short operator-watched `jog` commands,
+restore the physical start visually, then call `save-start`.
+
 ## Local security
 
 The Unix socket lives in the current user's short runtime directory and is mode

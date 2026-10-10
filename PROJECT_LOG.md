@@ -1,10 +1,22 @@
 # littleHands Project Log
 
+## 2026-10-10 Stopped-print Y recovery correction
+
+- A guarded stopped-print return replayed the pre-`M524` pose and reported logical `X0 Y0 Z0`, but the bed physically remained about 20 mm from the saved start. The operator restored it with two watched manual `Y -10 mm` jogs and saved the correct physical start.
+- Root cause: this firmware's `M524` runs `EVENT_GCODE_SD_ABORT G28XY`, which can physically displace X/Y after the pre-stop pose is captured. The pre-stop pose therefore remains useful evidence but cannot define an exact automatic return path.
+- Automatic stopped-print X/Y return is now refused. GUI and owner-only API users must use short watched manual jogs and then `Save start`. No power cycle is required for this ordinary acknowledged Stop.
+
+## 2026-10-10 Temperature graph telemetry-gap markers
+
+- The watched `ESPBPK2.GCO` print kept stable `225C` / `55C` temperatures while ordinary non-waiting `M930` requests were sometimes delayed behind Marlin's busy SD command handling for 5–15 polling cycles. Atomic LH1 prevents mixed-time fields once a snapshot executes, but it is still an ordinary queued G-code command and cannot guarantee that every host request is executed promptly.
+- The temperature graph now keeps measured data as separate solid-color segments and draws every missing interval longer than 60 seconds as a gray dashed connector labeled `No telemetry` / `Нет телеметрии` / `无遥测数据`. A still-open gap extends to the right edge without inventing a new temperature sample.
+- Added offline behavioral and GUI coverage for historical and open-ended gap markers in all supported languages. No printer command, heater change, or axis motion is involved.
+
 ## 2026-10-10 Backpack max-easy-release first-layer retry
 
 - The first print of the new `60°` / `3%` / no-interface `max-easy-release` file started normally on installed `LH v9`. Host preheat reached the `60C` bed gate and staged `226C` hotend gate, the known clearance lift returned, and atomic LH1 telemetry showed the SD cursor advancing.
 - Near `4.9%` progress and raw `Z0.36`, the operator reported that the first layer had detached and was winding around the nozzle. Normal Stop preserved the interrupted pose, completed the controlled `10 mm` Z lift, stopped the still-active SD file, and confirmed both heater targets and outputs at zero. No power cycle was required.
-- After the operator removed the loose plastic, guarded stopped-print recovery returned to the saved start. The operator-requested first-layer correction lowered the nozzle by exactly `0.2 mm` as two acknowledged `-0.1 mm` application jogs, then saved that physical pose as the new zero. The same verified SD file was started again so the Z-gap correction is tested independently from the support and small-layer profile changes.
+- After the operator removed the loose plastic, the then-enabled stopped-print recovery reported logical zero and was initially treated as a saved-start return. Later physical checking found that the bed was still about `20 mm` short because `M524` had displaced Y after the captured pose; this is why automatic stopped-print X/Y recovery is now prohibited. Before that discrepancy was known, the operator-requested Z correction lowered the nozzle by exactly `0.2 mm` as two acknowledged `-0.1 mm` application jogs and saved that pose as a new zero.
 - The retry completed the same `60C` bed and staged `226C` hotend gates, restored the known lift, confirmed the `55C` print-bed target, and sent `M24`. The operator again reported no adhesion and filament winding around the nozzle before the 180-second quiet window ended. Normal Stop completed, lifted Z by `10 mm`, left SD idle, and confirmed both heater targets/outputs off. Because a verified `-0.2 mm` start correction did not produce any adhesion, further blind Z lowering is unsafe; the next attempt requires physical gap/level and surface-condition evidence first.
 - Code review during the retry found that operator-confirmed completion returned before posting the completion progress/log and opening the guarded recovery window. The return now occurs after those UI updates, with a regression assertion that preserves the ordering.
 

@@ -143,8 +143,8 @@ G92 X0 Y0 Z0
 - 更换 / 断开 USB 端口、关闭电机、硬停止、jog 失败或 recovery 失败都会清除 home 信任，因为这台机器没有物理限位开关来重新寻找绝对零点
 - 普通 `Stop` 是受控停止，不是紧急路径：Little Hands 现在会尽早在 `M524` 前探测 `M114`，随后暂停、再次读取 `M114`、尝试把 Z 抬到已知安全 recovery 高度，然后发送 `M524` 和关闭加热命令
 - 在该受控中止之前，Stop 会在同一 USB 会话中检查 `M27`；如果打印机已回复 `Not SD printing`，Little Hands 保留最终位置，跳过 `M25`、stop-lift 和 `M524`，因为固件的 `EVENT_GCODE_SD_ABORT G28XY` 可能在文件完成后使 X/Y 发生物理移动
-- 正常 `Stop` 后，Little Hands 会尽量保存 stopped-print recovery 标记：X/Y 来自中断打印位置，Z 来自受控 post-stop 抬升（如果确认成功）；Stop 后的手动 jog 会更新该标记，而不是删除它
-- 如果 `Stop` 发生在 K9 仍然 busy、没有取得 `M114` 的窗口内，Little Hands 可能提供受保护的 live-session `回到保存起点`；只有平台清空后才使用，并且只有目视确认实际起点正确后才点击 `Save start`
+- 正常 `Stop` 后，Little Hands 仅把中断位置保留为诊断证据：此固件的 `M524` / `EVENT_GCODE_SD_ABORT G28XY` 可能在捕获位置之后实际移动 X/Y，因此该位置不能定义自动返回路径
+- `Stop` 后请清空平台，在操作员监看下用短距离手动点动恢复 X/Y，目视设置喷嘴高度，然后点击 `Save start`；GUI 和仅限所有者的 API 都会拒绝停止打印后的自动 X/Y 返回
 - 如果 USB 在真实 SD 打印期间断开，重新连接后主窗口仍显示过期的活动打印标记，`回到保存起点` 可以按保存的 `LH_END_GCODE_V1` print-end 提供受保护恢复；只有确认打印已经结束、平台已清空且结束后没有手动移动各轴时才接受
 - 如果 USB 断开后 CH340 打印机以新的 `/dev/ttyUSB*` 名称重新枚举，打印后 recovery 可以自动切换到唯一可见的安全 printer-like 端口；此 recovery 场景不需要手动点击 `Find`
 - 如果旧的活动打印标记已经太旧，不能恢复为活动打印，Little Hands 仍会保留有效的 predicted print-end 作为受保护 recovery 选项
@@ -163,6 +163,7 @@ G92 X0 Y0 Z0
 - `Manual control` 面板中的手动耗材进料用于停止打印后的装载 / 诊断：`Hotend 200C` 设置手动 `M104` 目标，`Feed` / `Retract` 只用相对 `M83` + `G1 E...` + `M400` 移动 E，并恢复 `M82`；活动 SD 打印期间会被阻止，且只有 `M105` 确认 hotend 至少 `180C` 后才发送 E 移动
 - 当前主界面将 `Manual control` 放在左侧，`USB metrics` 放在它下方，`Journal` 始终显示在右侧；调平点按钮也会使用短标签随语言切换，并且只有 `Save start` 让 home 可信后才会启用
 - `Capture all metrics` 会把原始 `M115` / `M503` / `M114` / `M105` / `M27` 快照保存到 `monitor_logs/little_hands_usb_metrics_latest.txt`，并在 `monitor_logs/usb_metrics/` 保留带时间戳的副本
+- 温度图以彩色实线分段显示实际收到的测量值；灰色虚线 `无遥测数据` 明确标记超过 60 秒的缺口，绝不表示测量温度或插值温度
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

@@ -151,6 +151,7 @@ def check_temperature_graph_segments(failures: list[str]) -> None:
     ]
     actual = appmod.split_temperature_series(rows, 1)
     target = appmod.split_temperature_series(rows, 2, positive_only=True)
+    gaps = appmod.temperature_gap_segments(rows, 1, end_ts=170.0)
     require(
         [len(segment) for segment in actual] == [2, 3, 1],
         "Temperature graph must break actual-temperature lines across long gaps and backwards timestamps.",
@@ -159,6 +160,11 @@ def check_temperature_graph_segments(failures: list[str]) -> None:
     require(
         [len(segment) for segment in target] == [2, 1, 1, 1],
         "Temperature graph must also break target lines when the heater target is missing/off.",
+        failures,
+    )
+    require(
+        gaps == [((30.0, 221.0), (95.0, 222.0)), ((90.0, 225.0), (170.0, 225.0))],
+        "Temperature graph must expose historical and still-open telemetry gaps without inventing samples.",
         failures,
     )
 
@@ -943,8 +949,11 @@ def main() -> int:
     require("if self.print_state_restored_from_log:" in app, "Restored print state must block automatic completion moves.", failures)
     require("completion_sequence_allowed" in app and "_run_printer_completion_sequence().strip()" in app, "Completion moves must be explicitly guarded.", failures)
     require(
-        "stopped_print_live_return_available" in app and "_confirm_live_stopped_session_return" in app,
-        "Stopped-print recovery must offer a guarded live-session return when M114 was not captured.",
+        "Автоматический возврат после Stop отключён" in app
+        and "M524 этой прошивки выполняет" in app
+        and "EVENT_GCODE_SD_ABORT" in app
+        and "Recovery после Stop: выставь старт вручную" in app,
+        "Stopped-print recovery must not infer a physical return path after M524 can displace X/Y.",
         failures,
     )
     require(

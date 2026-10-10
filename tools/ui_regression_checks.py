@@ -143,6 +143,14 @@ class OfflineUiChecks(unittest.TestCase):
             if kind == "line" and fill == "#b58900" and max(coords[1::2], default=0.0) >= 30.0:
                 hotend_plot_lines.append(coords)
         self.assertEqual([len(coords) for coords in hotend_plot_lines], [4, 4])
+        gap_lines = [
+            self.app.temp_canvas.coords(item)
+            for item in self.app.temp_canvas.find_all()
+            if self.app.temp_canvas.type(item) == "line"
+            and self.app.temp_canvas.itemcget(item, "fill") == appmod.TEMP_GRAPH_GAP_COLOR
+            and abs(self.app.temp_canvas.coords(item)[2] - self.app.temp_canvas.coords(item)[0]) > 20.0
+        ]
+        self.assertEqual(len(gap_lines), 2)
         self.assertFalse(any(
             self.app.temp_canvas.type(item) == "oval"
             and self.app.temp_canvas.itemcget(item, "fill") in {"#b58900", "#d33682", "#2aa198", "#268bd2"}

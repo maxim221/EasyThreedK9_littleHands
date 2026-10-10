@@ -13,7 +13,7 @@ Linux control center and cautious firmware/Cura workflow for EasyThreeD K9 / ET4
 Longer one-line description:
 
 ```text
-Little Hands is a Linux desktop control center for EasyThreeD K9 / ET4000+ printers: SD printing, USB upload, manual-zero start, guarded recovery, firmware support, Cura profile docs, and field diagnostics.
+Little Hands is a Linux desktop control center for EasyThreeD K9 / ET4000+ printers: SD printing, USB upload, manual-zero start, guarded post-print recovery, manual Stop recovery, explicit telemetry gaps, firmware support, Cura profile docs, and field diagnostics.
 ```
 
 ## Suggested Topics

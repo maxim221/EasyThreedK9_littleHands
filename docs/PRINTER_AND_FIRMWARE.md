@@ -146,8 +146,8 @@ So:
 - changing / disconnecting the USB port, disabling motors, hard-stopping, a failed jog, or a failed recovery invalidates that trust because the printer has no physical endstops to re-discover zero
 - normal `Stop` is a controlled stop, not the emergency path: Little Hands now probes `M114` before `M524` as early as possible, pauses, retries `M114`, tries to lift Z to a known safe recovery height, then sends `M524` / heater-off commands
 - before that controlled abort, Stop checks `M27` in the same USB session; when the printer already reports `Not SD printing`, Little Hands preserves the final pose and skips `M25`, the stop lift, and `M524`, because this firmware's `EVENT_GCODE_SD_ABORT G28XY` can physically displace X/Y after a completed file
-- after a normal `Stop`, Little Hands saves a stopped-print recovery marker when possible: X/Y come from the interrupted print position, while Z comes from the controlled post-stop lift when available; manual jogs after Stop update this recovery marker instead of deleting it
-- if `Stop` happens while the K9 is still busy and no `M114` is captured, Little Hands may offer a guarded live-session `Go to saved start`; use it only with a clear bed, then press `Save start` only after visually confirming the physical start pose
+- after a normal `Stop`, Little Hands retains the interrupted pose as diagnostic evidence only: this firmware's `M524` / `EVENT_GCODE_SD_ABORT G28XY` can physically displace X/Y after that pose was captured, so it cannot define an automatic return path
+- after `Stop`, clear the bed, restore X/Y with short operator-watched manual jogs, visually set the nozzle height, and press `Save start`; GUI and owner-only API both refuse automatic stopped-print X/Y return
 - if USB drops during a real SD print and the main window still shows a stale active-print marker after reconnect, `Go to saved start` may offer guarded recovery from the saved `LH_END_GCODE_V1` print-end; accept only if the print is definitely finished, the bed is clear, and the axes were not moved after finish
 - if the CH340 printer re-enumerates under a new `/dev/ttyUSB*` name after USB loss, post-print recovery may automatically switch to the single visible safe printer-like port; manual `Find` is not required for that recovery case
 - if an old active-print marker is too stale to restore as active printing, Little Hands still keeps a valid predicted print-end as a guarded recovery option
@@ -166,6 +166,7 @@ So:
 - manual filament feed in the `Manual control` panel is for loading/diagnosis after a print has stopped: `Hotend 200C` sets a manual `M104` target, `Feed` / `Retract` move only E with relative `M83` + `G1 E...` + `M400` and restore `M82`; these commands are blocked during active SD printing and do not send E movement until `M105` confirms the hotend is at least `180C`
 - the current main UI keeps `Manual control` on the left, `USB metrics` directly below it, and the `Journal` always visible on the right; leveling point buttons are localized with short `FL/C/FR/BL/BR` labels in English and are enabled only after `Save start` has made home trusted
 - `Capture all metrics` saves the raw `M115` / `M503` / `M114` / `M105` / `M27` snapshot to `monitor_logs/little_hands_usb_metrics_latest.txt` and keeps timestamped copies under `monitor_logs/usb_metrics/`
+- temperature graphs show received measurements as solid colored segments; a gray dashed `No telemetry` connector explicitly marks any gap longer than 60 seconds and never represents a measured or interpolated temperature
 
 ![Manual window](screenshots/little-hands-manual-window.png)
 

@@ -97,7 +97,7 @@ If you are bringing this up on a Raspberry Pi, use:
 
 - **No blind `G28`:** this K9 workflow avoids normal auto-home because the current setup does not have a reliable endstop-based home.
 - **Manual-zero start:** the operator places the nozzle at the physical start and Little Hands declares it with `G92 X0 Y0 Z0`.
-- **Guarded recovery:** after Stop, failed starts, USB drops, and finished SD prints, the app prefers explicit prompts over surprise axis motion.
+- **Guarded recovery:** after a completed print, failed preheat, or USB loss, the app prefers explicit prompts over surprise axis motion. After `Stop`, X/Y must be restored with short watched manual jogs and a new `Save start`.
 - **K9-specific motion limits:** service and manual moves are deliberately slow because this small machine can skip steps while Marlin still reports `ok`.
 - **Cura guardrails:** bundled settings and upload checks reject common unsafe files such as startup `G28`, unmarked or blocking bed heat, aggressive acceleration, and end-of-print `M84`.
 
@@ -119,17 +119,19 @@ This means:
   - power cycle the printer
   - re-check the start pose
   - press `Save start` again
-- after a stopped print, `Go to saved start` is allowed only through the explicit recovery prompts; if the app offers a live-session return because `M114` was not captured, clear the bed first and press `Save start` only after visually confirming the nozzle is back at the real start pose
+- after a stopped print, do not use captured pre-Stop coordinates for automatic X/Y return: this firmware's `M524` abort routine can physically move X/Y after the capture. Clear the bed, restore start with short watched manual jogs, and press `Save start`
 - if hotend preheat fails after Little Hands lifted Z for clearance, `Go to saved start` can offer a guarded retry that lowers Z by the same known preheat lift; accept it only if the print did not start and the axes were not moved by hand
 - if the hotend is heating, the printer is moving, or material is printing, do not power-cycle just because USB telemetry is quiet
 - after a normal print finish, use `Go to saved start`; it runs the guarded post-print recovery path and requires a clear bed
 - bed-level calibration point buttons stay disabled until `Save start` has made the current home trusted
-- after a completed, stopped, or failed SD print/start, the app requires a confirmed printer power cycle and a fresh `Save start` before the next `M24`, so this K9 cannot skip the file-local `M109` and begin cold movements
+- an ordinary completed print or acknowledged normal Stop does not require a power cycle; a fresh trusted start is still required after Stop. Power cycle is reserved for reset/thermal halt, hard stop, unacknowledged shutdown/start, or another genuinely unknown controller state
 - before `M24`, Little Hands confirms hotend heatup itself with staged `M104` targets and a final blocking `M109`; if heatup is not confirmed, SD print is not started
 
 ## Current Field Notes
 
 The current working baseline is intentionally conservative. Do not "improve" it just because it looks slow if real prints are starting and finishing correctly.
+
+- Temperature graphs draw only received measurements as solid colored lines. Gray dashed `No telemetry` connectors mark gaps longer than 60 seconds; they are not measured or interpolated temperatures.
 
 - Hotend warmup can show a slow first phase with faint clicks, then a rapid temperature climb. This is a known observation on the validated K9. Keep watching it, but do not change firmware or preheat timing unless the hotend fails to reach the staged gates, the target drops, heater output stays at `@0`, or there are real electrical warning signs.
 - After a print, the head-left/right axis can mechanically stick. If post-print return misses the horizontal move but a few short `head left` jogs free the axis and it then moves normally, treat that as mechanical friction first, not a reason to increase service speeds or force recovery moves.

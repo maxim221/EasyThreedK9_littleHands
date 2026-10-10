@@ -54,6 +54,7 @@ TEMP_GRAPH_WINDOW_SEC = 15 * 60
 TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
 TEMP_GRAPH_MAX_CONNECT_GAP_SEC = 60
 TEMP_GRAPH_RESTORE_MAX_AGE_SEC = 60
+TEMP_GRAPH_GAP_COLOR = "#708078"
 TEMP_LOG_INTERVAL_SEC = 5.0
 LIVE_SAMPLE_MAX_AGE_SEC = 12.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
@@ -173,6 +174,34 @@ def split_temperature_series(
     if current:
         segments.append(current)
     return segments
+
+
+def temperature_gap_segments(
+    rows: list[TempHistoryRow],
+    index: int,
+    *,
+    end_ts: float | None = None,
+    positive_only: bool = False,
+    max_gap_s: float = TEMP_GRAPH_MAX_CONNECT_GAP_SEC,
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Return dashed connectors that explicitly mark missing telemetry."""
+    gaps: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    previous: tuple[float, float] | None = None
+    for row in rows:
+        ts = float(row[0])
+        value = row[index] if len(row) > index else None
+        valid = value is not None and math.isfinite(float(value))
+        if valid and positive_only and float(value) <= 0.0:
+            valid = False
+        if not valid:
+            continue
+        point = (ts, float(value))
+        if previous is not None and ts >= previous[0] and (ts - previous[0]) > max_gap_s:
+            gaps.append((previous, point))
+        previous = point
+    if previous is not None and end_ts is not None and (end_ts - previous[0]) > max_gap_s:
+        gaps.append((previous, (end_ts, previous[1])))
+    return gaps
 
 
 def parse_m105_temperatures(reply: str) -> TempPayload:
@@ -2335,6 +2364,7 @@ class K9ControlCenter:
             "sound_pc_short": {"ru": "Звук ПК", "en": "PC sound", "zh": "电脑提示音"},
             "sound_pc_complete": {"ru": "Звук окончания печати ПК", "en": "PC completion sound", "zh": "打印完成电脑提示音"},
             "temp_graph": {"ru": "Температуры hotend / hotbed", "en": "Hotend / hotbed temperatures", "zh": "热端 / 热床温度"},
+            "telemetry_gap": {"ru": "Нет телеметрии", "en": "No telemetry", "zh": "无遥测数据"},
             "live_params": {"ru": "Параметры в реальном времени", "en": "Realtime parameters", "zh": "实时参数"},
             "sd_files": {"ru": "Файлы на SD принтера", "en": "Printer SD files", "zh": "打印机 SD 文件"},
             "printable_files": {"ru": "Файлы для печати", "en": "Printable files", "zh": "可打印文件"},
@@ -2886,10 +2916,29 @@ class K9ControlCenter:
                 if len(points) >= 4:
                     c.create_line(*points, fill=color, width=width, dash=dash)
 
+        def draw_gaps(index: int, map_y, *, positive_only: bool = False) -> None:
+            for start, finish in temperature_gap_segments(
+                data,
+                index,
+                end_ts=t1,
+                positive_only=positive_only,
+            ):
+                c.create_line(
+                    map_x(start[0]),
+                    map_y(start[1]),
+                    map_x(finish[0]),
+                    map_y(finish[1]),
+                    fill=TEMP_GRAPH_GAP_COLOR,
+                    width=2,
+                    dash=(2, 4),
+                )
+
         draw_series(2, map_hotend_y, color="#d33682", width=1, positive_only=True, dash=(4, 2))
         draw_series(4, map_bed_y, color="#268bd2", width=1, positive_only=True, dash=(3, 3))
         draw_series(1, map_hotend_y, color="#b58900", width=2)
         draw_series(3, map_bed_y, color="#2aa198", width=2)
+        draw_gaps(1, map_hotend_y)
+        draw_gaps(3, map_bed_y)
 
         hotend_legend = (
             ("Hotend", "#b58900", False),
@@ -2908,6 +2957,9 @@ class K9ControlCenter:
                 c.create_line(legend_x, hotend_top - 10, line_end, hotend_top - 10, fill=color, width=2)
             c.create_text(line_end + 4, hotend_top - 10, anchor="w", text=label, fill=colors["muted"], font=("DejaVu Sans", 8))
             legend_x += 114
+        line_end = legend_x + 20
+        c.create_line(legend_x, hotend_top - 10, line_end, hotend_top - 10, fill=TEMP_GRAPH_GAP_COLOR, width=2, dash=(2, 4))
+        c.create_text(line_end + 4, hotend_top - 10, anchor="w", text=self._t("telemetry_gap"), fill=colors["muted"], font=("DejaVu Sans", 8))
 
         legend_x = left + 78
         for label, color, dashed in bed_legend:
@@ -2918,6 +2970,9 @@ class K9ControlCenter:
                 c.create_line(legend_x, bed_top - 10, line_end, bed_top - 10, fill=color, width=2)
             c.create_text(line_end + 4, bed_top - 10, anchor="w", text=label, fill=colors["muted"], font=("DejaVu Sans", 8))
             legend_x += 118
+        line_end = legend_x + 20
+        c.create_line(legend_x, bed_top - 10, line_end, bed_top - 10, fill=TEMP_GRAPH_GAP_COLOR, width=2, dash=(2, 4))
+        c.create_text(line_end + 4, bed_top - 10, anchor="w", text=self._t("telemetry_gap"), fill=colors["muted"], font=("DejaVu Sans", 8))
 
         last = data[-1]
         hotend_current = last[1]
@@ -7886,6 +7941,39 @@ class K9ControlCenter:
             use_preheat_lift_recovery = True
         use_stopped_print_pose = False
         stopped_pose = self.stopped_print_pose
+        if (
+            not use_preheat_lift_recovery
+            and not self._home_is_trusted()
+            and self.bed_clear_before_go_start_required
+            and (stopped_pose is not None or self.stopped_print_live_return_available)
+        ):
+            lang = self.lang_var.get().strip() or "ru"
+            msg = {
+                "ru": (
+                    "Автоматический возврат после Stop отключён: M524 этой прошивки выполняет "
+                    "EVENT_GCODE_SD_ABORT и может физически сместить X/Y, поэтому снятая до Stop позиция "
+                    "больше не задаёт надёжный путь к нулю. Выставь старт короткими наблюдаемыми ручными "
+                    "шагами и нажми 'Запомнить старт'."
+                ),
+                "en": (
+                    "Automatic return after Stop is disabled: this firmware runs EVENT_GCODE_SD_ABORT for M524 "
+                    "and may physically displace X/Y, so the pre-Stop pose no longer defines a reliable path to "
+                    "zero. Restore the start with short watched manual jogs, then press Save start."
+                ),
+                "zh": (
+                    "Stop 后自动返回已禁用：此固件的 M524 会执行 EVENT_GCODE_SD_ABORT，并可能实际移动 "
+                    "X/Y，因此 Stop 前的位置不再能定义可靠的回零路径。请在监看下用短距离手动点动恢复起点，"
+                    "然后按“保存起点”。"
+                ),
+            }.get(lang) or "Automatic stopped-print return is unsafe; restore and save the physical start manually."
+            self.log(msg)
+            progress = {
+                "ru": "Recovery после Stop: выставь старт вручную",
+                "en": "Recovery after Stop: restore start manually",
+                "zh": "Stop 后恢复：请手动恢复起点",
+            }.get(lang) or "Recovery after Stop: restore start manually"
+            self.progress_var.set(progress)
+            return
         if (
             not use_preheat_lift_recovery
             and not self._home_is_trusted()
