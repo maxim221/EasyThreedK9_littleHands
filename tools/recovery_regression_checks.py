@@ -154,6 +154,56 @@ class RecoveryChecks(unittest.TestCase):
         self.assertIn(";LH_STOP_CONFIRMED:0", reply)
         self.assertFalse(any(c.startswith("G") for c in commands))
 
+    def test_stop_after_completed_sd_file_skips_abort_and_axis_moves(self):
+        commands = []
+        def send(ser, command):
+            commands.append(command)
+        def reply(ser, command, **kwargs):
+            commands.append(command)
+            if command == "M27":
+                return "Not SD printing\nok\n"
+            if command == "M114":
+                return "X:95.00 Y:95.00 Z:12.92 E:563.73\nok\n"
+            return "ok\n"
+        with patch.object(recovery.sdtool, "open_serial"), \
+             patch.object(recovery.sdtool, "sync_ascii"), \
+             patch.object(recovery.sdtool, "send_line", side_effect=send), \
+             patch.object(recovery.sdtool, "read_for", return_value="X:95.00 Y:95.00 Z:12.92 E:563.73\nok\n"), \
+             patch.object(recovery.sdtool.time, "sleep"), \
+             patch.object(recovery.sdtool, "send_line_wait_ok", side_effect=reply):
+            result, pose = recovery.sdtool.stop_sd_print_with_position("fake", 115200)
+        self.assertEqual(pose, (95.0, 95.0, 12.92))
+        self.assertIn(";LH_STOP_SD_ALREADY_IDLE:1", result)
+        self.assertNotIn("M25", commands)
+        self.assertNotIn("M524", commands)
+        self.assertFalse(any(command.startswith("G") for command in commands))
+        self.assertIn("M104 S0", commands)
+        self.assertIn("M140 S0", commands)
+
+    def test_stop_during_active_sd_file_still_uses_controlled_abort(self):
+        commands = []
+        def send(ser, command):
+            commands.append(command)
+        def reply(ser, command, **kwargs):
+            commands.append(command)
+            if command == "M27":
+                return "SD printing byte 120/1000\nok\n"
+            if command == "M114":
+                return "X:41.30 Y:59.39 Z:10.00 E:507.95\nok\n"
+            return "ok\n"
+        with patch.object(recovery.sdtool, "open_serial"), \
+             patch.object(recovery.sdtool, "sync_ascii"), \
+             patch.object(recovery.sdtool, "send_line", side_effect=send), \
+             patch.object(recovery.sdtool, "read_for", return_value="X:41.30 Y:59.39 Z:0.36 E:507.95\nok\n"), \
+             patch.object(recovery.sdtool.time, "sleep"), \
+             patch.object(recovery.sdtool, "send_line_wait_ok", side_effect=reply):
+            result, pose = recovery.sdtool.stop_sd_print_with_position("fake", 115200)
+        self.assertIsNotNone(pose)
+        self.assertIn(";LH_STOP_SD_ALREADY_IDLE:0", result)
+        self.assertIn("M25", commands)
+        self.assertIn("M524", commands)
+        self.assertTrue(any(command.startswith("G1 Z") for command in commands))
+
     def test_rejected_or_corrupt_reply_is_not_acknowledged_by_trailing_ok(self):
         bad = [b'echo:Unknown command: "M104 S0"\nok\n',
                b'echo:Unknown command: "\xffM108"\nok\n',
@@ -208,6 +258,7 @@ class PreheatChecks(unittest.TestCase):
         self.app._require_power_cycle_before_next_sd_start = Mock()
         self.app._set_home_trust = Mock()
         self.app._hotbed_target_for_print = lambda *args: 60
+        self.app.at_saved_start_pose = False
         self.app._preheat_hotbed_before_sd_start = Mock()
         self.app._preheat_hotend_before_sd_start = Mock()
         self.app._set_hotbed_print_target_before_sd_start = Mock()
@@ -237,16 +288,20 @@ class PreheatChecks(unittest.TestCase):
         shutdown.assert_called_once()
         self.assertFalse(self.app.preheat_active)
         self.assertTrue(self.app.preheat_cleanup_confirmed)
-        self.app._require_power_cycle_before_next_sd_start.assert_called_once()
+        self.app._require_power_cycle_before_next_sd_start.assert_not_called()
 
     def test_cancel_hotend_stage_and_m109_undoes_lift_without_m24(self):
         for trigger, initial in [('M104 S60', 25), ('M109 S226', 224)]:
             self.app.preheat_cancel_requested.clear()
-            self.app.preheat_lift_recovery_available = True
+            self.app.preheat_lift_recovery_available = False
             commands = []
-            self.app._preheat_hotend_before_sd_start = lambda *args: self.app._preheat_hotend_for_sd_start_with_clearance(226)
+            self.app._preheat_hotend_before_sd_start = lambda *args: self.app._preheat_hotend_for_sd_start(226)
             self.app._lift_from_saved_start_for_preheat_if_needed = Mock(return_value=True)
-            self.app._return_to_saved_start_after_failed_preheat = Mock(side_effect=lambda **kwargs: commands.append('RETURN'))
+            def returned(**kwargs):
+                commands.append('RETURN')
+                self.app.preheat_lift_recovery_available = False
+                self.app.at_saved_start_pose = True
+            self.app._return_to_saved_start_after_failed_preheat = Mock(side_effect=returned)
             self.app._return_to_saved_start_after_successful_preheat = Mock()
             def send(ser, command):
                 commands.append(command)
@@ -264,6 +319,7 @@ class PreheatChecks(unittest.TestCase):
                     self.app._preheat_for_sd_start('TEST.GCO', 'Test')
             self.app._return_to_saved_start_after_failed_preheat.assert_called_once_with(lifted_for_preheat=True)
             self.app._return_to_saved_start_after_successful_preheat.assert_not_called()
+            self.app._require_power_cycle_before_next_sd_start.assert_not_called()
             self.assertNotIn('M24', commands)
             if trigger.startswith('M109'):
                 self.assertLess(commands.index('M108'), commands.index('RETURN'))

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import re
+import json
+import socket
 import sys
 import tempfile
 import unittest
@@ -11,6 +13,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import k9_control_center as appmod
+import k9_agent_control as agent_control
+import k9_agent_cli as agent_cli
 import k9_cura_slice as slicermod
 import k9_marlin_sd as sdtool
 
@@ -31,6 +35,182 @@ def require_regex(text: str, pattern: str, message: str, failures: list[str]) ->
     require(re.search(pattern, text, re.MULTILINE | re.DOTALL) is not None, message, failures)
 
 
+def check_lh1_protocol(failures: list[str]) -> None:
+    first = (
+        "echo:busy: processing\n"
+        "LH1 token=7 seq=4 up=1200 sd=paused pos=100 size=1000 "
+        "lpx=1.000 lpy=2.000 lpz=3.000 lpe=4.000 "
+        "spx=1.000 spy=2.000 spz=3.000 q=0 hot=24.500/0/0 bed=25.000/0/0\n"
+    )
+    latest = (
+        first
+        + "LH1 token=4294967295 seq=5 up=1300 sd=printing pos=125 size=1000 "
+        "lpx=1.500 lpy=-2.000 lpz=3.125 lpe=4.000 "
+        "spx=1.490 spy=-2.010 spz=3.125 q=2 hot=199.750/200/127 bed=54.500/55/80\n"
+        + "ok\n"
+    )
+    snapshot = sdtool.parse_lh1_snapshot(latest)
+    require(snapshot is not None, "A complete LH1 snapshot must parse.", failures)
+    if snapshot is not None:
+        require(
+            snapshot.token == 4294967295
+            and snapshot.sequence == 5
+            and snapshot.sd_state == "printing"
+            and snapshot.sd_position == 125
+            and snapshot.logical_position == (1.5, -2.0, 3.125, 4.0)
+            and snapshot.stepper_position == (1.49, -2.01, 3.125)
+            and snapshot.hotend == (199.75, 200, 127)
+            and snapshot.bed == (54.5, 55, 80),
+            "LH1 parsing must keep all fields from the latest complete line.",
+            failures,
+        )
+    require(
+        sdtool.parse_lh1_snapshot(latest.replace("pos=125 size=1000", "pos=1001 size=1000")) is None,
+        "LH1 parser must reject an impossible SD cursor.",
+        failures,
+    )
+    require(
+        sdtool.parse_lh1_snapshot("LH1 token=7 seq=4 up=1200 sd=printing pos=1 size=2 lpx=0") is None,
+        "LH1 parser must reject partial lines rather than combine stale fields.",
+        failures,
+    )
+    require(
+        sdtool.parse_lh1_snapshot(latest.replace(" hot=199.750/200/127", " hot=bad")) is None,
+        "LH1 parser must reject a damaged heater sample.",
+        failures,
+    )
+    require(
+        sdtool.parse_lh1_snapshot(latest.replace("lpx=1.500", "lpx=nan")) is None,
+        "LH1 parser must reject non-finite coordinates.",
+        failures,
+    )
+
+    class FakeSerial:
+        def __init__(self, lines: list[bytes]) -> None:
+            self.lines = iter(lines)
+
+        def readline(self) -> bytes:
+            return next(self.lines, b"")
+
+    token_reply = sdtool.read_until_tokens(
+        FakeSerial([b"LH1 token=7 seq=1\n", b"ok\n"]),
+        ("ok", "Error:", "Resend:"),
+        timeout_s=0.05,
+    )
+    require(
+        token_reply == "LH1 token=7 seq=1\nok\n",
+        "The acknowledged-reply reader must not mistake the `ok` inside `token` for an acknowledgement line.",
+        failures,
+    )
+
+    fragmented_reply = sdtool.read_lh1_reply(
+        FakeSerial([
+            b"ok\n",
+            b"LH1 token=7 seq=6 up=1400 sd=printing pos=130 size=1000 ",
+            b"lpx=1.500 lpy=-2.000 lpz=3.125 lpe=4.000 spx=1.490 spy=-2.010 spz=3.125 ",
+            b"q=2 hot=199.750/200/127 bed=54.500/55/80\n",
+            b"ok\n",
+        ]),
+        timeout_s=0.05,
+    )
+    fragmented_snapshot = sdtool.parse_lh1_snapshot(fragmented_reply)
+    require(
+        fragmented_snapshot is not None and fragmented_snapshot.sequence == 6,
+        "The LH1 reader must ignore a stale leading ok and assemble a fragmented atomic snapshot.",
+        failures,
+    )
+    app = object.__new__(appmod.K9ControlCenter)
+    app.lang_var = Mock()
+    app.lang_var.get.return_value = "ru"
+    localized = app._log_t(
+        "lh1_incomplete",
+        detail=app._log_t("lh1_incomplete_empty"),
+        count=3,
+    )
+    require(
+        "Телеметрия LH1 временно неполная" in localized
+        and "snapshot rejected" not in localized.lower(),
+        "LH1 timeout diagnostics must follow the selected UI language and describe a temporary telemetry gap.",
+        failures,
+    )
+    require(
+        "ранее отправленный M930 остаётся в ожидании" in app._log_t("lh1_incomplete_busy"),
+        "A firmware busy reply must be described as a pending request, not malformed telemetry.",
+        failures,
+    )
+
+
+def check_temperature_graph_segments(failures: list[str]) -> None:
+    rows: list[appmod.TempHistoryRow] = [
+        (0.0, 220.0, 226.0, 55.0, 55.0),
+        (30.0, 221.0, 226.0, 55.1, 55.0),
+        (95.0, 222.0, 220.0, 54.9, 55.0),
+        (96.0, 223.0, 0.0, 54.8, 0.0),
+        (97.0, 224.0, 220.0, 54.7, 55.0),
+        (90.0, 225.0, 220.0, 54.6, 55.0),
+    ]
+    actual = appmod.split_temperature_series(rows, 1)
+    target = appmod.split_temperature_series(rows, 2, positive_only=True)
+    require(
+        [len(segment) for segment in actual] == [2, 3, 1],
+        "Temperature graph must break actual-temperature lines across long gaps and backwards timestamps.",
+        failures,
+    )
+    require(
+        [len(segment) for segment in target] == [2, 1, 1, 1],
+        "Temperature graph must also break target lines when the heater target is missing/off.",
+        failures,
+    )
+
+
+def check_agent_control_socket(failures: list[str]) -> None:
+    require(
+        isinstance(agent_cli.wire_value(Path("relative.gcode")), str),
+        "The agent CLI must serialize upload Path arguments as JSON strings.",
+        failures,
+    )
+    with tempfile.TemporaryDirectory(dir="/tmp") as tmp_name:
+        tmp = Path(tmp_name)
+        socket_path = tmp / "control.sock"
+        token_path = tmp / "control.token"
+        server = agent_control.LocalControlServer(
+            socket_path,
+            token_path,
+            lambda request: {"ok": True, "command": request.get("command")},
+        )
+        try:
+            server.start()
+            response = agent_cli.call(socket_path, token_path, "status", {})
+            require(
+                response == {"ok": True, "command": "status"},
+                "Owner-authenticated local control requests must round-trip over the Unix socket.",
+                failures,
+            )
+            require(
+                token_path.stat().st_mode & 0o777 == 0o600
+                and socket_path.stat().st_mode & 0o777 == 0o600,
+                "The local control token and socket must be owner-only (0600).",
+                failures,
+            )
+            bad_request = {
+                "version": agent_control.PROTOCOL_VERSION,
+                "token": "0" * 64,
+                "command": "status",
+                "arguments": {},
+            }
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.connect(str(socket_path))
+                client.sendall(json.dumps(bad_request).encode("utf-8") + b"\n")
+                rejected = json.loads(client.makefile("r", encoding="utf-8").readline())
+            require(
+                rejected.get("ok") is False and "authentication" in str(rejected.get("error")),
+                "The local control socket must reject requests with the wrong token.",
+                failures,
+            )
+        finally:
+            server.stop()
+
+
 def check_hotbed_workflow(failures: list[str]) -> None:
     """Exercise slicing, validation and heat gates without Tk or printer access."""
     app = object.__new__(appmod.K9ControlCenter)
@@ -39,6 +219,48 @@ def check_hotbed_workflow(failures: list[str]) -> None:
     app._post = lambda *args: None
     app._run_task = lambda label, task: task()
     app.current_print_file = "-"
+
+    support_settings, _ = slicermod.k9_profile_settings(14, hotbed_target=60)
+    require(
+        support_settings["support_angle"] == "50"
+        and support_settings["support_infill_rate"] == "8"
+        and support_settings["support_interface_density"] == "30"
+        and support_settings["support_roof_density"] == "30"
+        and support_settings["support_top_distance"] == "0.48"
+        and support_settings["support_z_distance"] == "0.48"
+        and support_settings["support_xy_distance"] == "0.5"
+        and support_settings["z_seam_type"] == "sharpest_corner",
+        "K9 support profile must keep the follow-up easy-release backpack trial values.",
+        failures,
+    )
+    easy_support, _ = slicermod.k9_profile_settings(
+        14,
+        hotbed_target=60,
+        support_preset="max-easy-release",
+    )
+    require(
+        easy_support["support_angle"] == "55"
+        and easy_support["support_infill_rate"] == "5"
+        and easy_support["support_interface_enable"] == "False"
+        and easy_support["support_roof_enable"] == "False"
+        and easy_support["support_top_distance"] == "0.64"
+        and easy_support["support_z_distance"] == "0.64"
+        and easy_support["support_xy_distance"] == "0.8",
+        "The explicit maximum easy-release preset must remain sparse, interface-free, and widely separated.",
+        failures,
+    )
+    _, detail_extruder = slicermod.k9_profile_settings(14, hotbed_target=60)
+    require(
+        detail_extruder["material_print_temperature"] == "220"
+        and detail_extruder["material_print_temperature_layer_0"] == "226"
+        and detail_extruder["material_flow"] == "101"
+        and detail_extruder["wall_material_flow"] == "101"
+        and detail_extruder["skin_material_flow"] == "101"
+        and detail_extruder["material_flow_layer_0"] == "103"
+        and detail_extruder["cool_min_layer_time"] == "15",
+        "K9 small-detail trial must reduce body heat/flow while preserving the validated first layer.",
+        failures,
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         source = Path(tmp) / "hotbed.gcode"
@@ -184,12 +406,35 @@ def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
         app._require_power_cycle_before_next_sd_start = Mock()
         app._set_home_trust = Mock()
         app._save_print_state = Mock()
-        app.preheat_lift_recovery_available = fail_stage == "hotend"
+        app.preheat_lift_recovery_available = False
+        app.at_saved_start_pose = True
         app.preheat_cancel_requested = appmod.threading.Event()
         app.preheat_state_lock = appmod.threading.Lock()
         app._t = lambda key: key
         app._hotbed_target_for_print = lambda *args: 60
         order = []
+
+        def lift() -> bool:
+            order.append("lift")
+            app.at_saved_start_pose = False
+            app.preheat_lift_recovery_available = True
+            return True
+
+        def failed_return(*, lifted_for_preheat: bool) -> None:
+            require(lifted_for_preheat, "A failed preheat must undo the known lift.", failures)
+            order.append("failed-return")
+            app.at_saved_start_pose = True
+            app.preheat_lift_recovery_available = False
+
+        def successful_return(*, lifted_for_preheat: bool) -> None:
+            require(lifted_for_preheat, "A successful preheat must undo the known lift before M24.", failures)
+            order.append("return")
+            app.at_saved_start_pose = True
+            app.preheat_lift_recovery_available = False
+
+        app._lift_from_saved_start_for_preheat_if_needed = lift
+        app._return_to_saved_start_after_failed_preheat = failed_return
+        app._return_to_saved_start_after_successful_preheat = successful_return
 
         def heat(stage: str) -> None:
             order.append(stage)
@@ -208,21 +453,21 @@ def check_temperature_reports_and_preheat_cleanup(failures: list[str]) -> None:
             else:
                 require(fail_stage is None, "Preheat failure must reach the caller before M24.", failures)
             expected_order = {
-                "bed": ["bed"],
-                "hotend": ["bed", "hotend"],
-                "print-target": ["bed", "hotend", "print-target"],
-                None: ["bed", "hotend", "print-target"],
+                "bed": ["lift", "bed", "failed-return"],
+                "hotend": ["lift", "bed", "hotend", "failed-return"],
+                "print-target": ["lift", "bed", "hotend", "return", "print-target"],
+                None: ["lift", "bed", "hotend", "return", "print-target"],
             }[fail_stage]
             require(order == expected_order,
-                    "Every SD start must heat bed then hotend and confirm the reduced bed print target.", failures)
+                    "Every SD start must lift before bed heat, then heat hotend, return, and confirm the print target.", failures)
             require(shutdown.call_count == (1 if fail_stage else 0),
                     "Failed preheat must verify shutdown before releasing the worker.", failures)
             if fail_stage:
-                require(app._require_power_cycle_before_next_sd_start.called and app._set_home_trust.called,
-                        "Failed preheat must require a power cycle and an operator-confirmed start.", failures)
-                phase = "preheat-lift-failed" if fail_stage == "hotend" else "failed-start"
+                require(not app._require_power_cycle_before_next_sd_start.called and not app._set_home_trust.called,
+                        "A cleanly recovered preheat failure must not require an unnecessary power cycle.", failures)
+                phase = "preheat-failed-clean"
                 require(app._save_print_state.call_args.args == (phase,),
-                        "Preheat shutdown must preserve failed-lift recovery state.", failures)
+                        "Clean preheat shutdown must persist a non-reset terminal state.", failures)
 
 
 def main() -> int:
@@ -465,8 +710,27 @@ def main() -> int:
     require(
         "next_sd_start_requires_power_cycle" in app
         and "_confirm_power_cycle_before_next_sd_start" in app
-        and "одного `Save start` без этого подтверждения недостаточно" in read("docs/PRINTER_AND_FIRMWARE.ru.md"),
-        "Post-print/stop/failed-start restart must require explicit power-cycle confirmation before the next M24.",
+        and "только после реального reset/halt" in read("docs/PRINTER_AND_FIRMWARE.ru.md"),
+        "Power-cycle gating must remain available for real reset/halt or unknown controller state.",
+        failures,
+    )
+    require(
+        '"lh1_session": self._lh1_session_payload()' in app
+        and "LH1_SESSION_CHECKPOINT_PATH" in app
+        and "lh1_restored_token_expected" in app
+        and "self.lh1_protocol_known\n                or self.lh1_restored_token_expected" in app
+        and "self.lh1_protocol_known = True" in app
+        and 'self.current_print_file == "-"' in app,
+        "An active print must persist and verify its LH1 token with the first state query after a host restart, then retain atomic LH1 polling without rebinding it.",
+        failures,
+    )
+    require(
+        "sdtool.read_lh1_reply" in app
+        and "LH1_INCOMPLETE_LOG_INTERVAL_SEC" in app
+        and "LH1_PENDING_RESEND_SEC" in app
+        and '"" if pending_request else lh1_command' in app
+        and "Legacy polling remains active" not in app,
+        "Known LH1 polling must wait for an atomic reply, avoid repeated pending requests/legacy mixing, and rate-limit diagnostics.",
         failures,
     )
     require(
@@ -577,8 +841,9 @@ def main() -> int:
         and "_preheat_hotbed_for_sd_start" in app
         and "self._preheat_for_sd_start(dest, source.name, upload_source)" in app
         and "self._preheat_for_sd_start(path, display, source_for_profile)" in app
-        and app.find("_preheat_hotbed_before_sd_start") < app.find("_preheat_hotend_before_sd_start"),
-        "Hotbed-marked files must trigger host-side hotbed preheat before hotend preheat and M24.",
+        and app.find("lifted_for_preheat = self._lift_from_saved_start_for_preheat_if_needed()")
+        < app.find("self._preheat_hotbed_before_sd_start(path, display, source)"),
+        "Every SD start must lift the saved-start nozzle before hotbed preheat, then heat hotend and return before M24.",
         failures,
     )
     require(
@@ -696,6 +961,24 @@ def main() -> int:
         and "stale active print marker preserved until explicit operator result" in app
         and "phase not in active_phases" in app,
         "Persistent restore must preserve stale active-print state and predicted recovery until an explicit operator result.",
+        failures,
+    )
+    for phase, state_file, expected in (
+        ("idle", "-", True),
+        ("failed-start", "-", True),
+        ("completed", "-", True),
+        ("printing", "-", False),
+        ("printing", "TEST.GCO", False),
+    ):
+        require(
+            appmod.persistent_state_closes_log_restored_print(phase, state_file) is expected,
+            f"Persistent phase {phase!r} / file {state_file!r} must resolve old log evidence correctly.",
+            failures,
+        )
+    require(
+        "PRINT_RESULT_CLOSED_BY_SAVE_START" in app
+        and "persistent_state_closes_log_restored_print" in app,
+        "Save start must durably close an explicitly abandoned restored print and prevent log resurrection.",
         failures,
     )
     require(
@@ -826,6 +1109,13 @@ def main() -> int:
         "Normal Stop must try to create a controlled post-stop recovery height.",
         failures,
     )
+    require(
+        'send_line_wait_ok(ser, "M27"' in marlin
+        and 'sd_already_idle = "not sd printing" in sd_status.lower()' in marlin
+        and 'if not sd_already_idle:\n            shutdown_commands.append("M524")' in marlin,
+        "Stop after a completed SD file must prove idle state and skip firmware M524/G28XY axis motion.",
+        failures,
+    )
 
     require("brim_width = 14" in cura_quality, "Tracked Cura baseline must keep 14 mm brim.", failures)
     require("bottom_layers = 7" in cura_quality and "top_layers = 7" in cura_quality, "Tracked Cura baseline must keep 7 top/bottom layers.", failures)
@@ -884,6 +1174,9 @@ def main() -> int:
     require(sdtool._stop_recovery_z(94.0) == 95.0, "High stopped prints must not plan recovery above the K9 Z limit.", failures)
 
     check_hotbed_workflow(failures)
+    check_lh1_protocol(failures)
+    check_temperature_graph_segments(failures)
+    check_agent_control_socket(failures)
     check_temperature_reports_and_preheat_cleanup(failures)
     import recovery_regression_checks
     recovery_result = unittest.TextTestRunner(verbosity=0).run(unittest.defaultTestLoader.loadTestsFromModule(recovery_regression_checks))

@@ -21,9 +21,12 @@ class OfflineUiChecks(unittest.TestCase):
             self.stack.enter_context(patch.object(appmod, name, tmp))
         for name in ("RUNTIME_LOG_PATH", "UI_STATE_PATH", "PRINT_STATE_PATH"):
             self.stack.enter_context(patch.object(appmod, name, tmp / name))
+        self.stack.enter_context(patch.object(appmod, "CONTROL_SOCKET_PATH", tmp / "control.sock"))
+        self.stack.enter_context(patch.object(appmod, "CONTROL_TOKEN_PATH", tmp / "control.token"))
         for name in ("_load_recent_temp_history_from_log", "_restore_persistent_print_state", "_save_ui_state"):
             self.stack.enter_context(patch.object(appmod.K9ControlCenter, name))
         self.stack.enter_context(patch.object(appmod.K9ControlCenter, "_load_ui_state", return_value={}))
+        self.stack.enter_context(patch.object(appmod.LocalControlServer, "start"))
         # Disable scheduled polling and fail immediately if any path opens USB.
         self.stack.enter_context(patch.object(tk.Tk, "after", return_value="disabled"))
         self.stack.enter_context(patch.object(appmod.sdtool.serial, "Serial", side_effect=AssertionError("USB forbidden in UI checks")))
@@ -122,6 +125,29 @@ class OfflineUiChecks(unittest.TestCase):
             for target in (35, 40, 50, 55, 60):
                 self.assertEqual(str(getattr(self.app, f"hotbed_{target}_button").cget("state")), "disabled")
             self.assertEqual(str(self.app.hotbed_off_button.cget("state")), "normal")
+
+    def test_temperature_graph_does_not_bridge_sparse_history(self):
+        now = time.time()
+        self.app.temp_history = [
+            (now - 200.0, 219.8, 220.0, 54.8, 55.0),
+            (now - 170.0, 220.1, 220.0, 55.0, 55.0),
+            (now - 80.0, 219.9, 220.0, 54.9, 55.0),
+            (now - 50.0, 220.2, 0.0, 55.1, 0.0),
+        ]
+        self.app._draw_temp_graph()
+        hotend_plot_lines = []
+        for item in self.app.temp_canvas.find_all():
+            fill = self.app.temp_canvas.itemcget(item, "fill")
+            kind = self.app.temp_canvas.type(item)
+            coords = self.app.temp_canvas.coords(item)
+            if kind == "line" and fill == "#b58900" and max(coords[1::2], default=0.0) >= 30.0:
+                hotend_plot_lines.append(coords)
+        self.assertEqual([len(coords) for coords in hotend_plot_lines], [4, 4])
+        self.assertFalse(any(
+            self.app.temp_canvas.type(item) == "oval"
+            and self.app.temp_canvas.itemcget(item, "fill") in {"#b58900", "#d33682", "#2aa198", "#268bd2"}
+            for item in self.app.temp_canvas.find_all()
+        ))
 
     def test_language_rebuild_preserves_guards_and_widgets(self):
         self.app.show_files_firmware_window()

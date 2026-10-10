@@ -55,15 +55,15 @@ G1 Y95 F240 ;Move bed toward the operator
 ## 材料和温度
 
 - 材料：PLA
-- 第一层热端：`225C`
-- 后续热端：`224C`
+- 第一层热端：`226C`
+- 后续热端：`220C`
 - Cura material bed temperature：`0C`
 - 受控 hotbed 策略：通过 `;LH_EXPERIMENTAL_HOTBED_TARGET:60` 让主机预热到 `60C`；通过 `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` 和非阻塞 `M140 S55` 在打印时保持 `55C`
 - 此本地默认值根据操作者 2026-09-09 的要求调整。应用/helper 的目标上限为 `60C`，热床预热最多等待 `15 分钟`。旧 G-code 需要重新切片并上传。修改本地 Cura 配置前请关闭 Cura；打印机空闲时重启 Little Hands。
 - 外部 warm mat 备用方案：手动预热到约 `40-50C`
 - Cura part cooling：`off`
 - 重要：当前 K9 只有一个物理风扇，它作为 firmware-managed hotend fan 使用。Little Hands / helper 会移除 slicer 的 `M106/M107`，避免 Cura 把这个风扇当作模型冷却风扇控制。
-- Minimum layer time：`10 s`
+- Minimum layer time：`15 s`
 
 ## 质量
 
@@ -75,11 +75,11 @@ G1 Y95 F240 ;Move bed toward the operator
 - Infill density：`20%`
 - Infill pattern：`lines`
 - Print infill before walls：`off`
-- Flow：`103%`
-- Wall flow：`103%`
-- Outer wall flow：`102%`
-- Top / bottom flow：`104%`
-- Infill flow：`101%`
+- Flow：`101%`
+- Wall flow：`101%`
+- Outer wall flow：`101%`
+- Top / bottom flow：`101%`
+- Infill flow：`100%`
 - Initial layer flow：`103%`
 - Skin overlap：`10%`
 - Top / bottom pattern：`lines`
@@ -89,7 +89,7 @@ G1 Y95 F240 ;Move bed toward the operator
 - Ironing pattern：`concentric`
 - Ironing line spacing：`0.12 mm`
 - Ironing flow：`7%`
-- Z seam alignment：`Random`
+- Z seam alignment：`Sharpest Corner`
 
 ## 速度
 
@@ -141,21 +141,21 @@ G1 Y95 F240 ;Move bed toward the operator
 
 - Generate support：`on`
 - Support placement：`everywhere`
-- Support overhang angle：`35 deg`
+- Support overhang angle：`50 deg`
 - Support structure：`normal`
 - Support pattern：`zigzag`
-- Support density：`10%`
+- Support density：`8%`
 - Support interface：`on`
 - Support roof：`on`
-- Support interface density：`65%`
-- Support roof density：`65%`
-- Support interface height：`0.48 mm`
-- Support roof height：`0.48 mm`
-- Support Z distance：`0.16 mm`
-- Support top distance：`0.16 mm`
-- Support XY distance：`0.3 mm`
+- Support interface density：`30%`
+- Support roof density：`30%`
+- Support interface height：`0.32 mm`
+- Support roof height：`0.32 mm`
+- Support Z distance：`0.48 mm`
+- Support top distance：`0.48 mm`
+- Support XY distance：`0.5 mm`
 
-如果支撑太难拆，先使用这些 `easy-release` 数值。暂时保持 Z distance 为 `0.16 mm`，以保护底面质量。如果仍然难拆，下一次单独测试再把 Support Z distance / top distance 提高到 `0.24-0.32 mm`。
+实际 backpack 结果表明，2026-10-09 的 45 deg / 50% / 0.32 mm / 0.4 mm 试验仍然产生几乎实心且无法正常拆除的支撑。当前参数是 2026-10-10 的后续试验。更大的间隔和更小的接触面积可能会让受支撑的底面稍粗；在再次增大间隔前请先检查新 backpack 的打印结果。
 
 如果 preview 没有在问题底面下方显示支撑，不要打印。调整 support placement / threshold，直到 preview 中确实出现所需支撑。
 

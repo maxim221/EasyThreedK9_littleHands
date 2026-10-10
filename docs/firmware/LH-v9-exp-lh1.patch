@@ -1,0 +1,156 @@
+diff --git a/Marlin/Configuration.h b/Marlin/Configuration.h
+--- a/Marlin/Configuration.h
++++ b/Marlin/Configuration.h
+@@
+-#define LH_FIRMWARE_LABEL "LH v8 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedGuard3C60s"
++#define LH_FIRMWARE_LABEL "LH v9 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70 BedGuard3C60s LH1"
+diff --git a/Marlin/Configuration_adv.h b/Marlin/Configuration_adv.h
+--- a/Marlin/Configuration_adv.h
++++ b/Marlin/Configuration_adv.h
+@@
+ //#define AUTO_REPORT_POSITION
++
++// Little Hands host protocol. M930 reports one machine-readable, non-blocking
++// snapshot; M930 W waits for queued motion first; M930 S<token> binds the
++// volatile firmware session to a host-generated token.
++#define LITTLE_HANDS_PROTOCOL
+diff --git a/Marlin/src/gcode/gcode.cpp b/Marlin/src/gcode/gcode.cpp
+--- a/Marlin/src/gcode/gcode.cpp
++++ b/Marlin/src/gcode/gcode.cpp
+@@
+         case 928: M928(); break;                                  // M928: Start SD write
+       #endif // SDSUPPORT
++
++      #if ENABLED(LITTLE_HANDS_PROTOCOL)
++        case 930: M930(); break;                                  // M930: Little Hands atomic status snapshot
++      #endif
+
+       case 31: M31(); break;                                      // M31: Report time since the start of SD print or last M109
+diff --git a/Marlin/src/gcode/gcode.h b/Marlin/src/gcode/gcode.h
+--- a/Marlin/src/gcode/gcode.h
++++ b/Marlin/src/gcode/gcode.h
+@@
+     static void M30();
+   #endif
++
++  #if ENABLED(LITTLE_HANDS_PROTOCOL)
++    static void M930();
++  #endif
+
+   static void M31();
+diff --git a/Marlin/src/gcode/host/M115.cpp b/Marlin/src/gcode/host/M115.cpp
+--- a/Marlin/src/gcode/host/M115.cpp
++++ b/Marlin/src/gcode/host/M115.cpp
+@@
+     // CUSTOM_FIRMWARE_UPLOAD (M20 F)
+     cap_line(F("CUSTOM_FIRMWARE_UPLOAD"), ENABLED(CUSTOM_FIRMWARE_UPLOAD));
++
++    // LITTLE_HANDS_PROTOCOL (M930)
++    cap_line(F("LITTLE_HANDS_PROTOCOL"), ENABLED(LITTLE_HANDS_PROTOCOL));
+
+     // EXTENDED_M20 (M20 L)
+diff --git a/Marlin/src/gcode/host/M930.cpp b/Marlin/src/gcode/host/M930.cpp
+new file mode 100644
+--- /dev/null
++++ b/Marlin/src/gcode/host/M930.cpp
+@@
++/**
++ * Marlin 3D Printer Firmware
++ * Copyright (c) 2020 MarlinFirmware [https://github.com/MarlinFirmware/Marlin]
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ */
++
++#include "../../inc/MarlinConfig.h"
++
++#if ENABLED(LITTLE_HANDS_PROTOCOL)
++
++#include "../gcode.h"
++#include "../../module/motion.h"
++#include "../../module/planner.h"
++#include "../../module/temperature.h"
++
++#if ENABLED(SDSUPPORT)
++  #include "../../sd/cardreader.h"
++#endif
++
++namespace {
++  uint32_t lh_session_token;
++  uint32_t lh_snapshot_sequence;
++
++  void echo_float_field(FSTR_P const label, const_float_t value) {
++    SERIAL_CHAR(' ');
++    SERIAL_ECHOF(label);
++    SERIAL_ECHO_F(value, 3);
++  }
++}
++
++/**
++ * M930: Report a single-line Little Hands protocol v1 snapshot.
++ *
++ *   S<uint32>  Set the volatile host session token before reporting.
++ *              A firmware reset clears it to zero.
++ *   W          Wait for all queued motion before taking the snapshot.
++ *
++ * The lp* fields are Marlin logical coordinates. The sp* fields come from
++ * step counters. Neither is proof that an unencoded K9 axis moved physically.
++ */
++void GcodeSuite::M930() {
++  if (parser.seenval('S')) lh_session_token = parser.value_ulong();
++  if (parser.seen_test('W')) planner.synchronize();
++
++  const abce_pos_t stepper_pos = planner.get_axis_positions_mm();
++  const uint8_t queued = planner.movesplanned();
++
++  SERIAL_ECHOPGM("LH1 token=", lh_session_token,
++                 " seq=", ++lh_snapshot_sequence,
++                 " up=", millis());
++
++  #if ENABLED(SDSUPPORT)
++    SERIAL_ECHOPGM(" sd=");
++    if (card.isPrinting())
++      SERIAL_ECHOPGM("printing");
++    else if (card.isPaused())
++      SERIAL_ECHOPGM("paused");
++    else if (card.isFileOpen())
++      SERIAL_ECHOPGM("selected");
++    else
++      SERIAL_ECHOPGM("idle");
++    SERIAL_ECHOPGM(" pos=", card.getIndex(), " size=", card.getFileSize());
++  #else
++    SERIAL_ECHOPGM(" sd=none pos=0 size=0");
++  #endif
++
++  const xyze_pos_t logical = current_position.asLogical();
++  echo_float_field(F("lpx="), logical.x);
++  echo_float_field(F("lpy="), logical.y);
++  echo_float_field(F("lpz="), logical.z);
++  echo_float_field(F("lpe="), logical.e);
++  echo_float_field(F("spx="), stepper_pos.a);
++  echo_float_field(F("spy="), stepper_pos.b);
++  echo_float_field(F("spz="), stepper_pos.c);
++  SERIAL_ECHOPGM(" q=", queued);
++
++  #if HAS_HOTEND
++    echo_float_field(F("hot="), thermalManager.degHotend(0));
++    SERIAL_ECHOPGM("/", thermalManager.degTargetHotend(0),
++                   "/", thermalManager.getHeaterPower(H_E0));
++  #else
++    SERIAL_ECHOPGM(" hot=na");
++  #endif
++
++  #if HAS_HEATED_BED
++    echo_float_field(F("bed="), thermalManager.degBed());
++    SERIAL_ECHOPGM("/", thermalManager.degTargetBed(),
++                   "/", thermalManager.getHeaterPower(H_BED));
++  #else
++    SERIAL_ECHOPGM(" bed=na");
++  #endif
++
++  SERIAL_EOL();
++}
++
++#endif // LITTLE_HANDS_PROTOCOL

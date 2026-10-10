@@ -17,6 +17,7 @@ from __future__ import annotations
 import queue
 import copy
 import re
+import secrets
 import shutil
 import threading
 import time
@@ -32,6 +33,7 @@ from tkinter.scrolledtext import ScrolledText
 import k9_marlin_sd as sdtool
 import k9_recovery as recovery
 import k9_heater_shutdown as heater_shutdown
+from k9_agent_control import LocalControlServer, default_socket_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -45,8 +47,13 @@ RUNTIME_LOG_PATH = LOG_DIR / "little_hands_runtime.log"
 RUNTIME_LOG_MAX_BYTES = 10 * 1024 * 1024
 UI_STATE_PATH = LOG_DIR / "little_hands_ui_state.json"
 PRINT_STATE_PATH = LOG_DIR / "little_hands_print_state.json"
+LH1_SESSION_CHECKPOINT_PATH = LOG_DIR / "little_hands_lh1_session.json"
+CONTROL_SOCKET_PATH = default_socket_path(PROJECT_ROOT)
+CONTROL_TOKEN_PATH = LOG_DIR / "little_hands_control.token"
 TEMP_GRAPH_WINDOW_SEC = 15 * 60
 TEMP_GRAPH_SCALE_RECENT_SEC = 3 * 60
+TEMP_GRAPH_MAX_CONNECT_GAP_SEC = 60
+TEMP_GRAPH_RESTORE_MAX_AGE_SEC = 60
 TEMP_LOG_INTERVAL_SEC = 5.0
 LIVE_SAMPLE_MAX_AGE_SEC = 12.0
 AUTO_SD_REFRESH_DELAY_MS = 3500
@@ -61,6 +68,9 @@ ACTIVE_PRINT_POSITION_SAMPLE_INTERVAL_SEC = 30.0
 ACTIVE_PRINT_POLL_INTERVAL_SEC = 8.0
 USB_SILENCE_POLL_INTERVAL_SEC = 30.0
 USB_SILENCE_LOG_INTERVAL_SEC = 30.0
+LH1_REPLY_TIMEOUT_SEC = 4.0
+LH1_INCOMPLETE_LOG_INTERVAL_SEC = 5 * 60.0
+LH1_PENDING_RESEND_SEC = 60.0
 PRINT_STATE_SAVE_INTERVAL_SEC = 5.0
 PRINT_STATE_MAX_AGE_SEC = 48 * 60 * 60
 PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC = 30 * 60
@@ -127,6 +137,41 @@ JOG_FEEDRATES = {
 
 TempPayload = tuple[float | None, float | None, int | None, float | None, float | None, int | None]
 TempHistoryRow = tuple[float, float | None, float | None, float | None, float | None]
+
+
+def split_temperature_series(
+    rows: list[TempHistoryRow],
+    index: int,
+    *,
+    positive_only: bool = False,
+    max_gap_s: float = TEMP_GRAPH_MAX_CONNECT_GAP_SEC,
+) -> list[list[tuple[float, float]]]:
+    """Return honest graph segments without interpolating missing telemetry."""
+    segments: list[list[tuple[float, float]]] = []
+    current: list[tuple[float, float]] = []
+    previous_ts: float | None = None
+    for row in rows:
+        ts = float(row[0])
+        value = row[index] if len(row) > index else None
+        valid = value is not None and math.isfinite(float(value))
+        if valid and positive_only and float(value) <= 0.0:
+            valid = False
+        discontinuity = bool(
+            previous_ts is not None
+            and (ts < previous_ts or (ts - previous_ts) > max_gap_s)
+        )
+        if not valid or discontinuity:
+            if current:
+                segments.append(current)
+                current = []
+            previous_ts = None
+            if not valid:
+                continue
+        current.append((ts, float(value)))
+        previous_ts = ts
+    if current:
+        segments.append(current)
+    return segments
 
 
 def parse_m105_temperatures(reply: str) -> TempPayload:
@@ -208,6 +253,13 @@ def should_keep_predicted_end_for_stale_active_restore(
         and (now_ts - updated_ts) > PRINT_STATE_ACTIVE_RESTORE_MAX_AGE_SEC
         and predicted_print_end_has_recovery_pose(predicted)
     )
+
+
+def persistent_state_closes_log_restored_print(phase: str, current_print_file: object) -> bool:
+    """Return whether durable terminal state overrides older PRINT_START log evidence."""
+    active_phases = {"prepared", "printing", "paused", "resume-sent", "print_end_expected"}
+    state_file = str(current_print_file or "-").strip()
+    return phase not in active_phases and state_file in {"", "-"}
 
 
 def should_offer_stale_predicted_end_recovery(
@@ -373,6 +425,24 @@ class K9ControlCenter:
         self.preheat_cleanup_confirmed = False
         self.close_after_preheat = False
         self.upload_cancel_requested = False
+        self.agent_dispatching = False
+        self.agent_operation_sequence = 0
+        self.agent_operation: dict[str, object] = {
+            "id": 0,
+            "state": "idle",
+            "label": "",
+            "started_ts": None,
+            "finished_ts": None,
+            "error": "",
+        }
+        self.lh1_host_token = secrets.randbelow(0xFFFFFFFF) + 1
+        self.lh1_restored_token_expected = False
+        self.last_lh1_snapshot: sdtool.LittleHandsSnapshot | None = None
+        self.last_lh1_sample_ts = 0.0
+        self.last_lh1_error = ""
+        self.lh1_incomplete_count = 0
+        self.last_lh1_incomplete_log_ts = 0.0
+        self.lh1_request_pending_since = 0.0
 
         self.preferred_port = str(self.ui_state.get("last_port", "")).strip()
         self.port_var = tk.StringVar(value="")
@@ -468,6 +538,7 @@ class K9ControlCenter:
         self.last_fw_line = ""
         self.last_fw_identity = ""
         self.last_m115_raw = ""
+        self.lh1_protocol_known = False
         self.last_m503_raw = ""
         self.last_position_line = "X:? Y:? Z:?"
         self.last_position_sample_ts = 0.0
@@ -519,6 +590,13 @@ class K9ControlCenter:
         self.root.after(350, self._tick_header_marquee)
         self.root.after(350, self._init_pane_layout)
         self.root.after(200, self._poll_status)
+        self.control_server = LocalControlServer(
+            CONTROL_SOCKET_PATH,
+            CONTROL_TOKEN_PATH,
+            self._dispatch_agent_request_from_server,
+        )
+        self.control_server.start()
+        self.log(f"Локальный control API готов: {CONTROL_SOCKET_PATH}")
 
     def _draw_corner_hands(self) -> None:
         c = self.hands_canvas
@@ -582,7 +660,17 @@ class K9ControlCenter:
             if stamp >= cutoff:
                 loaded.append((stamp, cur, tgt, bed_cur, bed_tgt))
         if loaded:
-            self.temp_history = loaded[-1200:]
+            latest_age = now - loaded[-1][0]
+            if 0.0 <= latest_age <= TEMP_GRAPH_RESTORE_MAX_AGE_SEC:
+                # Preserve only the latest continuous run. Older process
+                # fragments are useful in the log, but joining or scattering
+                # them across a fresh graph is visually misleading.
+                continuous_start = 0
+                for index in range(1, len(loaded)):
+                    delta = loaded[index][0] - loaded[index - 1][0]
+                    if delta < 0.0 or delta > TEMP_GRAPH_MAX_CONNECT_GAP_SEC:
+                        continuous_start = index
+                self.temp_history = loaded[continuous_start:][-1200:]
             self.last_temp_sample_ts = loaded[-1][0]
             self.last_temp_current = loaded[-1][1]
             self.last_temp_target = loaded[-1][2]
@@ -598,6 +686,9 @@ class K9ControlCenter:
         )
         end_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) PRINT_END file=(.+?) temp=")
         abort_re = re.compile(r"(\d{2}):(\d{2}):(\d{2}) PRINT_ABORT_CONFIRMED_BY_OPERATOR file=(.+?)(?:\s+reason=|$)")
+        save_start_close_re = re.compile(
+            r"(\d{2}):(\d{2}):(\d{2}) PRINT_RESULT_CLOSED_BY_SAVE_START file=(.+?)(?:\s+reason=|$)"
+        )
         last_active: str | None = None
         last_end: str | None = None
         last_start_ts: float | None = None
@@ -660,6 +751,10 @@ class K9ControlCenter:
             ma = abort_re.search(line)
             if ma:
                 last_end = ma.group(4).strip()
+                continue
+            mc = save_start_close_re.search(line)
+            if mc:
+                last_end = mc.group(4).strip()
         if last_active and last_active != "-" and last_active != last_end:
             self.current_print_file = last_active
             self.current_print_display = last_active
@@ -702,6 +797,61 @@ class K9ControlCenter:
             self.pause_session_continuous = False
         phase = str(data.get("phase") or "")
         active_phases = {"prepared", "printing", "paused", "resume-sent", "print_end_expected"}
+        lh1_state = data.get("lh1_session")
+        if not isinstance(lh1_state, dict) and phase in active_phases and LH1_SESSION_CHECKPOINT_PATH.is_file():
+            try:
+                checkpoint = json.loads(LH1_SESSION_CHECKPOINT_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                checkpoint = None
+            state_file_for_checkpoint = str(data.get("current_print_file") or "-").strip()
+            if (
+                isinstance(checkpoint, dict)
+                and str(checkpoint.get("current_print_file") or "-").strip() == state_file_for_checkpoint
+                and str(checkpoint.get("usb_generation") or "")
+                == str(data.get("current_print_usb_generation") or "")
+            ):
+                lh1_state = checkpoint.get("lh1_session")
+        if phase in active_phases and isinstance(lh1_state, dict):
+            try:
+                restored_token = int(lh1_state.get("token") or 0)
+            except (TypeError, ValueError):
+                restored_token = 0
+            if 0 < restored_token <= 0xFFFFFFFF:
+                self.lh1_host_token = restored_token
+                self.lh1_restored_token_expected = True
+                # A durable token belongs to a previously validated LH1
+                # session. Keep using atomic M930 polling even if the new host
+                # process has not obtained a fresh M115 capability line yet.
+                self.lh1_protocol_known = True
+                try:
+                    logical = tuple(float(value) for value in lh1_state.get("logical_position", ()))
+                    stepper = tuple(float(value) for value in lh1_state.get("stepper_position", ()))
+                    hotend = lh1_state.get("hotend")
+                    bed = lh1_state.get("bed")
+                    restored_snapshot = sdtool.LittleHandsSnapshot(
+                        token=restored_token,
+                        sequence=int(lh1_state.get("sequence") or 0),
+                        uptime_ms=int(lh1_state.get("uptime_ms") or 0),
+                        sd_state=str(lh1_state.get("sd_state") or "none"),
+                        sd_position=int(lh1_state.get("sd_position") or 0),
+                        sd_size=int(lh1_state.get("sd_size") or 0),
+                        logical_position=logical,  # type: ignore[arg-type]
+                        stepper_position=stepper,  # type: ignore[arg-type]
+                        queued_moves=int(lh1_state.get("queued_moves") or 0),
+                        hotend=tuple(hotend) if isinstance(hotend, list) else None,  # type: ignore[arg-type]
+                        bed=tuple(bed) if isinstance(bed, list) else None,  # type: ignore[arg-type]
+                    )
+                    if (
+                        restored_snapshot.sequence > 0
+                        and restored_snapshot.uptime_ms >= 0
+                        and restored_snapshot.sd_state in sdtool.LH1_STATES
+                        and len(logical) == 4
+                        and len(stepper) == 3
+                        and 0 <= restored_snapshot.sd_position <= restored_snapshot.sd_size
+                    ):
+                        self.last_lh1_snapshot = restored_snapshot
+                except (TypeError, ValueError, OverflowError):
+                    self.last_lh1_snapshot = None
         try:
             updated_ts = float(data.get("updated_ts") or 0.0)
         except (TypeError, ValueError):
@@ -719,12 +869,24 @@ class K9ControlCenter:
         if isinstance(suspect_uploads, dict):
             self.suspect_sd_uploads.update(suspect_uploads)
         if data.get("next_sd_start_requires_power_cycle"):
-            self.next_sd_start_requires_power_cycle = True
-            self.next_sd_start_power_cycle_reason = str(
+            restored_gate_reason = str(
                 data.get("next_sd_start_power_cycle_reason")
-                or "restored post-print / failed-start power-cycle gate"
+                or "restored failed-start power-cycle gate"
             )
-        if phase in {"completed", "stopped", "stop-requested", "stop-unconfirmed", "stopped-jog-updated", "hard-stop", "preheat-lift-failed", "failed-start"}:
+            obsolete_routine_gate_reasons = {
+                "completion",
+                "completed SD print",
+                "operator-confirmed completed SD print",
+                "print stopped by operator",
+            }
+            if restored_gate_reason not in obsolete_routine_gate_reasons:
+                self.next_sd_start_requires_power_cycle = True
+                self.next_sd_start_power_cycle_reason = restored_gate_reason
+        # Ordinary completion and an acknowledged Stop do not reset Marlin and
+        # therefore do not justify burdening the operator with a power cycle.
+        # Preserve the gate only for states that imply a reset/halt or unknown
+        # controller/heater state (and for an explicitly persisted gate above).
+        if phase in {"stop-unconfirmed", "hard-stop", "preheat-lift-failed", "failed-start"}:
             self._require_power_cycle_before_next_sd_start(f"restored {phase} state", save=False)
         predicted = data.get("predicted_end")
         predicted_has_recovery_pose = predicted_print_end_has_recovery_pose(predicted)
@@ -791,6 +953,21 @@ class K9ControlCenter:
             self.home_trust_reason = "stale active print marker preserved until explicit operator result"
         state_file = str(data.get("current_print_file") or "-").strip()
         state_display = str(data.get("current_print_display") or state_file).strip()
+        if persistent_state_closes_log_restored_print(phase, state_file):
+            # Log recovery runs first so it can rescue a missing/corrupt state file.
+            # A valid terminal state is newer and authoritative; otherwise an old
+            # PRINT_START is resurrected after Save start or a failed preheat.
+            self.current_print_file = "-"
+            self.current_print_display = "-"
+            self.current_print_start_ts = None
+            self.current_print_progress_pct = None
+            self.print_state_restored_from_log = False
+            self.print_start_watchdog_alerted = False
+            self.print_was_active = False
+            self.print_completion_armed = False
+            self.sd_progress_sample_count = 0
+            self.first_sd_progress_ts = None
+            self.last_sd_progress_ts = None
         predicted_valid = isinstance(predicted, dict) and bool(predicted.get("valid"))
         file_name = str(predicted.get("file") or state_file).strip() if predicted_valid else state_file
         if not file_name or file_name == "-":
@@ -840,9 +1017,25 @@ class K9ControlCenter:
             self.active_sd_var.set(self._format_label_value("active_sd", self.current_print_display))
         self.current_print_usb_generation = str(data.get("current_print_usb_generation") or "")
 
+    def _lh1_session_payload(self, snapshot: sdtool.LittleHandsSnapshot | None = None) -> dict[str, object]:
+        snapshot = self.last_lh1_snapshot if snapshot is None else snapshot
+        return {
+            "token": self.lh1_host_token,
+            "sequence": snapshot.sequence if snapshot is not None else 0,
+            "uptime_ms": snapshot.uptime_ms if snapshot is not None else 0,
+            "sd_state": snapshot.sd_state if snapshot is not None else "none",
+            "sd_position": snapshot.sd_position if snapshot is not None else 0,
+            "sd_size": snapshot.sd_size if snapshot is not None else 0,
+            "logical_position": list(snapshot.logical_position) if snapshot is not None else [],
+            "stepper_position": list(snapshot.stepper_position) if snapshot is not None else [],
+            "queued_moves": snapshot.queued_moves if snapshot is not None else 0,
+            "hotend": list(snapshot.hotend) if snapshot is not None and snapshot.hotend is not None else None,
+            "bed": list(snapshot.bed) if snapshot is not None and snapshot.bed is not None else None,
+        }
+
     def _print_state_payload(self, phase: str) -> dict[str, object]:
         return {
-            "schema": 2,
+            "schema": 3,
             "recovery": getattr(self, "recovery_record", {}),
             "phase": phase,
             "updated_ts": time.time(),
@@ -851,6 +1044,7 @@ class K9ControlCenter:
             "current_print_start_ts": self.current_print_start_ts,
             "progress_pct": self.current_print_progress_pct,
             "current_print_usb_generation": self.current_print_usb_generation,
+            "lh1_session": self._lh1_session_payload(),
             "predicted_end": {
                 "valid": self.predicted_print_end_valid,
                 "file": self.predicted_print_end_file,
@@ -1259,6 +1453,8 @@ class K9ControlCenter:
         port = self._port()
         identity = heater_shutdown.port_identity(port)
         require_bed = True
+        lifted_for_preheat = False
+        failure_requires_power_cycle = False
         with self.preheat_state_lock:
             self.preheat_cancel_requested.clear()
             self.preheat_active = True
@@ -1267,16 +1463,38 @@ class K9ControlCenter:
         try:
             require_bed = self._hotbed_target_for_print(path, display, source) > 0
             self._check_preheat_cancelled()
+            # Lift before either heater is enabled. A nozzle left at Z0 is warmed by
+            # the bed and can trigger the K9's shared fan, slowing bed preheat.
+            lifted_for_preheat = self._lift_from_saved_start_for_preheat_if_needed()
+            self._check_preheat_cancelled()
             self._preheat_hotbed_before_sd_start(path, display, source)
             self._check_preheat_cancelled()
             self._preheat_hotend_before_sd_start(path, display, source)
+            self._check_preheat_cancelled()
+            self._return_to_saved_start_after_successful_preheat(lifted_for_preheat=lifted_for_preheat)
+            lifted_for_preheat = False
             self._check_preheat_cancelled()
             self._set_hotbed_print_target_before_sd_start(path, display, source)
             # Atomically close the cancellation window before handing off to SD.
             with self.preheat_state_lock:
                 self._check_preheat_cancelled()
                 self.preheat_active = False
-        except Exception:
+        except Exception as exc:
+            if lifted_for_preheat and is_firmware_halt_message(exc):
+                failure_requires_power_cycle = True
+                self.at_saved_start_pose = False
+                self.preheat_lift_recovery_available = True
+                self.preheat_lift_mm = float(sdtool.SAFE_HOME_CLEARANCE_Z)
+                self._set_home_trust(HOME_TRUST_UNCERTAIN, "firmware thermal halt left preheat lift unrecovered", log_change=True)
+                self._save_print_state("preheat-lift-failed", force=True)
+                self._post(
+                    "log",
+                    "Прошивка остановила принтер во время предпрогрева. Не пытаюсь двигать оси до power cycle: "
+                    "после thermal halt Marlin обычно не подтверждает M17/G1. После перезагрузки используй "
+                    "guarded возврат известного preheat-lift.",
+                )
+            elif lifted_for_preheat:
+                self._return_to_saved_start_after_failed_preheat(lifted_for_preheat=True)
             try:
                 result = heater_shutdown.shutdown_heaters(
                     port, self._baud(), parse_m105_temperatures, identity=identity,
@@ -1292,15 +1510,28 @@ class K9ControlCenter:
                     self._post("log", f"USB cleanup: {error}")
                 self._post("log", self._t("heaters_off_confirmed" if result["confirmed"] else "heaters_off_unknown"))
                 if not result["confirmed"]:
+                    failure_requires_power_cycle = True
                     self._post("info", self._t("heaters_off_unknown"))
             except Exception as shutdown_error:
                 self.preheat_cleanup_confirmed = False
+                failure_requires_power_cycle = True
                 self._post("log", f"{self._t('heaters_off_unknown')} {shutdown_error}")
                 self._post("info", self._t("heaters_off_unknown"))
             finally:
-                self._require_power_cycle_before_next_sd_start("SD preheat cancelled or failed", save=False)
-                self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD preheat cancelled or failed", log_change=True)
-                phase = "preheat-lift-failed" if self.preheat_lift_recovery_available else "failed-start"
+                if self.preheat_lift_recovery_available:
+                    failure_requires_power_cycle = True
+                if failure_requires_power_cycle:
+                    self._require_power_cycle_before_next_sd_start(
+                        "preheat left firmware/heater/clearance state unconfirmed", save=False
+                    )
+                    self._set_home_trust(HOME_TRUST_UNCERTAIN, "SD preheat recovery is unconfirmed", log_change=True)
+                else:
+                    self._post(
+                        "log",
+                        "Предпрогрев отменён/не завершён, но нагреватели выключены и известный Z-подъём возвращён; "
+                        "power cycle для повторной попытки не требуется.",
+                    )
+                phase = "preheat-lift-failed" if self.preheat_lift_recovery_available else "preheat-failed-clean"
                 self._save_print_state(phase, force=True)
             raise
         finally:
@@ -1463,7 +1694,7 @@ class K9ControlCenter:
             f"{reason}: сначала доказываю нагрев hotend на стороне Little Hands до {target:.0f}C. "
             "Если нагрев не подтвердится, M24 не будет отправлен и принтер не начнёт холодные движения.",
         )
-        self._preheat_hotend_for_sd_start_with_clearance(target)
+        self._preheat_hotend_for_sd_start(target)
 
     def _preheat_hotend_for_sd_start(self, target: float) -> None:
         target = float(target)
@@ -1746,9 +1977,13 @@ class K9ControlCenter:
 
     def _lift_from_saved_start_for_preheat_if_needed(self) -> bool:
         self._check_preheat_cancelled()
-        if not self.at_saved_start_pose:
+        if not getattr(self, "at_saved_start_pose", False):
             return False
-        self._post("log", "Сопло сейчас в сохранённом старте: поднимаю Z перед предпрогревом, затем вернусь к старту перед M24.")
+        self._post(
+            "log",
+            "Сопло сейчас в сохранённом старте: поднимаю Z до включения hotbed/hotend, "
+            "затем вернусь к старту перед M24.",
+        )
         out = sdtool.lift_from_saved_start_for_preheat(self._port(), self._baud())
         self.at_saved_start_pose = False
         self.preheat_lift_recovery_available = True
@@ -2257,6 +2492,41 @@ class K9ControlCenter:
                 "en": "The port must be free from Cura and other monitors.",
                 "zh": "端口必须未被 Cura 或其他监视器占用。",
             },
+            "lh1_incomplete_empty": {
+                "ru": "за 4 секунды ответ не получен",
+                "en": "no reply arrived within 4 seconds",
+                "zh": "4 秒内未收到回复",
+            },
+            "lh1_incomplete_partial": {
+                "ru": "получено {bytes} байт, но нет целой строки LH1",
+                "en": "received {bytes} bytes but no complete LH1 line",
+                "zh": "已收到 {bytes} 字节，但没有完整的 LH1 行",
+            },
+            "lh1_incomplete_busy": {
+                "ru": "прошивка ответила «занята»; ранее отправленный M930 остаётся в ожидании",
+                "en": "firmware replied busy; the previously sent M930 remains pending",
+                "zh": "固件回复忙；先前发送的 M930 仍在等待",
+            },
+            "lh1_incomplete": {
+                "ru": "Телеметрия LH1 временно неполная: {detail} (подряд: {count}). SD-печать продолжается автономно; повторю M930 без дополнительных SD-команд.",
+                "en": "LH1 telemetry is temporarily incomplete: {detail} (consecutive: {count}). The SD print continues autonomously; M930 will be retried without extra SD commands.",
+                "zh": "LH1 遥测暂时不完整：{detail}（连续 {count} 次）。SD 打印继续自主运行；将重试 M930，不发送额外 SD 命令。",
+            },
+            "lh1_recovered": {
+                "ru": "Телеметрия LH1 восстановилась после {count} неполных ответов.",
+                "en": "LH1 telemetry recovered after {count} incomplete replies.",
+                "zh": "LH1 遥测在 {count} 次不完整回复后已恢复。",
+            },
+            "lh1_token_mismatch": {
+                "ru": "LH1 token не совпал: ожидался {expected}, получен {actual}. Сессия прошивки считается изменившейся.",
+                "en": "LH1 token mismatch: expected {expected}, got {actual}. The firmware session is treated as changed.",
+                "zh": "LH1 token 不匹配：预期 {expected}，实际 {actual}。固件会话被视为已更改。",
+            },
+            "lh1_sequence_backwards": {
+                "ru": "LH1 sequence/uptime уменьшились. Снимок отклонён как старый или после сброса прошивки.",
+                "en": "LH1 sequence/uptime moved backwards. The snapshot was rejected as stale or post-reset.",
+                "zh": "LH1 sequence/uptime 回退。该快照被视为过时或固件重置后数据而拒绝。",
+            },
             "task_blocked_busy": {
                 "ru": "Команда '{label}' не запущена: предыдущая USB-команда ещё выполняется.",
                 "en": "Command '{label}' was not started: the previous USB command is still running.",
@@ -2400,6 +2670,8 @@ class K9ControlCenter:
         self.auto_sd_refresh_after_port = None
         self._save_ui_state()
         self.port_var.set("")
+        if hasattr(self, "control_server"):
+            self.control_server.stop()
         try:
             if self.serial_lock.acquire(timeout=0.4):
                 self.serial_lock.release()
@@ -2598,28 +2870,24 @@ class K9ControlCenter:
             temp = max(bed_min, min(bed_max, temp))
             return bed_bottom - ((temp - bed_min) / max(1e-6, (bed_max - bed_min))) * max(1, bed_h)
 
-        def collect_points(index: int, map_y, *, positive_only: bool = False) -> list[float]:
-            points: list[float] = []
-            for row in data:
-                value = row[index] if len(row) > index else None
-                if value is None or (positive_only and value <= 0.0):
-                    continue
-                points.extend((map_x(row[0]), map_y(value)))
-            return points
+        def draw_series(
+            index: int,
+            map_y,
+            *,
+            color: str,
+            width: int,
+            positive_only: bool = False,
+            dash: tuple[int, int] | None = None,
+        ) -> None:
+            for segment in split_temperature_series(data, index, positive_only=positive_only):
+                points = [coordinate for ts, value in segment for coordinate in (map_x(ts), map_y(value))]
+                if len(points) >= 4:
+                    c.create_line(*points, fill=color, width=width, dash=dash)
 
-        hotend_points = collect_points(1, map_hotend_y)
-        hotend_target_points = collect_points(2, map_hotend_y, positive_only=True)
-        bed_points = collect_points(3, map_bed_y)
-        bed_target_points = collect_points(4, map_bed_y)
-
-        if len(hotend_target_points) >= 4:
-            c.create_line(*hotend_target_points, fill="#d33682", width=1, dash=(4, 2))
-        if len(bed_target_points) >= 4:
-            c.create_line(*bed_target_points, fill="#268bd2", width=1, dash=(3, 3))
-        if len(hotend_points) >= 4:
-            c.create_line(*hotend_points, fill="#b58900", width=2)
-        if len(bed_points) >= 4:
-            c.create_line(*bed_points, fill="#2aa198", width=2)
+        draw_series(2, map_hotend_y, color="#d33682", width=1, positive_only=True, dash=(4, 2))
+        draw_series(4, map_bed_y, color="#268bd2", width=1, positive_only=True, dash=(3, 3))
+        draw_series(1, map_hotend_y, color="#b58900", width=2)
+        draw_series(3, map_bed_y, color="#2aa198", width=2)
 
         hotend_legend = (
             ("Hotend", "#b58900", False),
@@ -3707,6 +3975,280 @@ class K9ControlCenter:
     def _post(self, kind: str, payload: object) -> None:
         self.events.put((kind, payload))
 
+    def _dispatch_agent_request_from_server(self, request: dict[str, object]) -> dict[str, object]:
+        completed = threading.Event()
+        envelope: dict[str, object] = {"request": request, "completed": completed}
+        self.events.put(("agent-request", envelope))
+        if not completed.wait(timeout=12.0):
+            return {"ok": False, "error": "GUI main thread did not process the request in time"}
+        response = envelope.get("response")
+        return response if isinstance(response, dict) else {"ok": False, "error": "missing GUI response"}
+
+    @staticmethod
+    def _age_seconds(stamp: float) -> float | None:
+        return round(max(0.0, time.time() - stamp), 3) if stamp else None
+
+    def _agent_status(self) -> dict[str, object]:
+        snapshot = self.last_lh1_snapshot
+        lh1: dict[str, object] | None = None
+        if snapshot is not None:
+            lh1 = {
+                "token": snapshot.token,
+                "sequence": snapshot.sequence,
+                "uptime_ms": snapshot.uptime_ms,
+                "sd_state": snapshot.sd_state,
+                "sd_position": snapshot.sd_position,
+                "sd_size": snapshot.sd_size,
+                "logical_position": list(snapshot.logical_position),
+                "stepper_position": list(snapshot.stepper_position),
+                "queued_moves": snapshot.queued_moves,
+                "hotend": list(snapshot.hotend) if snapshot.hotend is not None else None,
+                "bed": list(snapshot.bed) if snapshot.bed is not None else None,
+                "age_s": self._age_seconds(self.last_lh1_sample_ts),
+            }
+        temp_age = self._age_seconds(self.last_temp_sample_ts)
+        sd_age = self._age_seconds(self.last_sd_sample_ts)
+        if not self._port():
+            health = "disconnected"
+        elif self.printer_halted:
+            health = "firmware-halted"
+        elif self.user_task_pending:
+            health = "busy"
+        elif self.last_lh1_error and "Cap:LITTLE_HANDS_PROTOCOL:1" in self.last_m115_raw:
+            health = "lh1-invalid"
+        elif temp_age is None:
+            health = "telemetry-unknown"
+        elif temp_age > 45:
+            health = "telemetry-stale"
+        else:
+            health = "ok"
+        return {
+            "ok": True,
+            "health": health,
+            "timestamp": time.time(),
+            "port": self._port() or None,
+            "baud": self._baud(),
+            "firmware": self.last_fw_identity or None,
+            "busy": self.user_task_pending,
+            "busy_label": self.busy_var.get(),
+            "operation": dict(self.agent_operation),
+            "temperature": {
+                "hotend_current": self.last_temp_current,
+                "hotend_target": self.last_temp_target,
+                "hotend_power": self.last_heater_power,
+                "bed_current": self.last_bed_temp_current,
+                "bed_target": self.last_bed_temp_target,
+                "bed_power": self.last_bed_heater_power,
+                "age_s": temp_age,
+            },
+            "sd": {
+                "summary": self.last_sd_summary,
+                "age_s": sd_age,
+                "files_cached": len(self.sd_list),
+                "selected": self._selected_print_sd_path(),
+                "active_file": None if self.current_print_file == "-" else self.current_print_file,
+                "active_display": None if self.current_print_display == "-" else self.current_print_display,
+                "progress_pct": self.current_print_progress_pct,
+            },
+            "position": {
+                "operator_view": self.last_position_line,
+                "age_s": self._age_seconds(self.last_position_sample_ts),
+                "home_trust": self.home_trust,
+                "home_trust_reason": self.home_trust_reason,
+                "at_saved_start": self.at_saved_start_pose,
+            },
+            "guards": {
+                "post_print_recovery_required": self.post_print_recovery_required,
+                "bed_clear_before_go_start_required": self.bed_clear_before_go_start_required,
+                "preheat_lift_recovery_available": self.preheat_lift_recovery_available,
+                "next_sd_start_requires_power_cycle": self.next_sd_start_requires_power_cycle,
+                "next_sd_start_power_cycle_reason": self.next_sd_start_power_cycle_reason,
+                "printer_halted": self.printer_halted,
+            },
+            "usb": {
+                "generation": sdtool.serial_port_usb_generation(self._port()) if self._port() else "",
+                "silence_age_s": self._age_seconds(self.usb_silence_since),
+            },
+            "lh1": lh1,
+            "lh1_error": self.last_lh1_error or None,
+        }
+
+    def _agent_select_sd(self, requested: str) -> tuple[str, str]:
+        needle = normalize_sd_key(requested)
+        matches: list[tuple[int, str, str]] = []
+        for index, display in enumerate(self.sd_print_files):
+            path = self.sd_display_to_path.get(display, display)
+            if needle in {normalize_sd_key(path), normalize_sd_key(display)}:
+                matches.append((index, display, path))
+        if not matches:
+            raise RuntimeError(f"SD file is not in the cached printable list: {requested}")
+        if len(matches) != 1:
+            raise RuntimeError(f"SD file selection is ambiguous: {requested}")
+        index, display, path = matches[0]
+        self.sd_print_listbox.selection_clear(0, "end")
+        self.sd_print_listbox.selection_set(index)
+        self.sd_print_listbox.see(index)
+        self._sync_selected_sd_label()
+        return display, path
+
+    def _agent_sd_start_error(self, path: str, display: str) -> str | None:
+        if self.post_print_recovery_required or self.bed_clear_before_go_start_required:
+            return "post-print/recovery cycle is not complete"
+        if not self._home_is_trusted():
+            return f"saved start is not trusted: {self.home_trust_reason}"
+        if not self.at_saved_start_pose:
+            return "printer is not marked as physically standing at the saved start"
+        suspect = self._suspect_sd_upload_reason(path)
+        if suspect:
+            return f"SD file is blocked as suspect: {suspect}"
+        if self.next_sd_start_requires_power_cycle:
+            return "power-cycle confirmation is required before SD start"
+        return None
+
+    def _handle_agent_request(self, request: dict[str, object]) -> dict[str, object]:
+        command = str(request.get("command") or "").strip()
+        raw_arguments = request.get("arguments")
+        arguments = raw_arguments if isinstance(raw_arguments, dict) else {}
+        if command == "status":
+            return self._agent_status()
+        if command == "sd-files":
+            return {"ok": True, "printable": list(self.sd_print_files), "other": list(self.sd_other_files)}
+        if command == "log-tail":
+            limit = max(1, min(int(arguments.get("lines") or 80), 500))
+            try:
+                lines = RUNTIME_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
+            except FileNotFoundError:
+                lines = []
+            return {"ok": True, "lines": lines}
+        if command == "select-sd":
+            display, path = self._agent_select_sd(str(arguments.get("file") or ""))
+            return {"ok": True, "selected": path, "display": display}
+        if command == "cancel":
+            cancelled = self.cancel_preheat()
+            if (
+                not cancelled
+                and self.upload_cancel_requested is False
+                and self.user_task_pending
+                and self.progress_var.get().startswith("Upload")
+            ):
+                self.cancel_upload()
+                cancelled = True
+            return {"ok": True, "accepted": cancelled, "busy": self.user_task_pending}
+        if command == "close":
+            if arguments.get("confirm") != "close-control-center":
+                raise RuntimeError("close requires close-control-center confirmation")
+            if self.user_task_pending:
+                raise RuntimeError("cannot close while a USB operation is running")
+            self.root.after_idle(self._on_close)
+            return {"ok": True, "accepted": True}
+        if self.user_task_pending:
+            raise RuntimeError("another USB operation is already running")
+        if not self._port():
+            raise RuntimeError("printer port is not connected")
+
+        self.agent_dispatching = True
+        try:
+            if command == "refresh-sd":
+                self.refresh_sd_files()
+            elif command == "upload-gcode":
+                if arguments.get("confirm") != "write-printer-sd":
+                    raise RuntimeError("upload-gcode requires write-printer-sd confirmation")
+                if self.current_print_file != "-":
+                    raise RuntimeError("G-code upload is blocked while an SD print is active")
+                source = Path(str(arguments.get("path") or "")).expanduser().resolve()
+                if not source.is_file():
+                    raise RuntimeError(f"G-code file does not exist: {source}")
+                valid, reason = self._validate_gcode_for_current_k9(source)
+                if not valid:
+                    raise RuntimeError(reason)
+                destination = str(arguments.get("dest") or "").strip() or sdtool.make_sd_name(source.name)
+                self.local_gcode_var.set(str(source))
+                self.dest_name_var.set(destination)
+                if reason:
+                    self.log(reason)
+                self.upload_gcode()
+            elif command == "heaters-off":
+                if arguments.get("confirm") != "safety-shutdown":
+                    raise RuntimeError("heaters-off requires confirm=safety-shutdown")
+                self.shutdown_heaters()
+            elif command == "pause":
+                if arguments.get("confirm") != "operator-watching" or self.current_print_file == "-":
+                    raise RuntimeError("pause requires an active print and operator-watching confirmation")
+                self.pause_print()
+            elif command == "resume":
+                if arguments.get("confirm") != "power-axes-part-untouched":
+                    raise RuntimeError("resume requires power-axes-part-untouched confirmation")
+                paused = self.recovery_record.get("pause", {})
+                if not isinstance(paused, dict) or not paused.get("confirmed"):
+                    raise RuntimeError("there is no confirmed retained pause to resume")
+                if self.next_sd_start_requires_power_cycle:
+                    raise RuntimeError("resume is blocked by the power-cycle gate")
+                self.resume_print(confirmed_untouched=True)
+            elif command == "stop":
+                if arguments.get("confirm") != "operator-watching":
+                    raise RuntimeError("stop requires operator-watching confirmation")
+                self.stop_print()
+            elif command == "jog":
+                if arguments.get("confirm") != "operator-watching":
+                    raise RuntimeError("jog requires operator-watching confirmation")
+                axis = str(arguments.get("axis") or "").upper()
+                distance = float(arguments.get("distance") or 0.0)
+                if axis not in {"X", "Y", "Z"} or not math.isfinite(distance) or distance == 0:
+                    raise RuntimeError("invalid jog axis or distance")
+                if abs(distance) not in JOG_STEPS_MM:
+                    raise RuntimeError(f"jog distance must be one of {JOG_STEPS_MM}")
+                self.jog_axis(axis, distance)
+            elif command in {"hotbed", "hotend"}:
+                target = float(arguments.get("target") or 0.0)
+                maximum = HOTBED_MAX_MANUAL_TARGET_C if command == "hotbed" else K9_HOTEND_MAX_TARGET_C
+                if not math.isfinite(target) or target < 0 or target > maximum:
+                    raise RuntimeError(f"{command} target must be between 0 and {maximum:g}C")
+                if target > 0 and arguments.get("confirm") != "operator-watching":
+                    raise RuntimeError(f"positive {command} target requires operator-watching confirmation")
+                (self.set_hotbed_target if command == "hotbed" else self.set_filament_hotend_target)(target)
+            elif command == "motor-off":
+                if arguments.get("confirm") != "invalidate-home":
+                    raise RuntimeError("motor-off requires invalidate-home confirmation")
+                self.motor_off()
+            elif command == "save-start":
+                if arguments.get("confirm") != "physical-start-verified":
+                    raise RuntimeError("save-start requires physical-start-verified confirmation")
+                power_value = arguments.get("power_cycled")
+                if self.next_sd_start_requires_power_cycle and power_value not in {"yes", "no"}:
+                    raise RuntimeError("save-start requires power_cycled=yes or no while the gate is active")
+                power_confirmed = None if power_value is None else power_value == "yes"
+                self.set_current_home_zero(
+                    confirmed_physical_start=True,
+                    power_cycle_confirmation=power_confirmed,
+                )
+            elif command == "start":
+                if arguments.get("confirm") != "physical-start-and-watch":
+                    raise RuntimeError("start requires physical-start-and-watch confirmation")
+                requested = str(arguments.get("file") or "").strip()
+                if requested:
+                    display, path = self._agent_select_sd(requested)
+                else:
+                    path = self._selected_print_sd_path() or ""
+                    display = self._selected_sd_display() or path
+                if not path:
+                    raise RuntimeError("no printable SD file is selected")
+                if arguments.get("power_cycled") == "yes" and self.next_sd_start_requires_power_cycle:
+                    raise RuntimeError("save-start must record the power cycle before a start command")
+                error = self._agent_sd_start_error(path, display)
+                if error:
+                    raise RuntimeError(error)
+                self.start_selected_print_with_home(skip_interactive_guards=True)
+            elif command == "delete-sd":
+                if arguments.get("confirm") != "delete-this-file":
+                    raise RuntimeError("delete-sd requires delete-this-file confirmation")
+                self._agent_select_sd(str(arguments.get("file") or ""))
+                self.delete_selected_file(confirmed=True)
+            else:
+                raise RuntimeError(f"unknown command: {command}")
+        finally:
+            self.agent_dispatching = False
+        return {"ok": True, "accepted": True, "operation": dict(self.agent_operation)}
+
     def _drain_events(self) -> None:
         while True:
             try:
@@ -3734,6 +4276,16 @@ class K9ControlCenter:
                     self._require_power_cycle_before_next_sd_start("transient USB/serial error during printer command", save=True)
                     self._show_post_print_recovery_window("failed-start")
                 messagebox.showerror("K9 Control Center", text)
+            elif kind == "agent-error":
+                text = str(payload)
+                self.log(self._log_t("error_prefix", text=text))
+                if self._is_port_gone_error(text):
+                    self.disconnect_port(log_change=False)
+                if sdtool.is_transient_serial_error(text):
+                    self.post_print_recovery_required = True
+                    self._require_power_cycle_before_next_sd_start(
+                        "transient USB/serial error during printer command", save=True
+                    )
             elif kind == "info":
                 messagebox.showinfo("Little Hands", str(payload))
                 self.log(str(payload))
@@ -3790,6 +4342,26 @@ class K9ControlCenter:
             elif kind == "pos":
                 self.last_position_line = self._format_operator_position_line(str(payload))
                 self.last_position_sample_ts = time.time()
+            elif kind == "lh1":
+                snapshot, raw = payload  # type: ignore[misc]
+                self.last_lh1_snapshot = snapshot
+                self.last_lh1_sample_ts = time.time()
+                self.last_lh1_error = ""
+                self._store_metric_section("m930", raw)
+                if self.current_print_file != "-":
+                    try:
+                        recovery.atomic_json(
+                            LH1_SESSION_CHECKPOINT_PATH,
+                            {
+                                "schema": 1,
+                                "updated_ts": time.time(),
+                                "current_print_file": self.current_print_file,
+                                "usb_generation": self.current_print_usb_generation,
+                                "lh1_session": self._lh1_session_payload(snapshot),
+                            },
+                        )
+                    except Exception as exc:
+                        self.log(f"Не удалось сохранить LH1 checkpoint: {exc}")
             elif kind == "progress":
                 label, value = payload  # type: ignore[misc]
                 label_text = str(label)
@@ -3813,6 +4385,20 @@ class K9ControlCenter:
                     if self.preheat_cleanup_confirmed:
                         self._on_close()
                         return
+            elif kind == "agent-request":
+                envelope = payload  # type: ignore[assignment]
+                try:
+                    envelope["response"] = self._handle_agent_request(envelope["request"])
+                except Exception as exc:
+                    envelope["response"] = {"ok": False, "error": str(exc)}
+                finally:
+                    envelope["completed"].set()
+            elif kind == "agent-operation-finished":
+                operation_id, error = payload  # type: ignore[misc]
+                if int(operation_id) == int(self.agent_operation.get("id") or 0):
+                    self.agent_operation["state"] = "failed" if error else "completed"
+                    self.agent_operation["finished_ts"] = time.time()
+                    self.agent_operation["error"] = str(error or "")
             elif kind == "busy":
                 busy, label = payload  # type: ignore[misc]
                 self._set_busy_ui(bool(busy), str(label))
@@ -3859,7 +4445,7 @@ class K9ControlCenter:
             elif kind == "post-print-recovery":
                 reason = str(payload or "completion")
                 self.post_print_recovery_required = True
-                self._require_power_cycle_before_next_sd_start(reason, save=True)
+                self._save_print_state("completed", force=True)
                 self.log(self._post_print_recovery_text(reason))
                 self._show_post_print_recovery_window(reason)
             elif kind == "post-print-finish-confirmation":
@@ -3881,6 +4467,8 @@ class K9ControlCenter:
         self.metrics_sections[key_str] = value_str
         if key_str == "m115":
             self.last_m115_raw = value_str
+            if "Cap:LITTLE_HANDS_PROTOCOL:1" in value_str:
+                self.lh1_protocol_known = True
             self._refresh_fw_identity()
             self.fw_var.set(f"FW: {self.last_fw_identity}" if self.last_fw_identity else "")
         elif key_str == "m503":
@@ -3909,6 +4497,7 @@ class K9ControlCenter:
     def _render_metrics(self) -> None:
         order = [
             ("m115", "M115 / Firmware"),
+            ("m930", "M930 / Little Hands protocol"),
             ("m503", "M503 / Settings"),
             ("m114", "M114 / Position"),
             ("m105", "M105 / Temperature"),
@@ -3925,6 +4514,7 @@ class K9ControlCenter:
     def _format_metrics_snapshot(self, sections: dict[str, str], captured_at: str) -> str:
         order = [
             ("m115", "M115 / Firmware"),
+            ("m930", "M930 / Little Hands protocol"),
             ("m503", "M503 / Settings"),
             ("m114", "M114 / Position"),
             ("m105", "M105 / Temperature"),
@@ -4233,8 +4823,20 @@ class K9ControlCenter:
                     self.port_display_var.set(self._port_label(meta))
                     self.port_var.set(selected_device)
                     self.preferred_port = selected_device
-                    self._schedule_sd_refresh_after_port(selected_device, force=selected_device != previous_device)
+                    if self.current_print_file == "-":
+                        self._schedule_sd_refresh_after_port(selected_device, force=selected_device != previous_device)
                     return
+        if self.current_print_file != "-" and len(safe_ports) == 1:
+            candidate = safe_ports[0]
+            candidate_device = str(candidate.get("device") or "")
+            self.port_display_var.set(self._port_label(candidate))
+            self.port_var.set(candidate_device)
+            self.preferred_port = candidate_device
+            self.log(
+                f"Активная SD-печать восстановлена: выбран единственный безопасный порт {candidate_device}; "
+                "список SD не обновляю, ожидаю подтверждение текущего состояния через LH1/M930."
+            )
+            return
         if selected_device and any(meta.get("device") == selected_device for meta in ports):
             self.log(
                 f"Порт {selected_device} скрыт из списка принтера: он не похож на K9/CH340. "
@@ -4448,7 +5050,6 @@ class K9ControlCenter:
         self.last_sd_progress_ts = None
         self.post_print_recovery_required = True
         self.bed_clear_before_go_start_required = True
-        self._require_power_cycle_before_next_sd_start("operator-confirmed completed SD print", save=False)
         self.post_print_pose_known = False
         self.post_print_pose = None
         self.stopped_print_pose = None
@@ -4992,10 +5593,13 @@ class K9ControlCenter:
 
     def _run_task(self, label: str, func, *, require_port: bool = True) -> None:
         display_label = self._task_label(label)
+        headless = self.agent_dispatching
         if self.user_task_pending:
             self.log(self._log_t("task_blocked_busy", label=display_label))
             return
         if require_port and not self._port():
+            if headless:
+                raise RuntimeError(self._log_t("task_need_port"))
             messagebox.showerror("Little Hands", self._log_t("task_need_port"))
             return
         if require_port:
@@ -5003,12 +5607,27 @@ class K9ControlCenter:
             if safety_error:
                 self.disconnect_port(log_change=False)
                 self.log(self._log_t("task_not_started_safety", label=display_label, reason=safety_error))
+                if headless:
+                    raise RuntimeError(safety_error)
                 messagebox.showerror("Little Hands", safety_error)
                 return
         self.user_task_pending = True
         self._set_busy_ui(True, f"USB: {display_label.lower()}")
+        operation_id = 0
+        if headless:
+            self.agent_operation_sequence += 1
+            operation_id = self.agent_operation_sequence
+            self.agent_operation = {
+                "id": operation_id,
+                "state": "running",
+                "label": display_label,
+                "started_ts": time.time(),
+                "finished_ts": None,
+                "error": "",
+            }
 
         def worker() -> None:
+            operation_error = ""
             while not self.serial_lock.acquire(timeout=0.25):
                 pass
             try:
@@ -5024,12 +5643,15 @@ class K9ControlCenter:
                 self._post("files-status", str(exc))
                 self._post("progress", ("Upload cancelled", 0.0))
             except Exception as exc:
-                self._post("error", exc)
+                operation_error = str(exc)
+                self._post("agent-error" if headless else "error", exc)
             finally:
                 self.serial_lock.release()
                 self.user_task_pending = False
                 self._post("busy", (False, "USB: idle"))
                 self._post("preheat-task-finished", None)
+                if headless:
+                    self._post("agent-operation-finished", (operation_id, operation_error))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -6185,16 +6807,17 @@ class K9ControlCenter:
 
         self._run_task("Запуск SD-печати", task)
 
-    def start_selected_print_with_home(self) -> None:
+    def start_selected_print_with_home(self, *, skip_interactive_guards: bool = False) -> None:
         path = self._selected_print_sd_path()
         display = self._selected_sd_display() or path or "-"
         if not path:
             messagebox.showerror("Little Hands", "Выбери файл в секции 'Файлы для печати'.")
             return
-        if not self._guard_not_suspect_sd_upload(path, display):
-            return
-        if not self._guard_sd_start_preconditions():
-            return
+        if not skip_interactive_guards:
+            if not self._guard_not_suspect_sd_upload(path, display):
+                return
+            if not self._guard_sd_start_preconditions():
+                return
 
         def task() -> None:
             source_for_profile = self._source_for_print(path, display)
@@ -6310,6 +6933,11 @@ class K9ControlCenter:
             "temperature": ("Нагрев не соответствует паузе. Автоматический запуск и повторный прогрев заблокированы.",
                             "Temperatures do not match the pause. Automatic resume and reheating are blocked.", "温度与暂停时不符，已阻止自动继续和重新加热。"),
             "unknown": ("SD: состояние неизвестно, нет свежего ответа", "SD: state unknown, no fresh reply", "SD：状态未知，没有新回复"),
+            "active_wait": (
+                "SD-печать продолжается автономно; ожидаю следующую телеметрию",
+                "SD print continues autonomously; waiting for the next telemetry sample",
+                "SD 打印正在自主继续；等待下一次遥测",
+            ),
             "pause_done": ("Пауза подтверждена и сохранена.", "Pause confirmed and saved.", "暂停已确认并保存。"),
             "resume_sent": ("Продолжение отправлено; жду нового SD-прогресса.", "Resume sent; waiting for new SD progress.", "已发送继续，等待新的 SD 进度。"),
             "pause_uncertain": ("Не удалось подтвердить паузу. Проверьте принтер визуально; повторное продолжение заблокировано.",
@@ -6449,13 +7077,17 @@ class K9ControlCenter:
                 self._post("sync-controls", None)
         self._run_task("Пауза печати", task)
 
-    def resume_print(self) -> None:
+    def resume_print(self, *, confirmed_untouched: bool = False) -> None:
         paused = self.recovery_record.get("pause", {})
         if not paused.get("confirmed") or self.next_sd_start_requires_power_cycle:
             messagebox.showinfo("Little Hands", self._recovery_text("no_pause"))
             self.show_recovery()
             return
-        if not self.pause_session_continuous and not messagebox.askyesno("Little Hands", self._recovery_text("confirm")):
+        if (
+            not self.pause_session_continuous
+            and not confirmed_untouched
+            and not messagebox.askyesno("Little Hands", self._recovery_text("confirm"))
+        ):
             return
         def task() -> None:
             if self._suspect_sd_upload_reason(paused.get("file", "")):
@@ -6536,7 +7168,8 @@ class K9ControlCenter:
             finally:
                 self._clear_print_session_state(self._recovery_text("stop_unknown") if error_text else "Печать: остановлена", 0.0)
                 self.bed_clear_before_go_start_required = True
-                self._require_power_cycle_before_next_sd_start("print stopped by operator", save=False)
+                if error_text:
+                    self._require_power_cycle_before_next_sd_start("print stop was not acknowledged", save=False)
                 self._set_home_trust(
                     HOME_TRUST_UNCERTAIN if stop_pose is not None else HOME_TRUST_INVALID,
                     "print stopped; physical position must be recovered or start must be re-saved",
@@ -6587,6 +7220,13 @@ class K9ControlCenter:
                     f"Recovery-поза после стопа сохранена: X{stop_pose[0]:.2f} Y{stop_pose[1]:.2f} Z{stop_pose[2]:.2f} "
                     "(X/Y из позиции прерывания, Z из управляемого post-stop подъёма, если он подтвердился).",
                 )
+                if ";LH_STOP_SD_ALREADY_IDLE:1" in out:
+                    self._post(
+                        "log",
+                        "M27 уже сообщал Not SD printing: файл завершился до нажатия Stop. "
+                        "Little Hands не отправлял M524 и не двигал оси в Stop, чтобы firmware G28XY "
+                        "не сбил физическую конечную XY-позу.",
+                    )
             else:
                 if self.preheat_lift_recovery_available:
                     self._post(
@@ -6649,12 +7289,12 @@ class K9ControlCenter:
 
         self._run_task("Жёсткий стоп", task)
 
-    def delete_selected_file(self) -> None:
+    def delete_selected_file(self, *, confirmed: bool = False) -> None:
         path = self._selected_sd_path()
         if not path:
             messagebox.showerror("K9 Control Center", "Выбери файл на SD.")
             return
-        if not messagebox.askyesno("K9 Control Center", f"Удалить {path} с SD принтера?"):
+        if not confirmed and not messagebox.askyesno("K9 Control Center", f"Удалить {path} с SD принтера?"):
             return
 
         def task() -> None:
@@ -6682,43 +7322,54 @@ class K9ControlCenter:
 
         self._run_task("Home всех осей", task)
 
-    def set_current_home_zero(self) -> None:
+    def set_current_home_zero(
+        self,
+        *,
+        confirmed_physical_start: bool = False,
+        power_cycle_confirmation: bool | None = None,
+    ) -> None:
         if self.user_task_pending:
             return
-        if self.preheat_lift_recovery_available and not messagebox.askyesno(
-            "Little Hands", self._t("save_raised_start_confirm"), default=messagebox.NO,
-        ):
-            return
+        if self.preheat_lift_recovery_available:
+            if confirmed_physical_start:
+                pass
+            elif not messagebox.askyesno(
+                "Little Hands", self._t("save_raised_start_confirm"), default=messagebox.NO,
+            ):
+                return
         power_cycle_confirmed_with_save = False
         if self.next_sd_start_requires_power_cycle:
-            lang = self.lang_var.get().strip() or "ru"
-            prompt = {
-                "ru": (
-                    "После предыдущей печати/остановки требуется цикл питания.\n\n"
-                    "Принтер уже был выключен на 5–10 секунд и снова включён, а текущая физическая поза проверена как старт?\n\n"
-                    "Да — сохранить старт и записать подтверждение power cycle.\n"
-                    "Нет — сохранить старт, но оставить подтверждение перед следующей печатью.\n"
-                    "Отмена — ничего не менять."
-                ),
-                "en": (
-                    "A power cycle is required after the previous print/stop.\n\n"
-                    "Was printer power already off for 5–10 seconds and turned on again, and is the current physical pose verified as start?\n\n"
-                    "Yes — save start and record the power-cycle confirmation.\n"
-                    "No — save start but keep confirmation before the next print.\n"
-                    "Cancel — change nothing."
-                ),
-                "zh": (
-                    "上一次打印/停止后需要断电重启。\n\n"
-                    "打印机是否已经断电 5–10 秒后重新上电，并且当前实际位置已确认是起点？\n\n"
-                    "是 — 保存起点并记录断电确认。\n"
-                    "否 — 保存起点，但下次打印前仍需确认。\n"
-                    "取消 — 不做更改。"
-                ),
-            }.get(lang)
-            answer = messagebox.askyesnocancel("Little Hands", prompt, default=messagebox.NO)
-            if answer is None:
-                return
-            power_cycle_confirmed_with_save = bool(answer)
+            if confirmed_physical_start and power_cycle_confirmation is not None:
+                power_cycle_confirmed_with_save = bool(power_cycle_confirmation)
+            else:
+                lang = self.lang_var.get().strip() or "ru"
+                prompt = {
+                    "ru": (
+                        "После предыдущей печати/остановки требуется цикл питания.\n\n"
+                        "Принтер уже был выключен на 5–10 секунд и снова включён, а текущая физическая поза проверена как старт?\n\n"
+                        "Да — сохранить старт и записать подтверждение power cycle.\n"
+                        "Нет — сохранить старт, но оставить подтверждение перед следующей печатью.\n"
+                        "Отмена — ничего не менять."
+                    ),
+                    "en": (
+                        "A power cycle is required after the previous print/stop.\n\n"
+                        "Was printer power already off for 5–10 seconds and turned on again, and is the current physical pose verified as start?\n\n"
+                        "Yes — save start and record the power-cycle confirmation.\n"
+                        "No — save start but keep confirmation before the next print.\n"
+                        "Cancel — change nothing."
+                    ),
+                    "zh": (
+                        "上一次打印/停止后需要断电重启。\n\n"
+                        "打印机是否已经断电 5–10 秒后重新上电，并且当前实际位置已确认是起点？\n\n"
+                        "是 — 保存起点并记录断电确认。\n"
+                        "否 — 保存起点，但下次打印前仍需确认。\n"
+                        "取消 — 不做更改。"
+                    ),
+                }.get(lang)
+                answer = messagebox.askyesnocancel("Little Hands", prompt, default=messagebox.NO)
+                if answer is None:
+                    return
+                power_cycle_confirmed_with_save = bool(answer)
         def task() -> None:
             self._invalidate_retained_pause("new saved start")
             out = sdtool.set_current_home_zero(self._port(), self._baud())
@@ -6741,6 +7392,11 @@ class K9ControlCenter:
             had_active_print = self.current_print_file != "-"
             self._clear_predicted_print_end(save=False)
             if had_active_print:
+                closed_file = self.current_print_file
+                self._append_ring_log(
+                    f"{time.strftime('%H:%M:%S')} PRINT_RESULT_CLOSED_BY_SAVE_START "
+                    f"file={closed_file} reason=operator_saved_physical_start"
+                )
                 self.current_print_file = "-"
                 self.current_print_display = "-"
                 self.current_print_start_ts = None
@@ -7500,6 +8156,29 @@ class K9ControlCenter:
 
         self._run_task(label, task)
 
+    def shutdown_heaters(self) -> None:
+        """Turn both heaters and the single K9 fan off, then verify fresh telemetry."""
+        def task() -> None:
+            out = sdtool.run_commands_wait_ok(
+                self._port(),
+                self._baud(),
+                ["M108", "M104 S0", "M140 S0", "M107", "M105"],
+                per_command_timeout=12.0,
+            )
+            payload = parse_m105_temperatures(out)
+            hotend_current, hotend_target, hotend_power, bed_current, bed_target, bed_power = payload
+            if hotend_current is None or bed_current is None:
+                raise RuntimeError("heater shutdown was sent, but a fresh complete M105 report was not received")
+            if (hotend_target or 0.0) > 0.0 or (bed_target or 0.0) > 0.0:
+                raise RuntimeError("heater shutdown was sent, but a fresh M105 still reports a positive target")
+            if (hotend_power or 0) > 0 or (bed_power or 0) > 0:
+                raise RuntimeError("heater targets are zero, but a fresh M105 still reports positive heater output")
+            self._post("temp", payload)
+            self._post("metrics", ("m105", out))
+            self._post("log", "Agent/API safety shutdown confirmed: hotend and hotbed targets/outputs are zero.")
+
+        self._run_task("Выключение нагрева", task)
+
     def feed_filament(self) -> None:
         self._move_filament(self._filament_step_mm())
 
@@ -7734,13 +8413,19 @@ class K9ControlCenter:
                 finally:
                     serial_session = None
         def poll_query(command: str, *, wait_before_read: float, read_seconds: float,
-                       sync: bool = False, reset_input: bool = False) -> str:
+                       sync: bool = False, reset_input: bool = False,
+                       lh1_reply: bool = False) -> str:
             nonlocal serial_session
             if serial_session is None:
                 serial_session = sdtool.open_serial(self._port(), self._baud(), timeout=0.25, reset_input=False)
-            sdtool.send_line(serial_session, command)
+            if command:
+                sdtool.send_line(serial_session, command)
             time.sleep(wait_before_read)
-            reply = sdtool.read_for(serial_session, read_seconds)
+            reply = (
+                sdtool.read_lh1_reply(serial_session, timeout_s=read_seconds)
+                if lh1_reply
+                else sdtool.read_for(serial_session, read_seconds)
+            )
             if re.search(r"(?im)^(?:start\s*$|Error:)|Heating failed|THERMAL RUNAWAY|Printer halted", reply):
                 self._invalidate_retained_pause("firmware reset or error")
                 self._record_connection_loss("firmware reset or error")
@@ -7796,13 +8481,145 @@ class K9ControlCenter:
                 self.post_m24_usb_quiet_until = 0.0
                 self.last_post_m24_quiet_log_ts = 0.0
                 self._post("busy", (False, "USB: idle"))
-                self._post("log", "Стартовая USB-пауза после M24 завершена: начинаю аккуратный опрос M105/M27.")
+                protocol_name = (
+                    "M930"
+                    if self.lh1_protocol_known
+                    or self.lh1_restored_token_expected
+                    or "Cap:LITTLE_HANDS_PROTOCOL:1" in self.last_m115_raw
+                    else "M105/M27"
+                )
+                self._post("log", f"Стартовая USB-пауза после M24 завершена: начинаю аккуратный опрос {protocol_name}.")
+            lh1_snapshot = None
+            lh1_raw = ""
+            # On a fresh application/computer start M115 has not necessarily
+            # been collected yet.  A retained active-print token is itself the
+            # reason to ask for one plain M930 first: never delay the session
+            # comparison behind legacy M105/M27, and never re-bind the token.
+            use_lh1 = bool(
+                self.lh1_protocol_known
+                or self.lh1_restored_token_expected
+                or "Cap:LITTLE_HANDS_PROTOCOL:1" in self.last_m115_raw
+            )
+            if use_lh1:
+                previous_lh1 = self.last_lh1_snapshot
+                bind_needed = (
+                    self.current_print_file == "-"
+                    and
+                    not self.lh1_restored_token_expected
+                    and (previous_lh1 is None or previous_lh1.token != self.lh1_host_token)
+                )
+                lh1_command = f"M930 S{self.lh1_host_token}" if bind_needed else "M930"
+                pending_request = bool(
+                    self.lh1_request_pending_since
+                    and (now - self.lh1_request_pending_since) < LH1_PENDING_RESEND_SEC
+                )
+                if not pending_request:
+                    self.lh1_request_pending_since = now
+                lh1_raw = poll_query(
+                    "" if pending_request else lh1_command,
+                    wait_before_read=0.0,
+                    read_seconds=LH1_REPLY_TIMEOUT_SEC,
+                    sync=False,
+                    reset_input=False,
+                    lh1_reply=True,
+                )
+                candidate = sdtool.parse_lh1_snapshot(lh1_raw)
+                if candidate is None:
+                    self.lh1_incomplete_count += 1
+                    self.last_lh1_error = "incomplete LH1 snapshot"
+                    should_log = bool(
+                        self.lh1_incomplete_count == 1
+                        or (now - self.last_lh1_incomplete_log_ts) >= LH1_INCOMPLETE_LOG_INTERVAL_SEC
+                    )
+                    if should_log:
+                        self.last_lh1_incomplete_log_ts = now
+                        nonempty_lines = [line.strip().lower() for line in lh1_raw.splitlines() if line.strip()]
+                        if nonempty_lines and all(line.startswith("echo:busy:") for line in nonempty_lines):
+                            detail = self._log_t("lh1_incomplete_busy")
+                        else:
+                            detail = self._log_t(
+                                "lh1_incomplete_partial" if lh1_raw.strip() else "lh1_incomplete_empty",
+                                bytes=len(lh1_raw.encode("utf-8", "replace")),
+                            )
+                        self._post(
+                            "log",
+                            self._log_t(
+                                "lh1_incomplete",
+                                detail=detail,
+                                count=self.lh1_incomplete_count,
+                            ),
+                        )
+                    self._post("sd", self._recovery_text("active_wait"))
+                    return
+                if candidate.token != self.lh1_host_token:
+                    self.lh1_request_pending_since = 0.0
+                    self.last_lh1_error = "LH1 token mismatch"
+                    self._post(
+                        "log",
+                        self._log_t(
+                            "lh1_token_mismatch",
+                            expected=self.lh1_host_token,
+                            actual=candidate.token,
+                        ),
+                    )
+                    self._record_connection_loss("LH1 firmware session reset")
+                    self._set_home_trust(
+                        HOME_TRUST_UNCERTAIN,
+                        "LH1 firmware session changed or reset",
+                        log_change=True,
+                    )
+                    self._require_power_cycle_before_next_sd_start("LH1 firmware session reset", save=False)
+                    self._save_print_state("firmware-session-reset", force=True)
+                    return
+                if (
+                    previous_lh1 is not None
+                    and previous_lh1.token == candidate.token
+                    and (candidate.sequence <= previous_lh1.sequence or candidate.uptime_ms < previous_lh1.uptime_ms)
+                ):
+                    self.lh1_request_pending_since = 0.0
+                    self.last_lh1_error = "LH1 sequence/uptime moved backwards"
+                    self._post("log", self._log_t("lh1_sequence_backwards"))
+                    self._record_connection_loss("LH1 firmware session reset")
+                    self._set_home_trust(
+                        HOME_TRUST_UNCERTAIN,
+                        "LH1 firmware session changed or reset",
+                        log_change=True,
+                    )
+                    self._require_power_cycle_before_next_sd_start("LH1 firmware session reset", save=False)
+                    self._save_print_state("firmware-session-reset", force=True)
+                    return
+                incomplete_count = self.lh1_incomplete_count
+                if incomplete_count:
+                    self._post("log", self._log_t("lh1_recovered", count=incomplete_count))
+                self.lh1_incomplete_count = 0
+                self.lh1_request_pending_since = 0.0
+                self.last_lh1_error = ""
+                restored_session = self.lh1_restored_token_expected
+                lh1_snapshot = candidate
+                self.lh1_protocol_known = True
+                self.lh1_restored_token_expected = False
+                self._post("lh1", (candidate, lh1_raw))
+                if restored_session and candidate.sd_state in {"printing", "paused"}:
+                    self._post(
+                        "log",
+                        "После перезапуска подтверждена та же LH1-сессия: GUI подключился "
+                        "к уже идущей автономной SD-печати, восстановил телеметрию и безопасные кнопки "
+                        "Pause/Stop. Resume доступен только для подтверждённой паузы; сервисные движения и повторный старт заблокированы.",
+                    )
+                    self._post("sync-controls", None)
             pending_start_heatup = (
                 self.current_print_file != "-"
                 and self.current_print_start_ts
                 and not self.print_was_active
             )
-            if pending_start_heatup:
+            if lh1_snapshot is not None:
+                hot_current, hot_target, hot_power = lh1_snapshot.hotend
+                bed_current_lh1, bed_target_lh1, bed_power_lh1 = lh1_snapshot.bed
+                temp = (
+                    f"ok T:{hot_current:.3f} /{hot_target:.2f} @:{hot_power} "
+                    f"B:{bed_current_lh1:.3f} /{bed_target_lh1:.2f} B@:{bed_power_lh1}\nok\n"
+                )
+            elif pending_start_heatup:
                 # During M109 Marlin doesn't answer ordinary M105 commands.
                 # It does emit temperature lines about once a second, so listen first.
                 temp = sdtool.listen_serial(
@@ -7895,14 +8712,14 @@ class K9ControlCenter:
                 elif active_print_observed:
                     pct = self.current_print_progress_pct
                     progress_value = float(pct) if pct is not None else 0.0
-                    progress_text = f"{self._recovery_text('unknown')} · {progress_value:.1f}%"
-                    self._post("sd", self._recovery_text("unknown"))
+                    active_wait_text = self._recovery_text("active_wait")
+                    progress_text = f"{active_wait_text} · {progress_value:.1f}%"
+                    if self.last_sd_summary != active_wait_text:
+                        self._post("sd", active_wait_text)
+                        self._post("log", active_wait_text)
                     self._post("progress", (progress_text, progress_value))
                     if now - self.usb_silence_since >= 15:
                         self._record_connection_loss("printer replies lost during SD print")
-                    if now - self.last_usb_silence_log_ts >= USB_SILENCE_LOG_INTERVAL_SEC:
-                        self.last_usb_silence_log_ts = now
-                        self._post("log", self._recovery_text("unknown"))
                     return
                 elif recent_post_start_temp:
                     self._post("sd", "SD: hotend держит цель, жду SD-прогресс")
@@ -7973,13 +8790,19 @@ class K9ControlCenter:
                         f"{time.strftime('%H:%M:%S')} TELEMETRY file={self.current_print_file} progress=0.0% temp={current_temp:.2f}/{target_temp:.2f} sd=\"M109 heatup\""
                     )
                 return
-            sd = poll_query(
-                "M27",
-                wait_before_read=0.15,
-                read_seconds=0.45,
-                sync=False,
-                reset_input=False,
-            )
+            if lh1_snapshot is not None:
+                if lh1_snapshot.sd_state in {"printing", "paused"} and lh1_snapshot.sd_size > 0:
+                    sd = f"SD printing byte {lh1_snapshot.sd_position}/{lh1_snapshot.sd_size}\nok\n"
+                else:
+                    sd = "Not SD printing\nok\n"
+            else:
+                sd = poll_query(
+                    "M27",
+                    wait_before_read=0.15,
+                    read_seconds=0.45,
+                    sync=False,
+                    reset_input=False,
+                )
             summary = next((line.strip() for line in sd.splitlines() if line.strip()), "SD: idle")
             if recovery.sd_progress(sd) is not None or "not sd printing" in sd.lower():
                 if "not sd printing" in sd.lower():
@@ -7987,18 +8810,31 @@ class K9ControlCenter:
                 self._post("sd-reply", summary)
                 self._record_recovery_sample("sd", sd)
             else:
-                self._post("sd", self._recovery_text("unknown"))
+                self._post(
+                    "sd",
+                    self._recovery_text("active_wait")
+                    if self.current_print_file != "-"
+                    else self._recovery_text("unknown"),
+                )
             if (
                 not self.print_state_restored_from_log
                 and (now - self.last_position_sample_ts) >= ACTIVE_PRINT_POSITION_SAMPLE_INTERVAL_SEC
             ):
-                m114 = poll_query(
-                    "M114",
-                    wait_before_read=0.1,
-                    read_seconds=0.35,
-                    sync=False,
-                    reset_input=False,
-                )
+                if lh1_snapshot is not None:
+                    lx, ly, lz, le = lh1_snapshot.logical_position
+                    sx, sy, sz = lh1_snapshot.stepper_position
+                    m114 = (
+                        f"X:{lx:.3f} Y:{ly:.3f} Z:{lz:.3f} E:{le:.3f} "
+                        f"Count X:{sx:.3f} Y:{sy:.3f} Z:{sz:.3f}\n"
+                    )
+                else:
+                    m114 = poll_query(
+                        "M114",
+                        wait_before_read=0.1,
+                        read_seconds=0.35,
+                        sync=False,
+                        reset_input=False,
+                    )
                 pos_line = next((line.strip() for line in m114.splitlines() if "X:" in line and "Y:" in line and "Z:" in line), "").strip()
                 if pos_line:
                     self._record_recovery_sample("position", m114)
@@ -8201,7 +9037,6 @@ class K9ControlCenter:
                             self._post("log", "Печать завершена: автоматические движения не выполнялись")
                         self._post("log", finish_message)
                         self.post_print_recovery_required = True
-                        self._require_power_cycle_before_next_sd_start("completed SD print", save=False)
                         self._post("post-print-recovery", "completion")
                     duration_log = duration_s if duration_s is not None else "?"
                     self._remember_print_duration(self.current_print_file, finished_file, start_ts, finish_ts)
@@ -8336,7 +9171,11 @@ def main() -> int:
     app = K9ControlCenter(root)
     app.log(app._log_t("app_ready"))
     app.log(app._log_t("port_must_be_free"))
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        if hasattr(app, "control_server"):
+            app.control_server.stop()
     return 0
 
 

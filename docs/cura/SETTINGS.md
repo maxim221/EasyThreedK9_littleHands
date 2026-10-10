@@ -55,15 +55,15 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 ## Material And Temperature
 
 - Material: PLA
-- First layer hotend: `225C`
-- Normal hotend: `224C`
+- First layer hotend: `226C`
+- Normal hotend: `220C`
 - Cura material bed temperature: `0C`
 - Controlled hotbed policy: host preheat `60C` via `;LH_EXPERIMENTAL_HOTBED_TARGET:60`; print maintenance `55C` via `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` plus non-blocking `M140 S55`
 - This local default changed at the operator's request on 2026-09-09. The app/helper target cap is `60C`, and bed preheat waits up to `15 minutes`. Re-slice and upload existing G-code to change its target. Edit live Cura settings with Cura closed; restart Little Hands when the printer is idle.
 - Real external warm mat fallback: manually preheated to about `40-50C`
 - Part cooling in Cura: `off`
 - Important: the current K9 has one physical fan, used as the firmware-managed hotend fan. Little Hands / the helper strip slicer `M106/M107` commands so Cura cannot treat that fan as part cooling.
-- Minimum layer time: `10 s`
+- Minimum layer time: `15 s`
 
 ## Quality
 
@@ -75,11 +75,11 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Infill density: `20%`
 - Infill pattern: `lines`
 - Print infill before walls: `off`
-- Flow: `103%`
-- Wall flow: `103%`
-- Outer wall flow: `102%`
-- Top / bottom flow: `104%`
-- Infill flow: `101%`
+- Flow: `101%`
+- Wall flow: `101%`
+- Outer wall flow: `101%`
+- Top / bottom flow: `101%`
+- Infill flow: `100%`
 - Initial layer flow: `103%`
 - Skin overlap: `10%`
 - Top / bottom pattern: `lines`
@@ -89,7 +89,7 @@ Do not add `M84` at the end. Little Hands keeps steppers available for the post-
 - Ironing pattern: `concentric`
 - Ironing line spacing: `0.12 mm`
 - Ironing flow: `7%`
-- Z seam alignment: `Random`
+- Z seam alignment: `Sharpest Corner`
 
 ## Speed
 
@@ -141,21 +141,21 @@ For `mainFlasherTop.STL` and similar overhang-heavy parts:
 
 - Generate support: `on`
 - Support placement: `everywhere`
-- Support overhang angle: `35 deg`
+- Support overhang angle: `50 deg`
 - Support structure: `normal`
 - Support pattern: `zigzag`
-- Support density: `10%`
+- Support density: `8%`
 - Support interface: `on`
 - Support roof: `on`
-- Support interface density: `65%`
-- Support roof density: `65%`
-- Support interface height: `0.48 mm`
-- Support roof height: `0.48 mm`
-- Support Z distance: `0.16 mm`
-- Support top distance: `0.16 mm`
-- Support XY distance: `0.3 mm`
+- Support interface density: `30%`
+- Support roof density: `30%`
+- Support interface height: `0.32 mm`
+- Support roof height: `0.32 mm`
+- Support Z distance: `0.48 mm`
+- Support top distance: `0.48 mm`
+- Support XY distance: `0.5 mm`
 
-If supports grip too hard, try these `easy-release` values first. Keep Z distance at `0.16 mm` for now to protect underside quality. If removal is still difficult, make the next separate test Support Z distance / top distance `0.24-0.32 mm`.
+The physical backpack result showed that the 2026-10-09 45 deg / 50% / 0.32 mm / 0.4 mm trial was still effectively solid and could not be removed cleanly. These are the 2026-10-10 follow-up values. The larger separation and lighter contact trade some supported-underside finish for removability; inspect the new backpack before widening the gaps again.
 
 If the slicer preview does not show supports under the problematic underside, do not print yet. Change support placement / threshold until the preview actually shows support where needed.
 

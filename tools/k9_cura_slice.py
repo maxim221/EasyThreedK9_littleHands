@@ -116,7 +116,11 @@ def cura_engine_prefix(mount_point: Path) -> list[str]:
     ]
 
 
-def k9_profile_settings(brim_width: float, hotbed_target: float = 0.0) -> tuple[dict[str, str], dict[str, str]]:
+def k9_profile_settings(
+    brim_width: float,
+    hotbed_target: float = 0.0,
+    support_preset: str = "validated",
+) -> tuple[dict[str, str], dict[str, str]]:
     hotbed_target = max(0.0, min(float(hotbed_target), K9_MAX_EXPERIMENTAL_HOTBED_TARGET))
     hotbed_print_target = min(hotbed_target, K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET)
     hotbed_start = ""
@@ -207,22 +211,22 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "material_bed_temperature": "0",
         "relative_extrusion": "True",
         **speed_settings,
-        "support_angle": "35",
+        "support_angle": "50",
         "support_enable": "True",
-        "support_infill_rate": "10",
-        "support_interface_density": "65",
+        "support_infill_rate": "8",
+        "support_interface_density": "30",
         "support_interface_enable": "True",
-        "support_interface_height": "0.48",
+        "support_interface_height": "0.32",
         "support_interface_pattern": "lines",
         "support_pattern": "zigzag",
-        "support_roof_density": "65",
+        "support_roof_density": "30",
         "support_roof_enable": "True",
-        "support_roof_height": "0.48",
+        "support_roof_height": "0.32",
         "support_structure": "normal",
-        "support_top_distance": "0.16",
+        "support_top_distance": "0.48",
         "support_type": "everywhere",
-        "support_xy_distance": "0.3",
-        "support_z_distance": "0.16",
+        "support_xy_distance": "0.5",
+        "support_z_distance": "0.48",
         "skin_overlap": "10",
         "top_bottom_pattern": "lines",
         "top_bottom_pattern_0": "concentric",
@@ -232,18 +236,34 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "roofing_layer_count": "0",
         "flooring_layer_count": "0",
         "support_z_seam_away_from_model": "False",
-        "z_seam_type": "random",
+        "z_seam_type": "sharpest_corner",
     }
+    if support_preset == "max-easy-release":
+        global_settings.update({
+            "support_angle": "55",
+            "support_infill_rate": "5",
+            "support_interface_enable": "False",
+            "support_interface_density": "0",
+            "support_interface_height": "0",
+            "support_roof_enable": "False",
+            "support_roof_density": "0",
+            "support_roof_height": "0",
+            "support_top_distance": "0.64",
+            "support_z_distance": "0.64",
+            "support_xy_distance": "0.8",
+        })
+    elif support_preset != "validated":
+        raise ValueError(f"unknown support preset: {support_preset}")
     extruder_settings = {
         "material_diameter": "1.75",
-        "material_print_temperature": "224",
+        "material_print_temperature": "220",
         "material_print_temperature_layer_0": "226",
-        "material_flow": "103",
-        "wall_material_flow": "103",
-        "wall_0_material_flow": "102",
-        "wall_x_material_flow": "103",
-        "skin_material_flow": "104",
-        "infill_material_flow": "101",
+        "material_flow": "101",
+        "wall_material_flow": "101",
+        "wall_0_material_flow": "101",
+        "wall_x_material_flow": "101",
+        "skin_material_flow": "101",
+        "infill_material_flow": "100",
         "material_flow_layer_0": "103",
         "material_bed_temperature": "0",
         "retraction_amount": "6.5",
@@ -255,7 +275,7 @@ G1 Y95 F240 ;Move bed toward the operator"""
         "cool_fan_speed_min": "0",
         "cool_fan_speed_max": "0",
         "cool_fan_speed_0": "0",
-        "cool_min_layer_time": "10",
+        "cool_min_layer_time": "15",
         "bridge_settings_enabled": "True",
         "bridge_fan_speed": "0",
         "bridge_skin_material_flow": "100",
@@ -298,10 +318,15 @@ def build_cura_command(
     mesh_position_x: float,
     mesh_position_y: float,
     hotbed_target: float = 0.0,
+    support_preset: str = "validated",
 ) -> list[str]:
     definitions = mount_point / "share/cura/resources/definitions"
     extruders = mount_point / "share/cura/resources/extruders"
-    global_settings, extruder_settings = k9_profile_settings(brim_width, hotbed_target=hotbed_target)
+    global_settings, extruder_settings = k9_profile_settings(
+        brim_width,
+        hotbed_target=hotbed_target,
+        support_preset=support_preset,
+    )
 
     cmd = cura_engine_prefix(mount_point) + [
         "slice",
@@ -457,6 +482,7 @@ def patch_header_and_footer(
     bounds: tuple[float, float, float, float, float],
     brim_width: float,
     hotbed_target: float = 0.0,
+    support_preset: str = "validated",
 ) -> None:
     min_x, max_x, min_y, max_y, max_z = bounds
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -486,6 +512,11 @@ def patch_header_and_footer(
     if hotbed_target > 0.0 and not any(line.startswith(HOTBED_EXPERIMENTAL_PRINT_MARKER) for line in lines[:30]):
         lines.insert(13, f"{HOTBED_EXPERIMENTAL_PRINT_MARKER}{min(hotbed_target, K9_DEFAULT_EXPERIMENTAL_HOTBED_PRINT_TARGET):g}")
 
+    settings, _extruder_settings = k9_profile_settings(
+        brim_width,
+        hotbed_target=hotbed_target,
+        support_preset=support_preset,
+    )
     footer = (
         ';SETTING_3 {"global_quality": "[values]\\n'
         f'adhesion_type = brim\\nbrim_width = {brim_width:g}\\n'
@@ -497,18 +528,20 @@ def patch_header_and_footer(
         'skirt_brim_speed = 21\\nspeed_ironing = 6\\n'
         'bottom_layers = 7\\ntop_layers = 7\\nskin_overlap = 10\\n'
         'wall_line_count = 5\\n'
-        'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = 35\\n'
-        'support_infill_rate = 10\\nsupport_xy_distance = 0.3\\n'
-        'support_interface_enable = True\\nsupport_interface_density = 65\\n'
-        'support_interface_height = 0.48\\nsupport_roof_enable = True\\n'
-        'support_roof_density = 65\\nsupport_roof_height = 0.48\\n'
-        'z_seam_type = random\\n", '
-        '"extruder_quality": ["[values]\\nmaterial_print_temperature = 224\\n'
+        f'support_preset = {support_preset}\\n'
+        f'support_enable = True\\nsupport_type = everywhere\\nsupport_angle = {settings["support_angle"]}\\n'
+        f'support_infill_rate = {settings["support_infill_rate"]}\\nsupport_xy_distance = {settings["support_xy_distance"]}\\n'
+        f'support_z_distance = {settings["support_z_distance"]}\\nsupport_top_distance = {settings["support_top_distance"]}\\n'
+        f'support_interface_enable = {settings["support_interface_enable"]}\\nsupport_interface_density = {settings["support_interface_density"]}\\n'
+        f'support_interface_height = {settings["support_interface_height"]}\\nsupport_roof_enable = {settings["support_roof_enable"]}\\n'
+        f'support_roof_density = {settings["support_roof_density"]}\\nsupport_roof_height = {settings["support_roof_height"]}\\n'
+        'z_seam_type = sharpest_corner\\n", '
+        '"extruder_quality": ["[values]\\nmaterial_print_temperature = 220\\n'
         'material_print_temperature_layer_0 = 226\\nretraction_enable = True\\n'
-        'retraction_amount = 6.5\\nmaterial_flow = 103\\nwall_material_flow = 103\\n'
-        'skin_material_flow = 104\\nmaterial_flow_layer_0 = 103\\n'
+        'retraction_amount = 6.5\\nmaterial_flow = 101\\nwall_material_flow = 101\\n'
+        'skin_material_flow = 101\\nmaterial_flow_layer_0 = 103\\n'
         'cool_fan_enabled = False\\n'
-        'cool_fan_speed = 0\\nbridge_fan_speed = 0\\n'
+        'cool_fan_speed = 0\\ncool_min_layer_time = 15\\nbridge_fan_speed = 0\\n'
         'bridge_skin_material_flow = 100\\nbridge_wall_material_flow = 100\\n'
         'initial_layer_line_width_factor = 155\\n"]}'
     )
@@ -555,6 +588,12 @@ def main() -> int:
     )
     parser.add_argument("--sd-mount", type=Path, default=None, help="Optional mounted SD card path to copy to")
     parser.add_argument("--sd-name", default=None, help="Optional filename to use on SD")
+    parser.add_argument(
+        "--support-preset",
+        choices=("validated", "max-easy-release"),
+        default="validated",
+        help="Use the validated supports or a sparse/no-interface maximum easy-release trial.",
+    )
     parser.add_argument(
         "--allow-unvalidated-modulebot-orientation",
         action="store_true",
@@ -615,6 +654,7 @@ def main() -> int:
             mesh_position_x,
             mesh_position_y,
             hotbed_target=hotbed_target,
+            support_preset=args.support_preset,
         )
         started = time.monotonic()
         proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -623,7 +663,13 @@ def main() -> int:
             return proc.returncode
         bounds = gcode_bounds(output)
         validate_bounds(bounds, args.bed_size)
-        patch_header_and_footer(output, bounds, args.brim_width, hotbed_target=hotbed_target)
+        patch_header_and_footer(
+            output,
+            bounds,
+            args.brim_width,
+            hotbed_target=hotbed_target,
+            support_preset=args.support_preset,
+        )
         print(f"Sliced {stl.name} -> {output}")
         print(
             "Bounds: "
@@ -633,6 +679,7 @@ def main() -> int:
         print(f"SHA256: {sha256(output)}")
         if hotbed_target > 0.0:
             print(f"Experimental hotbed target: {hotbed_target:g}C")
+        print(f"Support preset: {args.support_preset}")
         print(f"Elapsed: {time.monotonic() - started:.1f}s")
 
         if args.sd_mount:

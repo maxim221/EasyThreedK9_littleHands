@@ -68,15 +68,15 @@ G1 Y95 F240 ;Move bed toward the operator
 ## Материал И Температура
 
 - Материал: PLA
-- Hotend первый слой: `225C`
-- Hotend дальше: `224C`
+- Hotend первый слой: `226C`
+- Hotend дальше: `220C`
 - Cura material bed temperature: `0C`
 - Политика hotbed в start G-code: host preheat `60C` через `;LH_EXPERIMENTAL_HOTBED_TARGET:60`; поддержание печати `55C` через `;LH_EXPERIMENTAL_HOTBED_PRINT_TARGET:55` плюс non-blocking `M140 S55`
 - С 2026-09-09 это новая локальная цель по запросу оператора; максимум приложения и helper — `60C`, ожидание прогрева стола — до `15 минут`. Старые G-code нужно переслайсить и загрузить заново. Настройки установленной Cura менять при закрытой Cura; Little Hands перезапустить, когда принтер простаивает.
 - Запасной вариант с внешним warm mat: вручную прогрет примерно до `40-50C`
 - Part-cooling в Cura: `off`
 - Важно: у текущего K9 один физический вентилятор, он используется как firmware-managed hotend fan. Little Hands / helper удаляют slicer-команды `M106/M107`, чтобы Cura не управляла этим вентилятором как обдувом детали.
-- Minimum layer time: `10 s`
+- Minimum layer time: `15 s`
 
 ## Качество
 
@@ -88,11 +88,11 @@ G1 Y95 F240 ;Move bed toward the operator
 - Infill density: `20%`
 - Infill pattern: `lines`
 - Print infill before walls: `off`
-- Flow: `103%`
-- Wall flow: `103%`
-- Outer wall flow: `102%`
-- Top / bottom flow: `104%`
-- Infill flow: `101%`
+- Flow: `101%`
+- Wall flow: `101%`
+- Outer wall flow: `101%`
+- Top / bottom flow: `101%`
+- Infill flow: `100%`
 - Initial layer flow: `103%`
 - Skin overlap: `10%`
 - Top / bottom pattern: `lines`
@@ -102,7 +102,7 @@ G1 Y95 F240 ;Move bed toward the operator
 - Ironing pattern: `concentric`
 - Ironing line spacing: `0.12 mm`
 - Ironing flow: `7%`
-- Z seam alignment: `Random`
+- Z seam alignment: `Sharpest Corner`
 
 ## Скорости
 
@@ -154,21 +154,21 @@ G1 Y95 F240 ;Move bed toward the operator
 
 - Generate support: `on`
 - Support placement: `everywhere`
-- Support overhang angle: `35 deg`
+- Support overhang angle: `50 deg`
 - Support structure: `normal`
 - Support pattern: `zigzag`
-- Support density: `10%`
+- Support density: `8%`
 - Support interface: `on`
 - Support roof: `on`
-- Support interface density: `65%`
-- Support roof density: `65%`
-- Support interface height: `0.48 mm`
-- Support roof height: `0.48 mm`
-- Support Z distance: `0.16 mm`
-- Support top distance: `0.16 mm`
-- Support XY distance: `0.3 mm`
+- Support interface density: `30%`
+- Support roof density: `30%`
+- Support interface height: `0.32 mm`
+- Support roof height: `0.32 mm`
+- Support Z distance: `0.48 mm`
+- Support top distance: `0.48 mm`
+- Support XY distance: `0.5 mm`
 
-Если поддержки держатся слишком крепко, сначала используй эти `easy-release` значения. Z-distance пока оставляем `0.16 mm`, чтобы не испортить нижнюю поверхность. Если снять поддержки всё ещё трудно, следующим отдельным тестом поднимай Support Z distance / top distance до `0.24-0.32 mm`.
+Физический backpack показал, что тест 2026-10-09 с 45 deg / 50% / 0.32 мм / 0.4 мм всё ещё давал почти монолитные поддержки, которые нельзя нормально удалить. Текущие значения — повторный тест 2026-10-10. Больший зазор и меньший контакт могут сделать нижнюю поверхность грубее; перед дальнейшим ослаблением поддержек оцени новую печать.
 
 Если preview не показывает поддержки под проблемной нижней поверхностью, не печатай. Меняй placement / threshold, пока support реально не появится в preview.
 

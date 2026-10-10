@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import math
 import os
 import re
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import serial
@@ -50,6 +52,95 @@ RECOVERY_X_SEGMENT_MM = 50.0
 LOCAL_NEUTRAL_X_MM = 50.0
 SAFE_HOME_CLEARANCE_Z = 10.0
 POSITION_RE = re.compile(r"^\s*X:([+-]?\d+(?:\.\d+)?)\s+Y:([+-]?\d+(?:\.\d+)?)\s+Z:([+-]?\d+(?:\.\d+)?)", re.MULTILINE)
+LH1_STATES = {"none", "idle", "selected", "paused", "printing"}
+
+
+@dataclass(frozen=True)
+class LittleHandsSnapshot:
+    token: int
+    sequence: int
+    uptime_ms: int
+    sd_state: str
+    sd_position: int
+    sd_size: int
+    logical_position: tuple[float, float, float, float]
+    stepper_position: tuple[float, float, float]
+    queued_moves: int
+    hotend: tuple[float, int, int] | None
+    bed: tuple[float, int, int] | None
+
+
+def parse_lh1_snapshot(reply: str) -> LittleHandsSnapshot | None:
+    """Parse the latest complete M930/LH1 line from a serial exchange.
+
+    A damaged or partial line is rejected as a whole so fields from separate
+    snapshots can never be combined. Stepper coordinates are commanded step
+    counts, not proof of physical motion on an unencoded K9 axis.
+    """
+    line = next((item.strip() for item in reversed(reply.splitlines()) if item.strip().startswith("LH1 ")), "")
+    if not line:
+        return None
+    fields: dict[str, str] = {}
+    for item in line.split()[1:]:
+        if "=" not in item:
+            return None
+        key, value = item.split("=", 1)
+        if not key or not value or key in fields:
+            return None
+        fields[key] = value
+    required = {"token", "seq", "up", "sd", "pos", "size", "lpx", "lpy", "lpz", "lpe", "spx", "spy", "spz", "q", "hot", "bed"}
+    if not required.issubset(fields) or fields["sd"] not in LH1_STATES:
+        return None
+
+    def heater_triplet(value: str) -> tuple[float, int, int] | None:
+        if value == "na":
+            return None
+        parts = value.split("/")
+        if len(parts) != 3:
+            raise ValueError("invalid heater triplet")
+        return float(parts[0]), int(parts[1]), int(parts[2])
+
+    try:
+        snapshot = LittleHandsSnapshot(
+            token=int(fields["token"]),
+            sequence=int(fields["seq"]),
+            uptime_ms=int(fields["up"]),
+            sd_state=fields["sd"],
+            sd_position=int(fields["pos"]),
+            sd_size=int(fields["size"]),
+            logical_position=tuple(float(fields[key]) for key in ("lpx", "lpy", "lpz", "lpe")),
+            stepper_position=tuple(float(fields[key]) for key in ("spx", "spy", "spz")),
+            queued_moves=int(fields["q"]),
+            hotend=heater_triplet(fields["hot"]),
+            bed=heater_triplet(fields["bed"]),
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        snapshot.token < 0
+        or snapshot.token > 0xFFFFFFFF
+        or snapshot.sequence <= 0
+        or snapshot.sequence > 0xFFFFFFFF
+        or snapshot.uptime_ms < 0
+        or snapshot.uptime_ms > 0xFFFFFFFF
+        or snapshot.sd_position < 0
+        or snapshot.sd_size < 0
+        or snapshot.sd_position > snapshot.sd_size
+        or snapshot.queued_moves < 0
+        or snapshot.queued_moves > 255
+        or not all(math.isfinite(value) for value in (*snapshot.logical_position, *snapshot.stepper_position))
+        or any(
+            sample is not None and (
+                not math.isfinite(sample[0])
+                or sample[1] < 0
+                or sample[2] < 0
+                or sample[2] > 255
+            )
+            for sample in (snapshot.hotend, snapshot.bed)
+        )
+    ):
+        return None
+    return snapshot
 
 
 class UploadCancelled(RuntimeError):
@@ -322,6 +413,30 @@ def read_for(ser: serial.Serial, seconds: float) -> str:
             chunks.append(raw.decode("utf-8", "replace"))
         except Exception:
             pass
+    return "".join(chunks)
+
+
+def read_lh1_reply(ser: serial.Serial, timeout_s: float = 4.0) -> str:
+    """Read one complete LH1 reply without accepting a stale leading ``ok``.
+
+    Busy SD printing can delay M930 and a previous exchange can leave an
+    acknowledgement in the UART buffer.  Stop only after a complete LH1 line
+    has been assembled and its following acknowledgement has arrived.
+    """
+    chunks: list[str] = []
+    complete_snapshot_seen = False
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        raw = ser.readline()
+        if not raw:
+            continue
+        text = raw.decode("utf-8", "replace")
+        chunks.append(text)
+        combined = "".join(chunks)
+        if not complete_snapshot_seen:
+            complete_snapshot_seen = parse_lh1_snapshot(combined) is not None
+        if complete_snapshot_seen and re.match(r"ok(?:\s|$)", text.lstrip()) is not None:
+            break
     return "".join(chunks)
 
 
@@ -959,16 +1074,27 @@ def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float,
         # M400 before this probe: on an active SD print it can sit in busy
         # planner-drain mode and starve the position response we need.
         pose_out = read_m114_probe(ser, "pre-pause", read_seconds=1.2)
-        send_line(ser, "M25")
-        time.sleep(0.35)
-        pose_out += ";LH stop pause M25\n" + read_for(ser, 0.8)
-        for attempt in range(3):
-            pose_out += read_m114_probe(ser, f"paused attempt {attempt + 1}")
-            if parse_position(pose_out) is not None:
-                break
+        try:
+            sd_status = send_line_wait_ok(ser, "M27", timeout_s=5.0)
+        except Exception as exc:
+            # An explicit operator Stop must still attempt M524 and every
+            # heater-off command when completion cannot be proven.
+            sd_status = f";LH stop pre-abort M27 unconfirmed: {exc}\n"
+        pose_out += ";LH stop pre-abort M27\n" + sd_status
+        sd_already_idle = "not sd printing" in sd_status.lower()
+        if not sd_already_idle:
+            send_line(ser, "M25")
+            time.sleep(0.35)
+            pose_out += ";LH stop pause M25\n" + read_for(ser, 0.8)
+            for attempt in range(3):
+                pose_out += read_m114_probe(ser, f"paused attempt {attempt + 1}")
+                if parse_position(pose_out) is not None:
+                    break
+        else:
+            pose_out += ";LH stop: SD already idle; skip M25, stop lift, and M524\n"
         interrupted_pose = parse_stopped_print_position(pose_out)
         controlled_stop_out = ""
-        if interrupted_pose is not None:
+        if interrupted_pose is not None and not sd_already_idle:
             safe_z = _stop_recovery_z(interrupted_pose[2])
             controlled_stop_out += f";LH controlled stop lift to Z{safe_z:.3f}\n"
             for command in (
@@ -988,7 +1114,11 @@ def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float,
                 time.sleep(0.05)
         stop_out = ""
         shutdown_confirmed = True
-        for command in ("M108", "M524", "M104 S0", "M140 S0", "M107", "M400"):
+        shutdown_commands = ["M108"]
+        if not sd_already_idle:
+            shutdown_commands.append("M524")
+        shutdown_commands.extend(["M104 S0", "M140 S0", "M107", "M400"])
+        for command in shutdown_commands:
             try:
                 stop_out += send_line_wait_ok(ser, command, timeout_s=5.0)
             except Exception as exc:
@@ -1000,6 +1130,7 @@ def stop_sd_print_with_position(port: str, baud: int) -> tuple[str, tuple[float,
                 stop_out += send_line_wait_ok(ser, "M114", timeout_s=5.0)
             except Exception as exc:
                 stop_out += f";LH post-stop position unavailable: {exc}\n"
+        stop_out += f";LH_STOP_SD_ALREADY_IDLE:{int(sd_already_idle)}\n"
         stop_out += f";LH_STOP_CONFIRMED:{int(shutdown_confirmed)}\n"
     out = pose_out + controlled_stop_out + stop_out
     return out, parse_stopped_print_position(out)
@@ -1092,7 +1223,12 @@ def read_until_tokens(ser: serial.Serial, stop_tokens: tuple[str, ...], timeout_
             continue
         text = raw.decode("utf-8", "replace")
         chunks.append(text)
-        if any(token in text for token in stop_tokens):
+        stripped = text.lstrip()
+        if any(
+            (token == "ok" and re.match(r"ok(?:\s|$)", stripped) is not None)
+            or (token != "ok" and stripped.startswith(token))
+            for token in stop_tokens
+        ):
             break
     return "".join(chunks)
 

@@ -142,6 +142,7 @@ G92 X0 Y0 Z0
 - Little Hands 现在把 home 状态分为 `trusted`、`uncertain` 和 `invalid`；除非 home 可信，或应用正在显示明确的打印后 recovery 确认流程，否则会阻止 SD 启动和 `回到保存起点`
 - 更换 / 断开 USB 端口、关闭电机、硬停止、jog 失败或 recovery 失败都会清除 home 信任，因为这台机器没有物理限位开关来重新寻找绝对零点
 - 普通 `Stop` 是受控停止，不是紧急路径：Little Hands 现在会尽早在 `M524` 前探测 `M114`，随后暂停、再次读取 `M114`、尝试把 Z 抬到已知安全 recovery 高度，然后发送 `M524` 和关闭加热命令
+- 在该受控中止之前，Stop 会在同一 USB 会话中检查 `M27`；如果打印机已回复 `Not SD printing`，Little Hands 保留最终位置，跳过 `M25`、stop-lift 和 `M524`，因为固件的 `EVENT_GCODE_SD_ABORT G28XY` 可能在文件完成后使 X/Y 发生物理移动
 - 正常 `Stop` 后，Little Hands 会尽量保存 stopped-print recovery 标记：X/Y 来自中断打印位置，Z 来自受控 post-stop 抬升（如果确认成功）；Stop 后的手动 jog 会更新该标记，而不是删除它
 - 如果 `Stop` 发生在 K9 仍然 busy、没有取得 `M114` 的窗口内，Little Hands 可能提供受保护的 live-session `回到保存起点`；只有平台清空后才使用，并且只有目视确认实际起点正确后才点击 `Save start`
 - 如果 USB 在真实 SD 打印期间断开，重新连接后主窗口仍显示过期的活动打印标记，`回到保存起点` 可以按保存的 `LH_END_GCODE_V1` print-end 提供受保护恢复；只有确认打印已经结束、平台已清空且结束后没有手动移动各轴时才接受
@@ -156,7 +157,7 @@ G92 X0 Y0 Z0
 - 如果 Little Hands 为安全加热抬起了喷嘴，应用会在 `M24` 前明确把喷嘴返回保存起点；如果预热失败，会先用相同距离的相对 Z 向下移动撤销这次抬升，然后再显示错误
 - 如果这个相对返回没有收到确认，Little Hands 会保留 failed-preheat-lift recovery 标记；只有操作者确认打印没有开始且各轴没有被手动移动后，`回到保存起点` 才能重试返回；成功返回后应用会立即用 `G92 X0 Y0 Z0` 重新声明已恢复的物理起点，因为断电重启后 Marlin 的逻辑 Z 可能已经过期；失败的手动 jog 不能清除这个标记，因为固件没有确认任何实际移动
 - 对于 SD 上已经存在且仍包含早期阻塞 `M109` 的文件，Little Hands 仍会在 `M24` 前预热 hotend；文件中的 `M109` 保留为额外安全等待，但应用不再把它当作唯一的加热门槛
-- 在完成、停止、hard stop 或失败的 SD 打印/启动之后，下一次 SD 启动需要明确确认打印机已经断电重启 `5–10` 秒并重新保存起点；单独点击 `Save start` 不会清除这个保护
+- 只有在确实出现 reset/thermal halt、hard stop、未确认的 Stop/启动、未确认的加热器/USB 状态，或已知抬升未确认回位时，才设置断电锁；正常完成和已确认的 Stop 本身不需要断电
 - 新的 Little Hands 文件不应再把早期 `M109` 改写为 `M104`；`M24` 前的 host-side 预热必须使用分段 `M104` 目标，然后用最终 `M109` 会话作为加热门槛，并被动读取温度行。不要把它改回单次冷态高温 `M109`，也不要改回旧的主动 `M104` 加重复 `M105` 轮询；这两种模式都已经在这台 K9 上失败过。
 - 如果 Marlin 显示 hotend 目标温度和正的加热输出，但第一分钟温度上升很小，应把它当作这台 K9 hotend / 传感器的 slow-start 特性：Little Hands 会记录警告并等待完整的预热超时；只有目标掉到 `/0C`、heater output 一直是 `@0` 或 `M109` 不再输出温度行时才快速中止
 - `Manual control` 面板中的手动耗材进料用于停止打印后的装载 / 诊断：`Hotend 200C` 设置手动 `M104` 目标，`Feed` / `Retract` 只用相对 `M83` + `G1 E...` + `M400` 移动 E，并恢复 `M82`；活动 SD 打印期间会被阻止，且只有 `M105` 确认 hotend 至少 `180C` 后才发送 E 移动
@@ -190,6 +191,7 @@ G92 X0 Y0 Z0
 - firmware identity: `LH v6 EXP YZSwap AutoFan45 FAN1 Z600 E1040 Watch180 Fan253 Bed10K Max70`
 - `firmware/LH-v7-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedwatch180-mksLite.bin` 是面向冷风环境的候选固件。它只把热床升温监视窗口从 `60s` 改为 `180s`；`WATCH_BED_TEMP_INCREASE 2`、热床 thermal-runaway 保护、`BED_MAXTEMP 70` 和应用的 `60C` 目标上限保持不变。
 - `firmware/LH-v8-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-mksLite.bin` 保留 v7 的升温监视，并把保持保护从 `2C/20s` 改为 `3C/60s`。之后的中心气流测试表明，即使 `B@:127` 满功率，热床仍降到 `55.65C`，因此 v8 不能证明可维持 60C，也不得继续放宽保护。
+- `firmware/LH-v9-EXP-YZSwap-AutoFan45-FAN1-z600-e1040-watch180-fan253-bed10k-max70-bedguard3c60s-lh1-mksLite.bin` 是已安装的协议实验版，保留 v8 的运动与热保护配置。无运动串口测试已确认 `Cap:LITTLE_HANDS_PROTOCOL:1`、原子 `M930`/`LH1` 快照、SD 空闲、加热器目标和输出为零，以及运动配置未变。它尚不是已验证的打印基线；逻辑坐标和步进计数不能证明物理运动。
 - 现场依据是 Marlin 明确返回 `Heating failed ... Heater_ID: bed`：已温热的平台先被风扇冷却，随后在旧的 `60s` 窗口内未能上升 `2C`。这是固件 halt，不是应用发送了 `M524`，也不是 G-code 中的停止命令。
 - 2026-09-29 的有人监看测试复现了风冷造成的初始降温；随后热床在新的 `180s` 窗口内恢复超过 `2C`，并在没有 `Heating failed` 的情况下达到 `59C` 启动阈值。之后保温阶段发生 CH341 detach/attach，但 `M114 X50 Y50 Z0` 被保留，说明丢失的是 USB 遥测而不是 Marlin 运动会话；heater-only 测试程序随后明确关闭了两个加热器。
 - Marlin bed sensor: `TEMP_SENSOR_BED 4` (`Generic 10K`), `BED_MAXTEMP 70`, bed preheat presets `50C` / `60C`；由于 `BED_OVERSHOOT 10`，实际可设目标上限约为 `60C`
@@ -269,7 +271,7 @@ G92 X0 Y0 Z0
 5. 点击 `Save start`。
 6. 开始下一次 SD 打印。
 
-打印完成后，应用会阻止重复 SD 启动，直到这个恢复流程和断电重启都被确认。
+打印完成后，应用会阻止重复 SD 启动，直到实际恢复/起点流程被确认。只有真实检测到 reset/halt 或其他不确定的控制器状态时，才额外要求断电。
 
 ## 11. 恢复规则
 
